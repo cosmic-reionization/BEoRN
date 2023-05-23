@@ -1,6 +1,6 @@
 # BEoRN 
 
-Bubbles during Epoch Of Reionization Numerical-simulator (BEORN) is a code simulation the state of the intergalactic medium (IGM) during cosmic dawn and reionization. More documentation can be found at its [readthedocs](https://beorn.readthedocs.io/) page.
+Bubbles during Epoch Of Reionization Numerical-simulator (BEORN) is a code simulating the state of the intergalactic medium (IGM) during cosmic dawn and reionization. More documentation can be found at its [readthedocs](https://beorn.readthedocs.io/) page.
 
 This package uses the template provided at https://github.com/sambit-giri/simple_python_package_template/ 
 
@@ -12,7 +12,7 @@ The package provides basic structure of a python package that can be used as a s
 
 To install the package from source, one should clone this package running the following::
 
-    git clone https://github.com/sambit-giri/beorn.git
+    git clone https://github.com/cosmic-reionization/BEoRN.git 
 
 To install the package in the standard location, run the following in the root directory::
 
@@ -24,7 +24,7 @@ In order to install it in a separate directory::
 
 One can also install the latest version using pip by running the following command::
 
-    pip install git+https://github.com/sambit-giri/beorn.git
+    pip install git+https://github.com/cosmic-reionization/BEoRN.git
 
 The dependencies should be installed automatically during the installation process. The list of required packages can be found in the requirements.txt file present in the root directory.
 
