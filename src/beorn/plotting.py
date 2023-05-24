@@ -10,6 +10,82 @@ from matplotlib import pyplot as plt
 from .constants import *
 
 
+def plot_Beorn(physics, qty='dTb', xlim=None, ylim=None, label='', color='C0', ls='-', lw=1, alpha=1):
+    """""""""
+    This functions plots Beorn global quantities.
+
+    Parameters
+    ----------    
+    physics : GS pickle file given by Beorn.
+    """""""""
+
+    try:
+        plt.plot(physics['z'], physics[qty], label=label, color=color, ls=ls,lw=lw,alpha=alpha)
+        plt.xlim(xlim)
+        plt.ylim(ylim)
+        plt.legend()
+    except Exception:
+        if qty == 'x_HI' or qty == 'xHI':
+            plt.plot(physics['z'], 1 - physics['x_HII'], label=label, color=color, ls=ls,lw=lw,alpha=alpha)
+            plt.xlim(xlim)
+            plt.ylim(ylim)
+            plt.legend()
+        print('available qty in Beorn: ', physics.keys())
+
+
+
+
+def plot_PS_Beorn(z, PS, color, ax, Beta=1, label='', qty='xHII',with_dTb = False,GS=None,ls='-',alpha=0.5,lw=3):
+    """""""""
+    Plot a Beorn power spectrum as a function of k.
+    Beta : float, the beta factor in the perturbative expansion of dTb. Set to 1 by default. 
+    """""""""
+
+    kk, zz = PS['k'], PS['z']
+    ind_z = np.argmin(np.abs(zz - z))
+    print('-------------BEORN -- plotting power spectrum of ', qty, 'at redshift ', PS['z'][ind_z])
+    coef = 1
+    if with_dTb:
+        coef = GS['dTb'][ind_z]**2
+        print('at z = ', zz[ind_z], 'dTb Boern IS : ', GS['dTb'][ind_z])
+
+    try:
+        ax.loglog(kk * 0.68, coef * kk ** 3 * Beta * np.abs(PS['PS_' + qty][ind_z]) / 2 / np.pi ** 2, lw=lw, alpha=alpha, label=label,
+                  color=color,ls=ls)
+    except Exception:
+        print('RT:', PS.keys())
+    plt.legend()
+    plt.xlabel('k [1/Mpc]')
+
+
+
+def plot_Beorn_PS_of_z(k, GS_Beorn, PS_Beorn,ls='-',lw=1, color='b',RSD = False,label='',qty='dTb',alpha=1,ax=plt):
+    """""""""
+    Plot a Beorn Power Spectrum as a function of z. 
+    """""""""
+    ind_k = np.argmin(np.abs(PS_Beorn['k'] - k))
+    print('k RT is', PS_Beorn['k'][ind_k],'Mpc/h')
+    kk, PS_dTb_RT = PS_Beorn['k'][ind_k], PS_Beorn['PS_'+qty][:, ind_k]
+    dTb_RT = GS_Beorn['dTb']
+    ax.semilogy(GS_Beorn['z'], kk ** 3 * dTb_RT ** 2 * PS_dTb_RT / 2 / np.pi ** 2,ls=ls, lw=lw, alpha=alpha,label=label , color=color)
+    if RSD :
+        dTb_RSD,PS_dTb_RT_RSD = GS_Beorn['dTb_RSD'],PS_Beorn['PS_dTb_RSD'][:, ind_k]
+        ax.semilogy(GS_Beorn['z'], kk ** 3 * dTb_RSD ** 2 * PS_dTb_RT_RSD / 2 / np.pi ** 2, lw=1, alpha=alpha,label=label, color=color)
+        print(PS_dTb_RT_RSD/PS_dTb_RT)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def Tgas_from_rho_heat(HM_PS):
     rmin = 0.1
@@ -602,28 +678,6 @@ def plot_FAST(Fast_Model,qty = 'zz',xlim = None,ylim = None,label='',color='C0',
     plt.legend()
 
 
-def plot_Beorn(physics, qty='dTb', xlim=None, ylim=None, label='', color='C0', ls='-', lw=1, alpha=1):
-    """""""""
-    This functions plots Beorn global quantities.
-
-    Parametersu
-    ----------    
-    physics : GS pickle file given by Beorn.
-    """""""""
-
-    try:
-        plt.plot(physics['z'], physics[qty], label=label, color=color, ls=ls,lw=lw,alpha=alpha)
-        plt.xlim(xlim)
-        plt.ylim(ylim)
-        plt.legend()
-    except Exception:
-        if qty == 'x_HI' or qty == 'xHI':
-            plt.plot(physics['z'], 1 - physics['x_HII'], label=label, color=color, ls=ls,lw=lw,alpha=alpha)
-            plt.xlim(xlim)
-            plt.ylim(ylim)
-            plt.legend()
-        print('available qty in Beorn: ', physics.keys())
-
 
 
 def GlogalSignal_21cmFast(path):
@@ -690,20 +744,6 @@ def plot_HM_PS_of_z(k, PS, color, label='',ls='--'):
     plt.xlabel('k [1/Mpc]')
 
 
-def plot_Beorn_PS_of_z(k, GS_Beorn, PS_Beorn,ls='-',lw=1, color='b',RSD = False,label='',qty='dTb',alpha=1,ax=plt):
-    """""""""
-    Plot a Beorn Power Spectrum as a function of z. 
-    """""""""
-    ind_k = np.argmin(np.abs(PS_Beorn['k'] - k))
-    print('k RT is', PS_Beorn['k'][ind_k],'Mpc/h')
-    kk, PS_dTb_RT = PS_Beorn['k'][ind_k], PS_Beorn['PS_'+qty][:, ind_k]
-    dTb_RT = GS_Beorn['dTb']
-    ax.semilogy(GS_Beorn['z'], kk ** 3 * dTb_RT ** 2 * PS_dTb_RT / 2 / np.pi ** 2,ls=ls, lw=lw, alpha=alpha,label=label , color=color)
-    if RSD :
-        dTb_RSD,PS_dTb_RT_RSD = GS_Beorn['dTb_RSD'],PS_Beorn['PS_dTb_RSD'][:, ind_k]
-        ax.semilogy(GS_Beorn['z'], kk ** 3 * dTb_RSD ** 2 * PS_dTb_RT_RSD / 2 / np.pi ** 2, lw=1, alpha=alpha,label=label, color=color)
-        print(PS_dTb_RT_RSD/PS_dTb_RT)
-
 
 
 def plot_PS_fast(z, file, color, ax, Beta=1, label='', qty='xHII',ls='--',alpha=0.5,lw=3):
@@ -726,28 +766,6 @@ def plot_PS_fast(z, file, color, ax, Beta=1, label='', qty='xHII',ls='--',alpha=
     plt.legend()
     plt.xlabel('k [1/Mpc]')
 
-
-def plot_PS_Beorn(z, PS, color, ax, Beta=1, label='', qty='xHII',with_dTb = False,GS=None,ls='-',alpha=0.5,lw=3):
-    """""""""
-    Plot a Beorn power spectrum as a function of k.
-    Beta : float, the beta factor in the perturbative expansion of dTb. Set to 1 by default. 
-    """""""""
-
-    kk, zz = PS['k'], PS['z']
-    ind_z = np.argmin(np.abs(zz - z))
-    print('-------------BEORN -- plotting power spectrum of ', qty, 'at redshift ', PS['z'][ind_z])
-    coef = 1
-    if with_dTb:
-        coef = GS['dTb'][ind_z]**2
-        print('at z = ', zz[ind_z], 'dTb Boern IS : ', GS['dTb'][ind_z])
-
-    try:
-        ax.loglog(kk * 0.68, coef * kk ** 3 * Beta * np.abs(PS['PS_' + qty][ind_z]) / 2 / np.pi ** 2, lw=lw, alpha=alpha, label=label,
-                  color=color,ls=ls)
-    except Exception:
-        print('RT:', PS.keys())
-    plt.legend()
-    plt.xlabel('k [1/Mpc]')
 
 
 def plot_PS_HM(z,PS,color,ax,label='',qty='rr',with_dTb = False):

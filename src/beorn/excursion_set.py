@@ -1,12 +1,12 @@
 """
 Generate the xHII field from the non linear density field using the excursion set formalism.  See 1403.0941 (2.3.2), 21cmFAST original paper, Zahn et al..
 """
-
+import copy
 
 import numpy as np
 from .constants import *; from.cosmo import *
 from astropy.convolution import convolve_fft
-import dmcosmo as dm  ## This is the HMF package. Can be dl here : https://github.com/timotheeschaeffer/dmcosmo.git
+from .halomassfunction import HMF as halomassfct
 from .run import load_delta_b
 import datetime
 from os.path import exists
@@ -203,7 +203,7 @@ def f_coll_norm(param,Mmin,z):
     par = HMF_par(param)
     par.code.z = [z]
     par.PS.A = 0.322
-    HMF = dm.HMF(par)
+    HMF = halomassfct(par)
     HMF.generate_HMF(par)
     ind_min = np.argmin(np.abs(HMF.tab_M - Mmin))
     #fcoll_ST = np.trapz(f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0  # integral of dndlnM dM
@@ -218,12 +218,12 @@ def f_coll_PS(param,Mmin,z):
     We use this to normalize the exc set results.
     """
     ### Collapsed fraction using PS HMF.
-    par = HMF_par(param)
-    par.code.z = [z]
-    par.PS.p = 0
-    par.PS.q = 1
-    par.PS.A = 0.5
-    HMF = dm.HMF(par)
+    par = copy.deepcopy(param)
+    par.hmf.z = [z]
+    par.hmf.p = 0
+    par.hmf.q = 1
+    par.hmf.A = 0.5
+    HMF = halomassfct(par)
     HMF.generate_HMF(par)
     ind_min = np.argmin(np.abs(HMF.tab_M - Mmin))
     fcoll_PS = np.trapz( f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0  # integral de dndlnM dM
@@ -269,6 +269,8 @@ def M_of_R(R,par):
 
 def HMF_par(param):
     """
+    NOT USED.
+
     Create a dict for the dmcosmo python package, with the Halo Mass function parameters updated from the one chosen by the user.
 
     Parameters

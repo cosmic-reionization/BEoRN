@@ -78,9 +78,23 @@ def E(x,param):
     return np.sqrt(param.cosmo.Om*(x**(-3))+1-param.cosmo.Om)
 
 #define D(a) non-normalized
+#def D_non_normalized(a,param):
+#    w=integrate.quad(lambda u: 1/(u*E(u,param))**3,0,a)[0]
+#    return  (5*param.cosmo.Om*E(a,param)/(2))*w
+
 def D_non_normalized(a,param):
-    w=integrate.quad(lambda u: 1/(u*E(u,param))**3,0,a)[0]
-    return  (5*param.cosmo.Om*E(a,param)/(2))*w
+    """""
+    a : input array 
+    Integrate from a~0 (0.001) to a. We checked that it gives same results than integrate.quad for z=0 to 30
+    """""
+    if np.any(a<0.001):
+        print('Integration pb in Growth Factor.')
+        exit()
+    integrand = np.linspace(0.001, a, 100)
+    w = np.trapz(1 / (integrand * E(integrand,param)) ** 3, integrand, axis=0)
+    return (5*param.cosmo.Om * E(a,param)/2)*w
+
+
 
 #define D normalized
 def D(a,param):

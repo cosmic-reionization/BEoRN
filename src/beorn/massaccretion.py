@@ -7,6 +7,7 @@ from scipy.integrate import cumtrapz, trapz, quad, odeint
 import numpy as np
 from .constants import *
 from .cosmo import comoving_distance, Hubble, hubble
+from .halomassfunction import HMF as halomassfct
 
 def mass_accretion_EPS(zz, mm,param):
     """
@@ -26,16 +27,12 @@ def mass_accretion_EPS(zz, mm,param):
         Dgrowth.append(D(aa[i], param))  # growth factor
     Dgrowth = np.array(Dgrowth)
 
-    import dmcosmo as dm ## import hmf python package
-    par = dm.par()
-    par.code.z = [0]  # we just want the linear variance
-    par.PS.q = 0.85
-    par.code.m_min = param.sim.Mh_bin_min * 1e-5 ## Need small enough value for the source term below (0.6*M)
-    par.code.m_max = param.sim.Mh_bin_max
-    par.cosmo.Ob, par.cosmo.Ol, par.cosmo.Om, par.cosmo.h = param.cosmo.Ob, param.cosmo.Ol, param.cosmo.Om, param.cosmo.h
-    par.cosmo.ps = param.cosmo.ps
-    HMF = dm.HMF(par)
-    HMF.generate_HMF(par)
+
+    param.hmf.z = [0]  # we just want the linear variance
+    param.hmf.m_min = param.sim.Mh_bin_min * 1e-5 ## Need small enough value for the source term below (0.6*M)
+    param.hmf.m_max = param.sim.Mh_bin_max
+    HMF = halomassfct(param)
+    HMF.generate_HMF(param)
     var_tck = splrep(HMF.tab_M, HMF.sigma2)
 
     # free parameter

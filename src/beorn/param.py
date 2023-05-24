@@ -101,19 +101,30 @@ def cosmo_par():
 
 def excursion_set_par():
     par = {
-        ### HMF parameters that we use to normalise the collapsed fraction.
-        "filter": 'tophat',           # tophat, sharpk or smoothk
-        "c": 1,                       # scale to halo mass relation (1 for tophat, 2.5 for sharp-k, 3 for smooth-k)
-        "q" : 0.8,                    # q for f(nu) [0.707,1,1] for [ST,smoothk or sharpk,PS] (q = 0.8 with tophat fits better the high redshift z>6 HMF)
-        "p" : 0.3,                    # p for f(nu) [0.3,0.3,0] for [ST,smoothk or sharpk,PS]
-        "delta_c" : 1.686,            # critical density
-        "A" : 0.322,                  # A = 0.322 except 0.5 for PS Spherical collapse (to double check)
         ### SemiNumerical Parameters
         "R_max": 40,                  # Mpc/h. The scale at which we start the excursion set.
         "n_rec": 3,                   # mean number of recombination per baryon.
         "stepping":1.1,               # When doing the exc set, we smooth the field over varying scales. We loop and increase this scale logarithmically (R=1.1*R)
      }
     return Bunch(par)
+
+
+def hmf_par(): ## Parameters related to analytical halo mass function (PS formalism. Used to compute variance in EPS_MAR, and for subhalo MF in excursion set).
+    par = {
+        ### HMF parameters that we use to normalise the collapsed fraction.
+        "filter": 'tophat',  # tophat, sharpk or smoothk
+        "c": 1,    # scale to halo mass relation (1 for tophat, 2.5 for sharp-k, 3 for smooth-k)
+        "q": 0.85,  # q for f(nu) [0.707,1,1] for [ST,smoothk or sharpk,PS] (q = 0.8 with tophat fits better the high redshift z>6 HMF)
+        "p": 0.3,  # p for f(nu) [0.3,0.3,0] for [ST,smoothk or sharpk,PS]
+        "delta_c": 1.686,  # critical density
+        "A": 0.322,  # A = 0.322 except 0.5 for PS Spherical collapse (to double check)
+        "m_min": 1e4,
+        "m_max": 1e16,
+        "Mbin": 300,
+        'z': [0],  # output z values. Should be a list.
+        }
+    return Bunch(par)
+
 
 
 def par():
@@ -123,5 +134,6 @@ def par():
         "cosmo" : cosmo_par(),
         "sim" : sim_par(),
         "exc_set" : excursion_set_par(),
+        "hmf" : hmf_par(),
         })
     return par
