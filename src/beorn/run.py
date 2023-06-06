@@ -204,18 +204,18 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                 kernel_T) / 1e-7 * renorm
 
                     end_time = time.time()
-                    print(len(indices), 'halos in mass bin ', i, '. It took : ',
-                          datetime.timedelta(seconds=end_time - start_time), 'to paint the profiles.')
+                    print(len(indices), 'halos in mass bin ', i, '. It took : ', datetime.timedelta(seconds=end_time - start_time), 'to paint the profiles.')
 
             Grid_Storage = np.copy(Grid_xHII_i)
 
+            t_start_spreading = time.time()
             if np.sum(Grid_Storage) < nGrid ** 3 and ion:
                 Grid_xHII = Spreading_Excess_Fast(param, Grid_Storage, pix_thresh=param.sim.thresh_pixel)
             else:
                 Grid_xHII = np.array([1])
 
-            time_spreadring_end = time.time()
-            print('It took:', time_spreadring_end - end_time, 'to spread the excess photons')
+            t_end_spreading= time.time()
+            print('It took:',datetime.timedelta(seconds= t_end_spreading - t_start_spreading), 'to spread the excess photons')
 
             if np.all(Grid_xHII == 0):
                 Grid_xHII = np.array([0])
@@ -247,19 +247,18 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             # factor * np.sqrt(1 + z) * (1 - Tcmb0 * (1 + z) / Grid_Temp) * (1 - Grid_xHII) * (
             #            delta_b + 1) * Grid_xtot / (1 + Grid_xtot)
 
-            PS_dTb, k_bins = t2c.power_spectrum.power_spectrum_1d(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
-                                                                  kbins=def_k_bins(param))
+    PS_dTb, k_bins = t2c.power_spectrum.power_spectrum_1d(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox, kbins=def_k_bins(param))
 
-            if not RSD:
-                dTb_RSD_mean = 0
-                PS_dTb_RSD = 0
-            else:
-                print('Computing RSD for snapshot...')
-                Grid_dTb_RSD = dTb_RSD(param, z, delta_b, Grid_dTb)
-                delta_Grid_dTb_RSD = Grid_dTb_RSD / np.mean(Grid_dTb_RSD) - 1
-                PS_dTb_RSD = \
-                    t2c.power_spectrum.power_spectrum_1d(delta_Grid_dTb_RSD, box_dims=LBox, kbins=def_k_bins(param))[0]
-                dTb_RSD_mean = np.mean(Grid_dTb_RSD)
+    if not RSD:
+        dTb_RSD_mean = 0
+        PS_dTb_RSD = 0
+    else:
+        print('Computing RSD for snapshot...')
+        Grid_dTb_RSD = dTb_RSD(param, z, delta_b, Grid_dTb)
+        delta_Grid_dTb_RSD = Grid_dTb_RSD / np.mean(Grid_dTb_RSD) - 1
+        PS_dTb_RSD = \
+            t2c.power_spectrum.power_spectrum_1d(delta_Grid_dTb_RSD, box_dims=LBox, kbins=def_k_bins(param))[0]
+        dTb_RSD_mean = np.mean(Grid_dTb_RSD)
 
             ##
 
