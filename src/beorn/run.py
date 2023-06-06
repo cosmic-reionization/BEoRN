@@ -9,7 +9,7 @@ import numpy as np
 import time
 import datetime
 from .constants import cm_per_Mpc, M_sun, m_H, rhoc0, Tcmb0
-from .cosmo import T_adiab, D, hubble, T_adiab_fluctu, dTb_fct
+from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct
 import os
 from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
     stacked_T_kernel
@@ -263,13 +263,13 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
             ##
 
-            GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
+    GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
                           'PS_dTb': PS_dTb, 'k': k_bins,
                           'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
                           'x_coll': np.mean(Grid_xcoll)}
-            if cross_corr:
-                GS_PS_dict = compute_cross_correlations(param,GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b)
-            save_f(file='./physics/GS_PS_' + z_str, obj=GS_PS_dict)
+    if cross_corr:
+        GS_PS_dict = compute_cross_correlations(param,GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b)
+    save_f(file='./physics/GS_PS_' + z_str, obj=GS_PS_dict)
 
     if param.sim.store_grids:
         if temp:
@@ -290,7 +290,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 # save_f(file='./grid_output/dTb_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_dTb_RSD)
 
 
-def gather_GS_PS_files(param):
+def gather_GS_PS_files(param,remove=False):
     """
     Reads in ./physics/GS_PS_... files, gather them into a single file and suppress them.
 
@@ -313,13 +313,15 @@ def gather_GS_PS_files(param):
             GS_PS = load_f(file)
             for key, value in GS_PS.items():
                 dd[key].append(value)
-            os.remove(file)
+            if remove:
+                os.remove(file)
 
     for key, value in dd.items(): # change lists to numpy arrays
         dd[key]= np.array(value)
 
-    save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl',
-           obj=dd)
+    dd['k'] = GS_PS['k']
+
+    save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl',obj=dd)
 
 def def_k_bins(param):
     """
