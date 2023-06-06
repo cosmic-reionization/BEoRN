@@ -25,7 +25,7 @@ class profiles:
     Rbubble is in comoving Mpc/h. shape((zz,M_bin))
     r_grid is in cMpc/h
     z_arr should be a decreasing array.
-
+    r_lyal : pMpc/h
     The 1D profiles are arrays of shape (z,r,M)
     Mhistory has shape [zz, Mass]
     """
@@ -42,7 +42,7 @@ class profiles:
         rr = np.logspace(np.log10(rmin), np.log10(rmax), Nr)
         self.r_grid = rr  ##cMpc/h
 
-        self.z_arr = np.flip(np.sort(np.unique(np.concatenate((def_redshifts(param),np.arange(6,30,0.5))))))  ## we add up some redshifts to be converged
+        self.z_arr = np.flip(np.sort(np.unique(np.concatenate((def_redshifts(param),np.arange(6,40,0.5))))))  ## we add up some redshifts to be converged
 
         Mh_bin_min = param.sim.Mh_bin_min
         Mh_bin_max = param.sim.Mh_bin_max

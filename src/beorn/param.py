@@ -60,8 +60,8 @@ def solver_par():
 
 def sim_par(): ## used when computing and painting profiles on a grid
     par = {
-        "Mh_bin_min" : 1e-2,
-        "Mh_bin_max" : 1e9,
+        "Mh_bin_min" : 1e5,
+        "Mh_bin_max" : 1e14,
         "binn" : 12,                # to define the initial halo mass at z_ini = solver.z
         "model_name": 'SED',        # Give a name to your sim, will be used to name all the files created.
         "Ncell" : 128,              # nbr of pixels of the final grid.
@@ -77,6 +77,8 @@ def sim_par(): ## used when computing and painting profiles on a grid
         "kbin": 30,                ## either a path to a text files containing kbins edges values or an int (nbr of bins to measure PS)
         "thresh_pixel" : None,      ## when spreading the excess ionisation fraction, we treat all the connected regions with less that "thresh_pixel" as a single connected region(to speed up)
         "approx" : True,            ## when spreading the excess ionisation fraction and running distance_tranform_edt, whether or not to do the subgrid approx.
+        "nGrid_min_heat": 4,             ## stacked_T_kernel
+        "nGrid_min_lyal": 32,            ## stacked_lyal_kernel
     }
     return Bunch(par)
 

@@ -25,6 +25,14 @@ def load_halo(param, z_str):
     catalog_dir = param.sim.halo_catalogs
     catalog = catalog_dir + z_str
     halo_catalog = load_f(catalog)
+    indices = np.where(halo_catalog['M'] > param.source.M_min)
+
+    # remove halos not forming stars
+    halo_catalog['M'] = halo_catalog['M'][indices]
+    halo_catalog['X'] = halo_catalog['X'][indices]
+    halo_catalog['Y'] = halo_catalog['Y'][indices]
+    halo_catalog['Z'] = halo_catalog['Z'][indices]
+
     return halo_catalog
 
 

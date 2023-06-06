@@ -380,7 +380,7 @@ def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
     profile_xal_HM = interp1d(rr_al, lyal_array, bounds_error=False, fill_value=0)  ##screening
     ind_lya_0 = np.min(np.where(lyal_array == 0))  ## indice where the lyman alpha profile gets to zero
     rr_al_max = rr_al[ind_lya_0]  ### max radius that we need to consider to fully include the lyman alpha profile
-    box_extension = int(rr_al_max / (LBox / 2))
+    box_extension = int(rr_al_max / (LBox / 2)) + 1
 
     # nGrid_min = 64
     if box_extension < 1:
@@ -390,6 +390,7 @@ def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
         box_extension += 1  ### this need to be even to make things work
 
     kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, box_extension * nGrid_min, box_extension * LBox)
+   # kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, box_extension * nGrid_min, box_extension * LBox)
     #nGrid_extd = box_extension * nGrid_min
     #LBox_extd = box_extension * LBox  ## size and nbr of pix of the larger box
 
@@ -430,7 +431,7 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
         ind_T_0 = -1 ## if T_array is always > 1e-6, we just take the whole profile...
 
     rr_T_max = rr_T[ind_T_0]  ### max radius that we need to consider to fully include the extended T profile
-    box_extension = int(rr_T_max / (LBox / 2))
+    box_extension = int(rr_T_max / (LBox / 2))+1
 
     # nGrid_min = 64
     if box_extension < 1:
@@ -447,8 +448,7 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
     for ii in range(box_extension):  ## loop over the box_extension**3 subboxes and stack them
         for jj in range(box_extension):
             for kk in range(box_extension):
-                stacked_T_ker += kernel_T_HM[ii * nGrid_min:(ii + 1) * nGrid_min,
-                                   jj * nGrid_min:(jj + 1) * nGrid_min, kk * nGrid_min:(kk + 1) * nGrid_min]
+                stacked_T_ker += kernel_T_HM[ii * nGrid_min:(ii + 1) * nGrid_min, jj * nGrid_min:(jj + 1) * nGrid_min, kk * nGrid_min:(kk + 1) * nGrid_min]
 
     pix_lft = int(box_extension / 2) * nGrid_min  ### coordinate of the central subbox
     pix_rgth = (1 + int(box_extension / 2)) * nGrid_min

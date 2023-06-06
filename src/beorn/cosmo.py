@@ -70,6 +70,12 @@ def T_adiab(z,param):
     """
     return Tcmb0 * (1 + z) ** 2 / (1 + param.cosmo.z_decoupl)
 
+def T_adiab_fluctu(z,param,delta_b):
+    """
+    Fluctuating adiabatic background.
+    delta_b : matter overdensity
+    """
+    return T_adiab(z,param) * (1 + delta_b) ** (2 / 3)
 
 
 
@@ -170,14 +176,13 @@ def Tspin_fct(Tcmb,Tk,xtot):
     return ((1 / Tcmb + xtot / Tk ) / (1 + xtot)) ** -1
 
 
-def dTb_fct(z, Tk, xtot, delta_b,xHII,param):
+def dTb_fct(z, Tk, xtot, delta_b,x_HII,param):
     """
     nHI_norm : (1+delta_b)*(1-xHII) , or also rho_HI/rhob_mean
     Returns : Birghtness Temperature in mK.
     """
-    Om, h0,Ob = param.cosmo.Om, param.cosmo.h,param.cosmo.Ob
-    factor = 27  * ((1 + z) / 10) ** 0.5 * (Ob * h0 ** 2 / 0.023) * (Om * h0 ** 2 / 0.15) ** (-0.5)
-    return factor * np.sqrt(1 + z) * (1 - Tcmb0*(1+z) / Tk) * (1+delta_b)* (1-xHII)  * xtot / (1 + Grid_xtot)
+    factor = dTb_factor(param)
+    return factor * np.sqrt(1 + z) * (1 - Tcmb0 * (1 + z) / Tk) * (1 - x_HII) * xtot / (1 + xtot) * (1+delta_b)
 
 def dTb_factor(param):
     """

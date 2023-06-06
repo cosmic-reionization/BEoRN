@@ -82,6 +82,7 @@ def from_catalog_to_hmf(dictionnary, Lbox=None, Mmax=None, Mmin=None):
     """""
     Lbox : Box size (Mpc/h)
     Read HMF dictionnary and output binned masses, halo mass fct (Mpc/h)^-3,  and Poisson error in each bins.
+    
     """""
     Mh = dictionnary['M']
     if Lbox is None:
