@@ -36,7 +36,9 @@ def f_star_Halo(param,Mh):
     Mt = param.source.Mt
     g3 = param.source.g3
     g4 = param.source.g4
-    return np.minimum(2 * f_st / ((Mh / Mp) ** g1 + (Mh / Mp) ** g2) * S_fct(Mh, Mt, g3, g4),1)
+    fstar = np.minimum(2 * f_st / ((Mh / Mp) ** g1 + (Mh / Mp) ** g2) * S_fct(Mh, Mt, g3, g4),1)
+    fstar[np.where(Mh < param.source.M_min)] = 0
+    return fstar
 
 
 def f_esc(param,Mh):
