@@ -22,6 +22,7 @@ from .cosmo import dTb_factor
 from .functions import *
 
 
+
 def compute_profiles(param):
     """
     This function computes the Temperature, Lyman-alpha, and ionisation fraction profiles that will then be painted on 3D maps.
@@ -147,9 +148,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
                     ### This is the position of halos in base "nGrid". We use this to speed up the code.
                     ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
-                    base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,
-                                                                                  1] + nGrid ** 2 * Pos_Halos_Grid[
-                                                                                                        indices][:, 2]
+                    base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,1] + nGrid ** 2 * Pos_Halos_Grid[indices][:, 2]
                     unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
 
                     ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
@@ -189,10 +188,12 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                         renorm = np.trapz(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal) / (
                                 LBox / (1 + z)) ** 3 / np.mean(kernel_xal)
                         if np.any(kernel_xal > 0):
+                            print('RENORM IS ',renorm)
                             # Grid_xal += put_profiles_group(Pos_Halos_Grid[indices], kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum( kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
                             Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
                                                            kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum(
                                 kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
+
                     if temp:
                         kernel_T = stacked_T_kernel(radial_grid * (1 + z), Temp_profile, LBox, nGrid, nGrid_min=param.sim.nGrid_min_heat)
                         renorm = np.trapz(Temp_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (
@@ -232,8 +233,10 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             if read_lyal:
                 Grid_xal = load_grid(param, z=z, type='lyal')
             else:
-                Grid_xal = Grid_xal * S_alpha(z, Grid_Temp,
-                                              1 - Grid_xHII) / 4 / np.pi  # We divide by 4pi to go to sr**-1 units
+                #save_f(file='./grid_output/S_alpha_z'+str(z)+'.pkl',obj = S_alpha(z, Grid_Temp,1 - Grid_xHII))
+                #save_f(file='./grid_output/rho_alpha_z' + str(z) + '.pkl', obj = Grid_xal)
+                #print('Salpha is :',S_alpha(z, Grid_Temp,1 - Grid_xHII) )
+                Grid_xal = Grid_xal * S_alpha(z, Grid_Temp,1 - Grid_xHII) / 4 / np.pi  # We divide by 4pi to go to sr**-1 units
 
             if dTb:
                 Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
@@ -301,7 +304,9 @@ def gather_GS_PS_files(param,remove=False):
     -------
     Nothing.
     """
+
     from collections import defaultdict
+
     dd = defaultdict(list)
 
     z_arr = def_redshifts(param)
@@ -315,8 +320,8 @@ def gather_GS_PS_files(param,remove=False):
             if remove:
                 os.remove(file)
 
-    for key, value in dd.items(): # change lists to numpy arrays
-        dd[key]= np.array(value)
+    for key, value in dd.items():# change lists to numpy arrays
+        dd[key] = np.array(value)
 
     dd['k'] = GS_PS['k']
 
@@ -988,3 +993,85 @@ def dTb_RSD(param, zz, delta_b, grid_dTb):
     t2c.conv.LB = param.sim.Lbox
     dT_rsd = t2c.get_distorted_dt(grid_dTb, kms, zz, los_axis=0, velocity_axis=0, num_particles=20)
     return dT_rsd
+
+
+def compute_variance(param):
+
+    if not os.path.isdir('./variances'):
+        os.mkdir('./variances')
+
+    start_time = time.time()
+    print('Compute variance of the individual fields.')
+
+    if param.sim.cores > 1:
+        import mpi4py.MPI
+        rank = mpi4py.MPI.COMM_WORLD.Get_rank()
+        size = mpi4py.MPI.COMM_WORLD.Get_size()
+    else:
+        rank = 0
+        size = 1
+
+    z_arr = def_redshifts(param)
+    for ii, z in enumerate(z_arr):
+        z = np.round(z, 2)
+        if rank == ii % size:
+            print('Core nbr', rank, 'is taking care of z = ', z)
+            print('----- Computing variance for z =', z, '-------')
+            compute_var_single_z(param, z)
+            print('----- Variance at z = ', z, ' is computed -------')
+
+    end_time = time.time()
+    print('Finished computing variances. It took in total: ', end_time - start_time)
+    print('  ')
+
+
+def compute_var_single_z(param, z):
+    from .excursion_set import profile_kern
+    from astropy.convolution import convolve_fft
+    Grid_Temp = load_grid(param, z=z, type='Tk')
+    Grid_xHII = load_grid(param, z=z, type='bubbles')
+    Grid_xal = load_grid(param, z=z, type='lyal')
+
+    Lbox = param.sim.Lbox  # Mpc/h
+    nGrid = param.sim.Ncell  # number of grid cells
+    kmin = 2 * np.pi / Lbox
+    kmax = 2
+    kbin = int(6 * np.log10(kmax / kmin))
+    param.sim.kmin = kmin
+    param.sim.kmax = kmax
+    param.sim.kbin = kbin
+
+    k_values = def_k_bins(param)
+    R_scale = np.pi / k_values
+
+    pixel_size = Lbox / nGrid
+    x = np.linspace(-Lbox / 2, Lbox / 2, nGrid)  # y, z will be the same.
+    rx, ry, rz = np.meshgrid(x, x, x, sparse=True)
+    rgrid = np.sqrt(rx ** 2 + ry ** 2 + rz ** 2)
+
+    variance_lyal = []
+    variance_xHII = []
+    variance_Temp = []
+    print('nbr of scales is', len(k_values))
+    for Rsmoothing in R_scale:
+        if Rsmoothing > pixel_size:
+            print('R is ', round(Rsmoothing, 2))
+            kern = profile_kern(rgrid, Rsmoothing)
+            smoothed_lyal = convolve_fft(delta_fct(Grid_xal), kern, boundary='wrap', normalize_kernel=True,
+                                         allow_huge=True)  #
+            smoothed_xHII = convolve_fft(delta_fct(Grid_xHII), kern, boundary='wrap', normalize_kernel=True,
+                                         allow_huge=True)  #
+            smoothed_Tk = convolve_fft(delta_fct(Grid_Temp), kern, boundary='wrap', normalize_kernel=True,
+                                       allow_huge=True)  #
+            variance_lyal.append(np.var(smoothed_lyal))
+            variance_xHII.append(np.var(smoothed_xHII))
+            variance_Temp.append(np.var(smoothed_Tk))
+        else:
+            variance_lyal.append(0)
+            variance_xHII.append(0)
+            variance_Temp.append(0)
+
+    save_f(file='./variances/var_z' + z_string_format(z) + '.pkl',
+           obj={'z': z, 'var_lyal': np.array(variance_lyal), 'var_xHII': np.array(variance_xHII)
+               , 'var_Temp': np.array(variance_Temp), 'k': k_values, 'R': R_scale})
+
