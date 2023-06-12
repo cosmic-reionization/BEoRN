@@ -653,8 +653,7 @@ def compute_PS(param, Tspin=False, RSD=False, ion='bubbles', cross_corr=False):
 
     for ii, z in enumerate(z_arr):
         zz_ = z
-        Grid_Temp = load_grid(param, z,
-                              type='Tk')  # pickle.load(file=open('./grid_output/T_Grid'    + str(nGrid) + model_name + '_snap' + z_str, 'rb'))
+        Grid_Temp = load_grid(param, z, type='Tk')  # pickle.load(file=open('./grid_output/T_Grid'    + str(nGrid) + model_name + '_snap' + z_str, 'rb'))
         Grid_xHII = load_grid(param, z, type=ion)
         Grid_dTb = load_grid(param, z, type='dTb')
         Grid_xal = load_grid(param, z, type='lyal')
@@ -1042,11 +1041,11 @@ def compute_var_single_z(param, z):
     param.sim.kmax = kmax
     param.sim.kbin = kbin
 
-    if Grid_xHII == np.array([0]):
+    if (Grid_xHII == np.array([0])).all():
             Grid_xHII = np.full((nGrid, nGrid, nGrid), 0)
-    if Grid_xHII == np.array([1]):
+    if (Grid_xHII == np.array([1])).all():
             Grid_xHII = np.full((nGrid, nGrid, nGrid), 1)
-    if Grid_xal == np.array([0]):
+    if (Grid_xal == np.array([0])).all():
             Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
 
     k_values = def_k_bins(param)
