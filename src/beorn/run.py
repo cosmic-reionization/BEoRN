@@ -1028,6 +1028,7 @@ def compute_variance(param):
 def compute_var_single_z(param, z):
     from .excursion_set import profile_kern
     from astropy.convolution import convolve_fft
+
     Grid_Temp = load_grid(param, z=z, type='Tk')
     Grid_xHII = load_grid(param, z=z, type='bubbles')
     Grid_xal = load_grid(param, z=z, type='lyal')
@@ -1040,6 +1041,13 @@ def compute_var_single_z(param, z):
     param.sim.kmin = kmin
     param.sim.kmax = kmax
     param.sim.kbin = kbin
+
+    if Grid_xHII == np.array([0]):
+            Grid_xHII = np.full((nGrid, nGrid, nGrid), 0)
+    if Grid_xHII == np.array([1]):
+            Grid_xHII = np.full((nGrid, nGrid, nGrid), 1)
+    if Grid_xal == np.array([0]):
+            Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
 
     k_values = def_k_bins(param)
     R_scale = np.pi / k_values
