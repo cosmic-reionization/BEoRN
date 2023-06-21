@@ -55,17 +55,17 @@ def load_grid(param, z, type=None):
     nGrid: str = str(param.sim.Ncell)
 
     if type == 'dTb':
-        return load_f(dir_name + 'dTb_Grid' + nGrid + out_name + '_snap' + z_str)
+        return load_f(dir_name + 'dTb_' + nGrid + out_name + '_z' + z_str)
     elif type == 'lyal':
-        return load_f(dir_name + 'xal_Grid' + nGrid + out_name + '_snap' + z_str)
+        return load_f(dir_name + 'xal_' + nGrid + out_name + '_z' + z_str)
     elif type == 'Tk':
-        return load_f(dir_name + 'T_Grid' + nGrid + out_name + '_snap' + z_str)
+        return load_f(dir_name + 'Tk_' + nGrid + out_name + '_z' + z_str)
     elif type == 'exc_set':
-        return load_f(dir_name + 'xHII_exc_set_' + nGrid + '_' + out_name + '_snap' + z_str)
+        return load_f(dir_name + 'xHII_exc_set_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'sem_num':
-        return load_f(dir_name + 'xHII_Sem_Num_' + nGrid + '_' + out_name + '_snap' + z_str)
+        return load_f(dir_name + 'xHII_Sem_Num_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'bubbles':
-        return load_f(dir_name + 'xHII_Grid' + nGrid + out_name + '_snap' + z_str)
+        return load_f(dir_name + 'xHII_' + nGrid + out_name + '_snap' + z_str)
     else:
         print('grid type should be dTb, lyal, Tk, exc_set, sem_num, or bubbles. Abort')
         exit()
@@ -90,17 +90,17 @@ def save_grid(param, z, grid, type=None):
     nGrid: str = str(param.sim.Ncell)
 
     if type == 'dTb':
-        save_f(file=dir_name + 'dTb_Grid' + nGrid + out_name + '_snap' + z_str, obj=grid)
+        save_f(file=dir_name + 'dTb_' + nGrid + out_name + '_z' + z_str, obj=grid)
     elif type == 'lyal':
-        save_f(file=dir_name + 'xal_Grid' + nGrid + out_name + '_snap' + z_str, obj=grid)
+        save_f(file=dir_name + 'xal_' + nGrid + out_name + '_z' + z_str, obj=grid)
     elif type == 'Tk':
-        save_f(file=dir_name + 'T_Grid' + nGrid + out_name + '_snap' + z_str, obj=grid)
+        save_f(file=dir_name + 'Tk_' + nGrid + out_name + '_z' + z_str, obj=grid)
     elif type == 'exc_set':
-        save_f(file=dir_name + 'xHII_exc_set_' + nGrid + out_name + '_snap' + z_str, obj=grid)
+        save_f(file=dir_name + 'xHII_exc_set_' + nGrid + out_name + '_z' + z_str, obj=grid)
     elif type == 'sem_num':
-        save_f(file=dir_name + 'xHII_Sem_Num_' + nGrid + out_name + '_snap' + z_str, obj=grid)
+        save_f(file=dir_name + 'xHII_Sem_Num_' + nGrid + out_name + '_z' + z_str, obj=grid)
     elif type == 'bubbles':
-        save_f(file=dir_name + 'xHII_Grid' + nGrid + out_name + '_snap' + z_str, obj=grid)
+        save_f(file=dir_name + 'xHII_' + nGrid + out_name + '_z' + z_str, obj=grid)
     else:
         print('grid type should be dTb, lyal, exc_set, sem_num, or bubbles. Abort')
         exit()
@@ -155,3 +155,36 @@ def def_redshifts(param):
     return z_arr
 
 
+
+
+
+
+def Beta(zz,PS,qty='Tk'):
+    if qty=='Tk':
+        Tcmb = Tcmb0 *  (1 + zz)
+        beta_T = Tcmb / (PS['Tk'] - Tcmb)
+        return beta_T
+    elif qty == 'lyal':
+        x_al = PS['x_al']
+        x_tot = x_al+ PS['x_coll']
+        return x_al / x_tot / (1 + x_tot)
+    elif qty=='reio':
+        return -PS['x_HII']/(1-PS['x_HII'])
+    else:
+        print('qty should be either Tk, lyal, or reio.')
+
+
+
+from datetime import timedelta
+
+def print_time(delta_t):
+    """
+    Parameters
+    ----------
+    delta_t : output of time.time()
+
+    Returns
+    ----------
+    A clean time in hh:mm:ss
+    """
+    return "{:0>8}".format(str(timedelta(seconds=round(delta_t))))

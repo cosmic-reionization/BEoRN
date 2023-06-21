@@ -55,11 +55,11 @@ def compute_profiles(param):
     print('...  Profiles stored in dir ./profiles.')
     print(' ')
     end_time = time.time()
-    print('It took :', end_time - start_time, 'to compute the profiles.')
+    print('It took '+print_time(end_time - start_time)+' to compute the profiles.')
 
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
-                              read_lyal=False, RSD=False, xcoll=True, cross_corr=False):
+                              read_lyal=False, RSD=False, xcoll=True,S_al=True, cross_corr=False):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
 
@@ -69,6 +69,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     z_str : the redshift of the snapshot.
                     filename : the name of the halo catalog, contained in param.sim.halo_catalogs.
     temp, lyal, ion, dTb : which map to paint.
+    S_alpha : if equals to False, then we write xal = rhoal*Salpha(mean quantity). If true, we take the full inhomogeneous Salpha.
 
     Returns
     -------
@@ -100,7 +101,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     Indexing = np.argmin(np.abs(np.log10(H_Masses[:, None] / grid_model.Mh_history[ind_z, :])),
                          axis=1)  # (M_Bin * np.exp(-param.source.alpha_MAR * (z - z_start))))
     print('There are', H_Masses.size, 'halos at z=', z, )
-
+    print('Looping over halo mass bins and painting profiles on 3D grid .... ' )
     if H_Masses.size == 0:
         print('There is no sources')
         Grid_xHII = np.array([0])
@@ -188,7 +189,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                         renorm = np.trapz(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal) / (
                                 LBox / (1 + z)) ** 3 / np.mean(kernel_xal)
                         if np.any(kernel_xal > 0):
-                            print('RENORM IS ',renorm)
                             # Grid_xal += put_profiles_group(Pos_Halos_Grid[indices], kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum( kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
                             Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
                                                            kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum(
@@ -205,18 +205,20 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                 kernel_T) / 1e-7 * renorm
 
                     end_time = time.time()
-                    print(len(indices), 'halos in mass bin ', i, '. It took : ', datetime.timedelta(seconds=end_time - start_time), 'to paint the profiles.')
+                    print(len(indices), 'halos in mass bin ', i, '. It took '+print_time(end_time - start_time)+' to paint the profiles.')
 
+            print('.... Done painting profiles. ')
+
+            print('Dealing with the overlap of ionised bubbles.... ')
             Grid_Storage = np.copy(Grid_xHII_i)
 
             t_start_spreading = time.time()
             if np.sum(Grid_Storage) < nGrid ** 3 and ion:
-                Grid_xHII = Spreading_Excess_Fast(param, Grid_Storage, pix_thresh=param.sim.thresh_pixel)
+                Grid_xHII = Spreading_Excess_Fast(param, Grid_Storage)
             else:
                 Grid_xHII = np.array([1])
 
-            t_end_spreading= time.time()
-            print('It took:',datetime.timedelta(seconds= t_end_spreading - t_start_spreading), 'to spread the excess photons')
+            print('.... Done. It took:', print_time(time.time() - t_start_spreading), 'to redistribute excess photons from the overlapping regions.')
 
             if np.all(Grid_xHII == 0):
                 Grid_xHII = np.array([0])
@@ -236,7 +238,12 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 #save_f(file='./grid_output/S_alpha_z'+str(z)+'.pkl',obj = S_alpha(z, Grid_Temp,1 - Grid_xHII))
                 #save_f(file='./grid_output/rho_alpha_z' + str(z) + '.pkl', obj = Grid_xal)
                 #print('Salpha is :',S_alpha(z, Grid_Temp,1 - Grid_xHII) )
-                Grid_xal = Grid_xal * S_alpha(z, Grid_Temp,1 - Grid_xHII) / 4 / np.pi  # We divide by 4pi to go to sr**-1 units
+                if S_al:
+                    print('--- Including Salpha fluctuations in dTb ---')
+                    Grid_xal = Grid_xal * S_alpha(z, Grid_Temp,1 - Grid_xHII) / 4 / np.pi  # We divide by 4pi to go to sr**-1 units
+                else :
+                    print('--- NOT Salpha fluctuations in dTb ---')
+                    Grid_xal = Grid_xal * S_alpha(z, np.mean(Grid_Temp), 1 - np.mean(Grid_xHII)) / 4 / np.pi
 
             if dTb:
                 Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
@@ -345,7 +352,7 @@ def def_k_bins(param):
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
-                check_exists=True, RSD=True, xcoll=True, cross_corr=False):
+                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False):
     """
     Parameters
     ----------
@@ -355,7 +362,8 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
 
     Returns
     -------
-    Does not return anything. Loop over all snapshots in param.sim.halo_catalogs and calls paint_profile_single_snap. Uses joblib for parallelisation.
+    Does not return anything. Loop over all snapshots in param.sim.halo_catalogs and calls paint_profile_single_snap.
+
     """
 
     start_time = time.time()
@@ -389,16 +397,17 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                 else:
                     print('----- Painting 3D map for z =', z, '-------')
                     paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
-                                              read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, cross_corr=cross_corr)
+                                              read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
+                                              cross_corr=cross_corr)
                     print('----- Snapshot at z = ', z, ' is done -------')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
-                                          read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, cross_corr=cross_corr)
+                                          read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
+                                          cross_corr=cross_corr)
                 print('----- Snapshot at z = ', z, ' is done -------')
 
-    end_time = time.time()
-    print('Finished painting the maps. They are stored in ./grid_output. It took in total: ', end_time - start_time,
+    print('Finished painting the maps. They are stored in ./grid_output. It took in total: '+print_time(time.time() - start_time)+
           'to paint the grids.')
     print('  ')
 
@@ -1024,13 +1033,15 @@ def compute_variance(param):
     print('  ')
 
 
+
+
+
 def compute_var_single_z(param, z):
-    from .excursion_set import profile_kern
-    from astropy.convolution import convolve_fft
+
 
     Grid_Temp = load_grid(param, z=z, type='Tk')
     Grid_xHII = load_grid(param, z=z, type='bubbles')
-    Grid_xal = load_grid(param, z=z, type='lyal')
+    Grid_xal  = load_grid(param, z=z, type='lyal')
 
     Lbox = param.sim.Lbox  # Mpc/h
     nGrid = param.sim.Ncell  # number of grid cells
@@ -1048,37 +1059,38 @@ def compute_var_single_z(param, z):
     if (Grid_xal == np.array([0])).all():
             Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
 
+    variance_lyal, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xal))
+    variance_xHII, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xHII))
+    variance_Temp, R_scale, k_values = compute_var_field(param, delta_fct(Grid_Temp))
+    print('nbr of scales is', len(k_values))
+
+    save_f(file='./variances/var_z' + z_string_format(z) + '.pkl',
+           obj={'z': z, 'var_lyal': np.array(variance_lyal), 'var_xHII': np.array(variance_xHII)
+               , 'var_Temp': np.array(variance_Temp), 'k': k_values, 'R': R_scale})
+
+
+def compute_var_field(param, field):
+    from .excursion_set import profile_kern
+    from astropy.convolution import convolve_fft
+
     k_values = def_k_bins(param)
     R_scale = np.pi / k_values
+    Lbox = param.sim.Lbox  # Mpc/h
+    nGrid = param.sim.Ncell  # number of grid cells
 
     pixel_size = Lbox / nGrid
     x = np.linspace(-Lbox / 2, Lbox / 2, nGrid)  # y, z will be the same.
     rx, ry, rz = np.meshgrid(x, x, x, sparse=True)
     rgrid = np.sqrt(rx ** 2 + ry ** 2 + rz ** 2)
 
-    variance_lyal = []
-    variance_xHII = []
-    variance_Temp = []
-    print('nbr of scales is', len(k_values))
+    variance = []
     for Rsmoothing in R_scale:
         if Rsmoothing > pixel_size:
             print('R is ', round(Rsmoothing, 2))
             kern = profile_kern(rgrid, Rsmoothing)
-            smoothed_lyal = convolve_fft(delta_fct(Grid_xal), kern, boundary='wrap', normalize_kernel=True,
-                                         allow_huge=True)  #
-            smoothed_xHII = convolve_fft(delta_fct(Grid_xHII), kern, boundary='wrap', normalize_kernel=True,
-                                         allow_huge=True)  #
-            smoothed_Tk = convolve_fft(delta_fct(Grid_Temp), kern, boundary='wrap', normalize_kernel=True,
-                                       allow_huge=True)  #
-            variance_lyal.append(np.var(smoothed_lyal))
-            variance_xHII.append(np.var(smoothed_xHII))
-            variance_Temp.append(np.var(smoothed_Tk))
-        else:
-            variance_lyal.append(0)
-            variance_xHII.append(0)
-            variance_Temp.append(0)
-
-    save_f(file='./variances/var_z' + z_string_format(z) + '.pkl',
-           obj={'z': z, 'var_lyal': np.array(variance_lyal), 'var_xHII': np.array(variance_xHII)
-               , 'var_Temp': np.array(variance_Temp), 'k': k_values, 'R': R_scale})
-
+            smoothed_field = convolve_fft(field, kern, boundary='wrap', normalize_kernel=True,allow_huge=True)  #
+            variance.append(np.var(smoothed_field))
+        else :
+            variance.append(0)
+    print('return : variance, R_scale, k_values')
+    return variance, R_scale, k_values

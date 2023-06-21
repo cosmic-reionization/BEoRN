@@ -62,6 +62,13 @@ def x_coll(z, Tk, xHI, rho_b):
     x_eH = prefac * kappa_eH * n_HII
     return x_HH  + x_eH
 
+def x_coll_coef(param):
+    """
+    Coefficient to turn rho/rho_mean into a baryon density in nbr of [H atoms /phys-cm**3]
+    """
+    Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
+    coef = rhoc0 * h0 ** 2 * Ob * (1 + z) ** 3 * M_sun / cm_per_Mpc ** 3 / m_H
+    return coef
 
 def S_alpha(zz, Tgas, xHI):
     """
@@ -75,6 +82,7 @@ def S_alpha(zz, Tgas, xHI):
 
     # Eq. 55
     S_al = np.exp(-0.803 * Tgas ** (-2 / 3) * (1e-6 * tau_GP) ** (1 / 3))
+  #  print('CAREFULL SALPHA IS 1')
 
     return S_al
 

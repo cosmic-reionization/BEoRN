@@ -137,7 +137,7 @@ def Spreading_Excess(Grid_Storage):
     return Grid
 
 
-def Spreading_Excess_Fast(param,Grid_input,plot__=False,pix_thresh=None):
+def Spreading_Excess_Fast(param,Grid_input,plot__=False):
     """
     Last and fastest version of the function.
     Input : Grid_Storage, the cosmological mesh grid (X,X,X) with the ionized fractions, with overlap (pixels where x_ion>1). (X can be 256, 512 ..)
@@ -149,9 +149,14 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False,pix_thresh=None):
         - Spread_Single :  spread the excess photons.
     """
 
-    t0 = datetime.datetime.now()
+    #t0 = datetime.datetime.now()
     nGrid = len(Grid_input[0])
     Grid = np.copy(Grid_input)
+
+    if param.sim.thresh_pixel is None :
+        pix_thresh = 80 * (nGrid / 256) ** 3
+    else :
+        pix_thresh = param.sim.thresh_pixel
 
     Binary_Grid = np.copy(Grid)
     Binary_Grid[np.where(Grid < 0.9999999)] = 0
@@ -164,7 +169,7 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False,pix_thresh=None):
 
 
     x_ion_tot_i= np.sum(Grid)
-    print('initial sum of ionized fraction :', np.sum(Grid))
+    print('initial sum of ionized fraction :', round(np.sum(Grid),3))
     print(Nbr_regions, 'connected regions.')
 
     if x_ion_tot_i > Grid.size:
@@ -172,19 +177,16 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False,pix_thresh=None):
         Grid = np.array([1])
 
     else:
-        print('Universe not fully ionized : xHII is', x_ion_tot_i / Grid.size)
+        print('Universe not fully ionized : xHII is', round(x_ion_tot_i / Grid.size,4))
 
         region_nbr, size_of_region = np.unique(connected_regions, return_counts=True)
-        if pix_thresh is None:
-            pix_thresh  = 10 * (nGrid/128)**3 # group all the connected regions that have less than pix_thresh pixels together for the spreading.. to go faster. ==10 for nGrid=128pixels..
-
         small_regions  = np.where(np.isin(connected_regions, region_nbr[np.where(size_of_region < pix_thresh)[0]]))        ## small_regions : Gridmesh indices gathering all the connected regions that have less than 10 pixels
         Small_regions_labels = region_nbr[np.where(size_of_region < pix_thresh)[0]]                                     ## labels of the small regions. Use this to exclude them from the for loop
 
         initial_excess = np.sum(Grid[small_regions] - 1)
         excess_ion = initial_excess
 
-        print('there are ', len(Small_regions_labels),'connected regions with less than ',pix_thresh,' pixels. They contain a fraction ', excess_ion / x_ion_tot_i,'of the total ionizing fraction.')
+        print('there are ', len(Small_regions_labels),'connected regions with less than ',pix_thresh,' pixels. They contain a fraction ', round(excess_ion / x_ion_tot_i,4),'of the total ionisation fraction.')
 
 
         Grid = Spread_Single(param,Grid, small_regions, Grid_of_1 = Grid_of_1, print_time=None) # Do the spreading for the small regions
@@ -198,20 +200,21 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False,pix_thresh=None):
         for i, ir in enumerate(large_regions_labels):
             if plot__:
                 if i % 100 == 0:
-                    print('doing region ', i, 'over ', len(large_regions_labels), ' region in total')
+                    print('doing region ', i, 'over ', len(large_regions_labels), ' regions in total')
             connected_indices = np.where(connected_regions == ir)
             Grid = Spread_Single(param,Grid, connected_indices, Grid_of_1 = Grid_of_1, print_time=None)
 
         if np.any(Grid > 1.):
             print('Some grid pixels are still in excess.')
 
-        print('final xion sum: ', np.sum(Grid))
+        print('final xion sum: ', round(np.sum(Grid),3))
         X_Ion_Tot_f = np.sum(Grid)
         if int(X_Ion_Tot_f) != int(x_ion_tot_i):
-            print('Smtg is wrong when spreading xion_excess.')
+            print('Something is wrong when redistributing photons from the overlapping regions. See '
+                  'Spreading_Excess_Fast.')
 
-    time_end = datetime.datetime.now()
-    print('Spreading Excess took :', time_end - t0, ' in total.')
+    #time_end = datetime.datetime.now()
+    #print('Spreading Excess took :', time_end - t0, ' in total.')
     return Grid
 
 
