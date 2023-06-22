@@ -19,7 +19,7 @@ from .functions import *
 
 class profiles:
     """
-    Computes the 1D profiles. .Similar to the HM for 21cm profiles (Scheider et al 2021)
+    Computes the 1D profiles. Similar to the HM for 21cm (Schneider et al 2021)
 
     M_bin : Halo masses in [Msol/h]
     Rbubble is in comoving Mpc/h. shape((zz,M_bin))
@@ -51,10 +51,6 @@ class profiles:
 
 
     def solve(self, param):
-        """
-        EPS MAR is not yet tested.
-        """
-
         if param.source.MAR == 'EXP':
             #Mh_history = self.M_Bin * np.exp(param.source.alpha_MAR * (np.min(self.z_arr) - self.z_arr[:,None])) #shape is [zz, Mass]
             #dMh_dt = dMh_dt_EXP(param, Mh_history, self.z_arr[:, None])

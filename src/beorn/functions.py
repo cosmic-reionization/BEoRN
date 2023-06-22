@@ -36,6 +36,25 @@ def load_halo(param, z_str):
     return halo_catalog
 
 
+def format_file_name(param,dir_name,z,qty):
+    """
+    Parameters
+    ----------
+    param : Bunch
+    z : redshift, float.
+    qty : str. The quantity of interest. Can be dTb, Tk, xal, xHII
+    dir : str. The directory where we store the grids.
+
+    Returns
+    ----------
+    The name of the pickle file containing the 3D maps of quantity qty.
+    """
+    out_name = param.sim.model_name
+    z_str = z_string_format(z)
+    nGrid: str = str(param.sim.Ncell)
+    return dir_name + qty + '_' + nGrid + '_' + out_name + '_z' + z_str
+
+
 def load_grid(param, z, type=None):
     """
     Parameters
@@ -49,23 +68,31 @@ def load_grid(param, z, type=None):
     3D map of the desired "type", at redshift z
     """
 
-    dir_name = './grid_output/'
     out_name = param.sim.model_name
+    dir_name = './grid_output/'
     z_str = z_string_format(z)
     nGrid: str = str(param.sim.Ncell)
 
     if type == 'dTb':
-        return load_f(dir_name + 'dTb_' + nGrid + out_name + '_z' + z_str)
+        return load_f(dir_name + 'dTb_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'lyal':
-        return load_f(dir_name + 'xal_' + nGrid + out_name + '_z' + z_str)
+        return load_f(dir_name + 'xal_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'Tk':
-        return load_f(dir_name + 'Tk_' + nGrid + out_name + '_z' + z_str)
+        return load_f(dir_name + 'Tk_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'exc_set':
         return load_f(dir_name + 'xHII_exc_set_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'sem_num':
         return load_f(dir_name + 'xHII_Sem_Num_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'bubbles':
-        return load_f(dir_name + 'xHII_' + nGrid + out_name + '_snap' + z_str)
+        grid = load_f(dir_name + 'xHII_' + nGrid + '_' + out_name + '_z' + z_str)
+        if np.all(grid == 0):
+            Ncell = param.sim.Ncell
+            return np.zeros((Ncell, Ncell, Ncell))
+        elif np.all(grid == 1):
+            Ncell = param.sim.Ncell
+            return np.zeros((Ncell, Ncell, Ncell)) + 1
+        else :
+            return grid
     else:
         print('grid type should be dTb, lyal, Tk, exc_set, sem_num, or bubbles. Abort')
         exit()
@@ -90,17 +117,17 @@ def save_grid(param, z, grid, type=None):
     nGrid: str = str(param.sim.Ncell)
 
     if type == 'dTb':
-        save_f(file=dir_name + 'dTb_' + nGrid + out_name + '_z' + z_str, obj=grid)
+        save_f(file=dir_name + 'dTb_' + nGrid + '_' + out_name + '_z' + z_str, obj=grid)
     elif type == 'lyal':
-        save_f(file=dir_name + 'xal_' + nGrid + out_name + '_z' + z_str, obj=grid)
+        save_f(file=dir_name + 'xal_' + nGrid + '_' + out_name + '_z' + z_str, obj=grid)
     elif type == 'Tk':
-        save_f(file=dir_name + 'Tk_' + nGrid + out_name + '_z' + z_str, obj=grid)
+        save_f(file=dir_name + 'Tk_' + nGrid + '_' + out_name + '_z' + z_str, obj=grid)
     elif type == 'exc_set':
-        save_f(file=dir_name + 'xHII_exc_set_' + nGrid + out_name + '_z' + z_str, obj=grid)
+        save_f(file=dir_name + 'xHII_exc_set_' + nGrid  + '_' + out_name + '_z' + z_str, obj=grid)
     elif type == 'sem_num':
-        save_f(file=dir_name + 'xHII_Sem_Num_' + nGrid + out_name + '_z' + z_str, obj=grid)
+        save_f(file=dir_name + 'xHII_Sem_Num_' + nGrid + '_' + out_name + '_z' + z_str, obj=grid)
     elif type == 'bubbles':
-        save_f(file=dir_name + 'xHII_' + nGrid + out_name + '_z' + z_str, obj=grid)
+        save_f(file=dir_name + 'xHII_' + nGrid  + '_' + out_name + '_z' + z_str, obj=grid)
     else:
         print('grid type should be dTb, lyal, exc_set, sem_num, or bubbles. Abort')
         exit()

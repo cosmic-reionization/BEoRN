@@ -190,5 +190,3 @@ def dTb_factor(param):
     """
     Om, h0,Ob = param.cosmo.Om, param.cosmo.h,param.cosmo.Ob
     return 27 * Ob * h0 ** 2 / 0.023 * np.sqrt(0.15 / Om / h0 ** 2 / 10)
-
-

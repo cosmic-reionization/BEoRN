@@ -85,9 +85,9 @@ def sim_par(): ## used when computing and painting profiles on a grid
 
 def cosmo_par():
     par = {
-    'Om' : 0.3,
+    'Om' : 0.31,
     'Ob' : 0.045,
-    'Ol' : 0.7,
+    'Ol' : 0.68,
     'rho_c' : 2.775e11,
     'h' : 0.7,
     's8': None,

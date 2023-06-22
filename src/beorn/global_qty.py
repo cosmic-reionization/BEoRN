@@ -66,7 +66,7 @@ def xHII_approx(param, halo_catalog):
 
 
 def compute_glob_qty(param):
-    print('Computing Global quantities from profiles and halo catalogs.')
+    print('Computing global quantities (sfrd, Tk, xHII, dTb, xal, xcoll) from 1D profiles and halo catalogs....')
     LBox = param.sim.Lbox  # Mpc/h
     model_name = param.sim.model_name
     M_Bin = np.logspace(np.log10(param.sim.Mh_bin_min), np.log10(param.sim.Mh_bin_max), param.sim.binn, base=10)
@@ -153,7 +153,8 @@ def compute_glob_qty(param):
         dTb_arr.append(dTb)
         xcoll_arr.append(xcoll)
 
-        print(round(z, 3), 'done.')
+
+    print( '....done. Returns a dictionnary.')
 
     zz, Tk, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr = np.array(zz), np.array(Tk), np.array(xHII), np.array(
         sfrd), np.array(s_alpha), np.array(x_alpha), np.array(dTb_arr), np.array(xcoll_arr)

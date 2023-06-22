@@ -400,15 +400,17 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                                               read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
                                               cross_corr=cross_corr)
                     print('----- Snapshot at z = ', z, ' is done -------')
+                    print(' ')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                           read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
                                           cross_corr=cross_corr)
                 print('----- Snapshot at z = ', z, ' is done -------')
+                print(' ')
 
     print('Finished painting the maps. They are stored in ./grid_output. It took in total: '+print_time(time.time() - start_time)+
-          'to paint the grids.')
+          ' to paint the grids.')
     print('  ')
 
 

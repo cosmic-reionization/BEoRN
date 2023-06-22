@@ -6,8 +6,8 @@ from scipy.ndimage import distance_transform_edt
 from astropy.convolution import convolve_fft
 import datetime
 from scipy.interpolate import splrep,splev, interp1d
-
-
+import time
+from .functions import print_time
 
 ## Creating a profile kernel
 def profile_to_3Dkernel(profile, nGrid, LB):
@@ -149,7 +149,6 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
         - Spread_Single :  spread the excess photons.
     """
 
-    #t0 = datetime.datetime.now()
     nGrid = len(Grid_input[0])
     Grid = np.copy(Grid_input)
 
@@ -163,14 +162,38 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
     Binary_Grid[np.where(Grid >= 0.9999999)] = 1
 
     # The first region (i=0) is the still neutral IGM, in between the bubbles
-    connected_regions = label(Binary_Grid)
-    Nbr_regions = np.max(connected_regions) + 1
-    Grid_of_1 = np.full(((nGrid, nGrid, nGrid)), 1)
+    label_image = label(Binary_Grid)
 
+
+    # Periodic boundary conditions for label_image
+    # assign  same label to ionised regions that are connected through left/right, up/down, front/back box boundaries
+    '''''''''
+    t0_PBC = time.time()
+    PBC_indices = np.where(label_image[0, :, :] * label_image[-1, :, :] > 0)  # neighbor ionised indices
+    label_to_change, indice = np.unique(label_image[-1, PBC_indices[0], PBC_indices[1]], return_index=True)  # labels in the upper layer that should be changed to neighbor labels in the lower layer
+    replacement_label = label_image[0, PBC_indices[0], PBC_indices[1]][indice]
+    for il in range(len(label_to_change)):
+        label_image[label_image == label_to_change[il]] = replacement_label[il]
+
+    PBC_indices = np.where(label_image[:, 0, :] * label_image[:, -1, :] > 0)
+    label_to_change, indice = np.unique(label_image[PBC_indices[0], -1, PBC_indices[1]], return_index=True)
+    replacement_label = label_image[PBC_indices[0], 0, PBC_indices[1]][indice]
+    for il in range(len(label_to_change)):
+        label_image[label_image == label_to_change[il]] = replacement_label[il]
+
+    PBC_indices = np.where(label_image[:, :, 0] * label_image[:, :, -1] > 0)
+    label_to_change, indice = np.unique(label_image[PBC_indices[0], PBC_indices[1], -1], return_index=True)
+    replacement_label = label_image[PBC_indices[0], PBC_indices[1], 0][indice]
+    for il in range(len(label_to_change)):
+        label_image[label_image == label_to_change[il]] = replacement_label[il]
+    print('Imposing PBC on label_image took', print_time(time.time()-t0_PBC))
+    '''''''''
 
     x_ion_tot_i= np.sum(Grid)
     print('initial sum of ionized fraction :', round(np.sum(Grid),3))
-    print(Nbr_regions, 'connected regions.')
+
+
+
 
     if x_ion_tot_i > Grid.size:
         print('Universe is fully ionized.')
@@ -179,8 +202,11 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
     else:
         print('Universe not fully ionized : xHII is', round(x_ion_tot_i / Grid.size,4))
 
-        region_nbr, size_of_region = np.unique(connected_regions, return_counts=True)
-        small_regions  = np.where(np.isin(connected_regions, region_nbr[np.where(size_of_region < pix_thresh)[0]]))        ## small_regions : Gridmesh indices gathering all the connected regions that have less than 10 pixels
+        region_nbr, size_of_region = np.unique(label_image, return_counts=True)
+        print(len(region_nbr), 'connected regions.')
+        label_max = np.max(label_image)
+
+        small_regions  = np.where(np.isin(label_image, region_nbr[np.where(size_of_region < pix_thresh)[0]]))        ## small_regions : Gridmesh indices gathering all the connected regions that have less than 10 pixels
         Small_regions_labels = region_nbr[np.where(size_of_region < pix_thresh)[0]]                                     ## labels of the small regions. Use this to exclude them from the for loop
 
         initial_excess = np.sum(Grid[small_regions] - 1)
@@ -189,11 +215,11 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
         print('there are ', len(Small_regions_labels),'connected regions with less than ',pix_thresh,' pixels. They contain a fraction ', round(excess_ion / x_ion_tot_i,4),'of the total ionisation fraction.')
 
 
-        Grid = Spread_Single(param,Grid, small_regions, Grid_of_1 = Grid_of_1, print_time=None) # Do the spreading for the small regions
+        Grid = Spread_Single(param,Grid, small_regions, print_time=None) # Do the spreading for the small regions
         if np.any(Grid[small_regions] > 1):
             print('small regions not correctly spread')
 
-        all_regions_labels = np.array(range(1, Nbr_regions))  # the remaining larges overlapping ionized regions
+        all_regions_labels = np.array(range(1, label_max+1))  # the remaining larges overlapping ionized regions
         large_regions_labels = all_regions_labels[np.where(np.isin(all_regions_labels, Small_regions_labels) == False)[0]]  # indices of regions that have more than pix_thresh pixels
 
         # Then do the spreading individually for large regions
@@ -201,8 +227,8 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
             if plot__:
                 if i % 100 == 0:
                     print('doing region ', i, 'over ', len(large_regions_labels), ' regions in total')
-            connected_indices = np.where(connected_regions == ir)
-            Grid = Spread_Single(param,Grid, connected_indices, Grid_of_1 = Grid_of_1, print_time=None)
+            connected_indices = np.where(label_image == ir)
+            Grid = Spread_Single(param,Grid, connected_indices,  print_time=None)
 
         if np.any(Grid > 1.):
             print('Some grid pixels are still in excess.')
@@ -213,19 +239,16 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
             print('Something is wrong when redistributing photons from the overlapping regions. See '
                   'Spreading_Excess_Fast.')
 
-    #time_end = datetime.datetime.now()
-    #print('Spreading Excess took :', time_end - t0, ' in total.')
     return Grid
 
 
-def Spread_Single(param,Grid, connected_indices, Grid_of_1, print_time=None):
+def Spread_Single(param,Grid, connected_indices, print_time=None):
     """
     This spreads the excess ionizing photons for a given region.
     Input :
     - Grid : The meshgrid containing the ionizing fractions
     - Connected_indices : The indices of the ionized region from which you want to spread the overlaps. (excess_ion)
     - print_time : if it's not None, will print the time taken, along with the message contained in "print_time".
-    - Grid_of_1 : grid full of 1 that we generate in Spread_excess_HR.
 
     Return : the same grid but with the excess ion fraction of the connected region spread around.
 
@@ -242,7 +265,7 @@ def Spread_Single(param,Grid, connected_indices, Grid_of_1, print_time=None):
 
     if initial_excess > 1e-8:
         ## take sub grid with only the connected region, find pixels where xion>1, sum the excess, and set these pixels to 1.
-        Inverted_grid = np.copy(Grid_of_1)
+        Inverted_grid = np.full(((nGrid, nGrid, nGrid)), 1)
         Inverted_grid[connected_indices] = 0
         sum_distributed_xion = 0
 
