@@ -397,7 +397,7 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
             if check_exists:
-                if exists('./grid_output/xHII_Grid' + str(nGrid) + model_name + '_snap' + z_str):
+                if exists('./grid_output/xHII_' + str(nGrid) + '_' + model_name + '_z' + z_str):
                     print('xHII map for z = ', z, 'already painted. Skipping.')
                 else:
                     print('----- Painting 3D map for z =', z, '-------')
