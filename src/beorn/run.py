@@ -114,6 +114,12 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         Grid_dTb_RSD = np.array([0])
 
     else:
+        if np.max(H_Masses) > np.max(grid_model.Mh_history[ind_z, :]):
+            print('WARNING!!! You should use a larger value for param.sim.Mh_bin_max')
+            exit()
+        if np.min(H_Masses) < np.min(grid_model.Mh_history[ind_z, :]):
+            print('WARNING!!! You should use a smaller value for param.sim.Mh_bin_min')
+            exit()
 
         Ionized_vol = xHII_approx(param, halo_catalog)[1]
         print('Quick calculation from the profiles predicts xHII = ', round(Ionized_vol, 4))
