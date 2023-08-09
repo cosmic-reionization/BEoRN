@@ -23,9 +23,9 @@ def hubble(z,param):
 
 
 def Hubble(z,param):
-    """""
-    Hubble factor [yr-1] 
-    """""
+    """
+    Hubble parameter [yr-1]
+    """
     Om, Ol = param.cosmo.Om, param.cosmo.Ol
     return param.cosmo.h * 100.0 * sec_per_year / km_per_Mpc * np.sqrt(Om*(1+z)**3 + (1.0-Om-Ol)*(1+z)**2+Ol)
 
@@ -39,9 +39,11 @@ def comoving_distance(z,param):
 
 def T_cmb(z):
     """
-    CMB temperature
+    CMB temperature [K]
     """
     return Tcmb0*(1+z)
+
+
 
 def T_smooth_radio(z,param):
     """
@@ -83,11 +85,6 @@ def T_adiab_fluctu(z,param,delta_b):
 def E(x,param):
     return np.sqrt(param.cosmo.Om*(x**(-3))+1-param.cosmo.Om)
 
-#define D(a) non-normalized
-#def D_non_normalized(a,param):
-#    w=integrate.quad(lambda u: 1/(u*E(u,param))**3,0,a)[0]
-#    return  (5*param.cosmo.Om*E(a,param)/(2))*w
-
 def D_non_normalized(a,param):
     """""
     a : input array 
@@ -99,8 +96,6 @@ def D_non_normalized(a,param):
     integrand = np.linspace(0.001, a, 100)
     w = np.trapz(1 / (integrand * E(integrand,param)) ** 3, integrand, axis=0)
     return (5*param.cosmo.Om * E(a,param)/2)*w
-
-
 
 #define D normalized
 def D(a,param):
@@ -188,5 +183,5 @@ def dTb_factor(param):
     """
     Constant factor in dTb formula
     """
-    Om, h0,Ob = param.cosmo.Om, param.cosmo.h,param.cosmo.Ob
+    Om, h0, Ob = param.cosmo.Om, param.cosmo.h, param.cosmo.Ob
     return 27 * Ob * h0 ** 2 / 0.023 * np.sqrt(0.15 / Om / h0 ** 2 / 10)

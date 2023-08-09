@@ -1,5 +1,5 @@
 """
-Contains avrious functions related to astrophysical sources.
+Contains various functions related to astrophysical sources.
 """
 
 import numpy as np
@@ -10,7 +10,7 @@ from .functions import *
 
 
 
-def BB_Planck( nu , T):
+def BB_Planck(nu, T):
     """
     Input : nu in [Hz], T in [K]
     Returns : BB Spectrum [J.s-1.m−2.Hz−1]
@@ -22,12 +22,18 @@ def BB_Planck( nu , T):
 
 
 def S_fct(Mh, Mt, g3, g4):
+    """
+    Suppression function in f_star. See eq.6 in arXiv:2305.15466.
+    """
     return (1 + (Mt / Mh) ** g3) ** g4
 
 
 def f_star_Halo(param,Mh):
     """
-    Double power law. fstar * Mh_dot * Ob/Om = M*_dot. fstar is therefore the conversion from baryon accretion rate  to star formation rate.
+    fstar * Mh_dot * Ob/Om = Mstar_dot.
+    fstar is therefore the conversion from baryon accretion rate  to star formation rate.
+    See eq.(5) in arXiv:2305.15466.
+    Double power law.
     """
     f_st = param.source.f_st
     Mp = param.source.Mp
@@ -64,70 +70,6 @@ def eps_xray(nu_,param):
    # param.source.cX * eV_per_erg * norm_xray * nu_ ** (-sed_xray) * Hz_per_eV   # [eV/eV/s/SFR]
 
     return param.source.cX/param.cosmo.h * eV_per_erg * norm_xray * nu_ ** (-sed_xray) /(nu_*h_eV_sec)   # [photons/Hz/s/SFR]
-
-
-
-def Read_Rockstar(file,Nmin = 10,Mmin = 1e5,Mmax = 1e15 ,keep_subhalos=True):
-    """
-    Read in a rockstar halo catalog and return a dictionnary with all the information stored.
-    R is in ckpc/h
-    Nmin : not working yet
-    """
-
-    Halo_File = []
-    with open(file) as f:
-        for line in f:
-            Halo_File.append(line)
-    a = float(Halo_File[1][4:])
-    z = 1 / a - 1
-    LBox = float(Halo_File[6][10:-7])
-    Mpart = float(Halo_File[5][15:-7])
-    Halo_File = Halo_File[16:]  ### Rockstar
-    H_Masses, H_Radii = [], []
-    H_X, H_Y, H_Z = [], [], []
-    subhalo_nbr = 0
-    for i in range(len(Halo_File)):
-        line = Halo_File[i].split(' ')
-        if float(line[2]) > Mmin and float(line[2]) < Mmax and Nmin * Mpart<float(line[2]):
-            if keep_subhalos: # keep subhalos
-                H_Masses.append(float(line[2]))
-                H_X.append(float(line[8]))
-                H_Y.append(float(line[9]))
-                H_Z.append(float(line[10]))
-                H_Radii.append(float(line[5]))
-            else :# do not keep subhalos
-                if float(line[-1]) ==-1 : #not a subhalo
-                    H_Masses.append(float(line[2]))
-                    H_X.append(float(line[8]))
-                    H_Y.append(float(line[9]))
-                    H_Z.append(float(line[10]))
-                    H_Radii.append(float(line[5]))
-                else :
-                    subhalo_nbr+=1 # add one to the count
-
-    H_Masses, H_X, H_Y, H_Z, H_Radii = np.array(H_Masses), np.array(H_X), np.array(H_Y), np.array(H_Z), np.array(H_Radii)
-    Dict = {'M':H_Masses,'X':H_X,'Y':H_Y,'Z':H_Z, 'R':H_Radii,'z':z,'Lbox':LBox,'subhalos': subhalo_nbr}
-
-    return Dict
-
-
-
-def from_Rockstar_to_Dict(rockstar_folder,output_folder):
-    """
-    rockstar_folder : path to the folder where the rockstar halo catalogs are stored.
-    output_folder : where you want to store the dictionnaries.
-
-    This functions reads in Rockstar halo catalogs and store the information we need as a dictionnary (halo masses etc..). Used to speed up.
-    """
-    import os
-
-
-    for ii, filename in enumerate(os.listdir(rockstar_folder)):
-        catalog = rockstar_folder + filename
-        halo_catalog = Read_Rockstar(catalog)
-        save_f(file = output_folder +'dct_'+ filename[4:],obj=halo_catalog)
-
-
 
 
 def Ng_dot_Snapshot(param,rock_catalog, type ='xray'):

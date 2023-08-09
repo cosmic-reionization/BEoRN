@@ -89,7 +89,7 @@ def cosmo_par():
     'Ob' : 0.045,
     'Ol' : 0.68,
     'rho_c' : 2.775e11,
-    'h' : 0.7,
+    'h' : 0.68,
     's8': None,
     'ps': pkg_resources.resource_filename('beorn', "files/PCDM_Planck.dat"),      ### This is the path to the input Linear Power Spectrum
     'corr_fct' : pkg_resources.resource_filename('beorn', "files/corr_fct.dat"),  ### This is the path where the corresponding correlation function will be stored. You can change it to anything.

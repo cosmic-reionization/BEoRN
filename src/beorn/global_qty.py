@@ -166,6 +166,7 @@ def compute_glob_qty(param):
 
 
 def compute_sfrd(param, zz_, Maccr, dM_dt_accr):
+    model_name = param.sim.model_name
     if os.path.exists('./physics/sfrd_' + model_name + '.txt'):
         print('Reading SFRD from ./physics/sfrd_' + model_name + '.txt')
         data = np.loadtxt('./physics/sfrd_' + model_name + '.txt')

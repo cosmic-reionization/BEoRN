@@ -6,14 +6,16 @@ import numpy as np
 from .constants import *
 
 
-
-
-
-############ Used for Hydrogen
 def sigma_HI(E):
     """
-    Input : E is in eV.
-    Returns : bound free photo-ionization cross section ,  [cm ** 2]
+    Parameters
+    ----------
+    E : Photon energy, in [eV]
+
+    Returns
+    ----------
+    Photo-ionization cross section for Hydrogen,  [cm ** 2]
+    Taken from  Verner et al. arXiv:astro-ph/9601009
     """
     sigma_0 = 5.475 * 10 ** 4 * 10 ** -18 ## cm**2 1Mbarn = 1e-18 cm**2
     E_01 = 4.298 * 10 ** -1
@@ -26,14 +28,76 @@ def sigma_HI(E):
     sigma = sigma_0 * F
     return sigma
 
+def sigma_HeI(E):
+    """
+    Parameters
+    ----------
+    E : Photon energy, in [eV]
 
-# Ionization and Recombination coefficients. Expressions taken from Fukugita and Kawasaki 1994.
+    Returns
+    ----------
+    Photo-ionization cross section for Helium HeI,  [cm ** 2]
+    Taken from  Verner et al. arXiv:astro-ph/9601009
+    """
+    sigma_0 = 9.492 * 10 ** 2 * 10 ** -18
+    E_01 = 1.361 * 10 ** 1
+    y_a = 1.469
+    P = 3.188
+    y_w = 2.039
+    y_0 = 4.434 * 10 ** -1
+    y_1 = 2.136
+    x = E / E_01 - y_0
+    y = np.sqrt(x ** 2 + y_1 ** 2)
+    F = ((x - 1) ** 2 + y_w ** 2) * y ** (0.5 * P - 5.5) * (1 + np.sqrt(y / y_a)) ** -P
+    sigma = sigma_0 * F
+    return sigma
+
+def sigma_HeII(E):
+    """
+    Parameters
+    ----------
+    E : Photon energy, in [eV]
+
+    Returns
+    ----------
+    Photo-ionization cross section for singly ionized Helium HeII,  [cm ** 2]
+    Taken from  Verner et al. arXiv:astro-ph/9601009
+    """
+    sigma_0 = 1.369 * 10 ** 4 * 10 ** -18  # cm**2
+    E_01 = 1.72
+    y_a = 3.288 * 10 ** 1
+    P = 2.963
+    y_w = 0
+    y_0 = 0
+    y_1 = 0
+    x = E / E_01 - y_0
+    y = np.sqrt(x ** 2 + y_1 ** 2)
+    F = ((x - 1) ** 2 + y_w ** 2) * y ** (0.5 * P - 5.5) * (1 + np.sqrt(y / y_a)) ** -P
+    sigma = sigma_0 * F
+    return sigma
+
+
 def alpha_HII(T):
     """
+    Parameters
+    ----------
+    T : temperature in K
+
+    Returns
+    ----------
     Case B recombination coefficient for Hydrogen :  [cm3.s-1]
-    Input : temperature in K
+    Taken from Fukugita and Kawasaki 1994
     """
     return 2.6 * 10 ** -13 * (T / 10 ** 4) ** -0.85
+
+
+
+
+
+
+####### Not used below this line
+
+# Ionization and Recombination coefficients. Expressions taken from Fukugita and Kawasaki 1994.
 
 
 def beta_HI(T):
@@ -125,30 +189,3 @@ def psi_HeII(T):
 def omega_HeII(T):
     return eV_per_erg * 1.24 * 10 ** -13 * T ** -1.5 * np.exp(-4.7 * 10 ** 5 / T) * (1 + 0.3 * np.exp(-9.4 * 10 ** 4 / T))
 
-def sigma_HeI(E):
-    sigma_0 = 9.492 * 10 ** 2 * 10 ** -18
-    E_01 = 1.361 * 10 ** 1
-    y_a = 1.469
-    P = 3.188
-    y_w = 2.039
-    y_0 = 4.434 * 10 ** -1
-    y_1 = 2.136
-    x = E / E_01 - y_0
-    y = np.sqrt(x ** 2 + y_1 ** 2)
-    F = ((x - 1) ** 2 + y_w ** 2) * y ** (0.5 * P - 5.5) * (1 + np.sqrt(y / y_a)) ** -P
-    sigma = sigma_0 * F
-    return sigma
-
-def sigma_HeII(E):
-    sigma_0 = 1.369 * 10 ** 4 * 10 ** -18  # cm**2
-    E_01 = 1.72
-    y_a = 3.288 * 10 ** 1
-    P = 2.963
-    y_w = 0
-    y_0 = 0
-    y_1 = 0
-    x = E / E_01 - y_0
-    y = np.sqrt(x ** 2 + y_1 ** 2)
-    F = ((x - 1) ** 2 + y_w ** 2) * y ** (0.5 * P - 5.5) * (1 + np.sqrt(y / y_a)) ** -P
-    sigma = sigma_0 * F
-    return sigma

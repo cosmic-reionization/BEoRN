@@ -574,6 +574,7 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
     nGrid = param.sim.Ncell
     Lbox = param.sim.Lbox  # Mpc/h
 
+
     print('Computing Power Spectra with all cross correlations.')
 
     kbins = def_k_bins(param)
@@ -610,6 +611,8 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
     dict_cross_corr = {'PS_xHII': PS_xHII, 'PS_T': PS_T, 'PS_xal': PS_xal, 'PS_rho': PS_rho, 'PS_T_lyal': PS_T_lyal,
                        'PS_T_xHII': PS_T_xHII, 'PS_lyal_xHII': PS_lyal_xHII, 'PS_rho_xHII': PS_rho_xHII,
                        'PS_rho_xal': PS_rho_xal, 'PS_rho_T': PS_rho_T}
+
+
     return Merge(GS_PS_dict, dict_cross_corr)
 
 
@@ -1101,3 +1104,7 @@ def compute_var_field(param, field):
             variance.append(0)
     print('return : variance, R_scale, k_values')
     return variance, R_scale, k_values
+
+
+
+
