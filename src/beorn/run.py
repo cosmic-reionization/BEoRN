@@ -1106,5 +1106,24 @@ def compute_var_field(param, field):
     return variance, R_scale, k_values
 
 
+def compute_corr_fct(param):
+
+    if not os.path.isdir('./variances'):
+        os.mkdir('./variances')
+
+    start_time = time.time()
+    print('Compute correlation functions of the fields, for r=0.')
+
+    z_arr = def_redshifts(param)
+    Xi_rb = np.zeros((len(z_arr)))
+    for ii, z in enumerate(z_arr):
+        Grid_xHII = load_grid(param, z=z, type='bubbles')
+        delta_b = load_delta_b(param, z_string_format(z))
+        Xi_rb[ii] = np.var(delta_b*delta_fct(Grid_xHII))
+    Dict = {'z':np.array(z_arr), 'Xi_rb':Xi_rb}
+    end_time = time.time()
+    print('Finished computing Xi at r=0. It took in total: ', end_time - start_time)
+    print('  ')
+    save_f(file='./variances/Xi_corr_fct.pkl', obj=Dict)
 
 
