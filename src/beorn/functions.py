@@ -4,6 +4,7 @@ Basic functions to load and save profiles, 3D maps etc...
 
 import pickle
 import numpy as np
+from .constants import rhoc0
 
 def load_f(file):
     import pickle
@@ -215,3 +216,29 @@ def print_time(delta_t):
     A clean time in hh:mm:ss
     """
     return "{:0>8}".format(str(timedelta(seconds=round(delta_t))))
+
+
+
+
+def load_pkdgrav_density_field(file,LBox,nGrid):
+    """
+    Parameters
+    ----------
+    file : String. Path to the pkdgrav density field
+    LBox : Float, box size in Mpc/h
+    nGrid : Float, number of grid pixels
+
+    Returns
+    ----------
+    delta = rho_m/rho_mean-1
+    3-D mesh grid. Size (nGrid,nGrid,nGrid)
+    """
+    dens = np.fromfile(file, dtype=np.float32)
+    pkd = dens.reshape(nGrid, nGrid, nGrid)
+    pkd = pkd.T  ### take the transpose to match X_ion map coordinates
+    V_total = LBox ** 3
+    V_cell = (LBox / nGrid) ** 3
+    mass = pkd * rhoc0 * V_total
+    rho_m = mass / V_cell
+    delta_b = (rho_m) / np.mean(rho_m) - 1
+    return delta_b
