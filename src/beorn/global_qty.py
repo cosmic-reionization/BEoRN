@@ -158,8 +158,8 @@ def compute_glob_qty(param):
 
     zz, Tk, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr = np.array(zz), np.array(Tk), np.array(xHII), np.array(
         sfrd), np.array(s_alpha), np.array(x_alpha), np.array(dTb_arr), np.array(xcoll_arr)
-    matrice = np.array([zz, Tk, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr])
-    zz, Tk, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr = matrice[:, matrice[0].argsort()]  ## sort according to zz
+    #matrice = np.array([zz, Tk, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr])
+    #zz, Tk, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr = matrice[:, matrice[0].argsort()]  ## sort according to zz
 
     return {'z': zz, 'Tk': Tk, 'x_HII': xHII, 'sfrd': sfrd, 'S_al': s_alpha, 'x_al': x_alpha, 'dTb': dTb_arr,
             'xcoll': xcoll_arr}
