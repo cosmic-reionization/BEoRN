@@ -1043,6 +1043,39 @@ def compute_variance(param):
     print('Finished computing variances. It took in total: ', end_time - start_time)
     print('  ')
 
+def gather_variances(param):
+    """
+    gather all variances files at different z into a single file
+
+    Parameters
+    ----------
+    param : dictionnary
+
+    Returns
+    ---------
+    Store in a single file
+    """
+    from collections import defaultdict
+
+    dd = defaultdict(list)
+
+    z_arr = def_redshifts(param)
+    for ii, z in enumerate(z_arr):
+        z_str = z_string_format(z)
+        file = './variances/var_z' + z_str + '.pkl'
+        if exists(file):
+            var_z = load_f(file)
+            for key, value in var_z.items():
+                dd[key].append(value)
+            os.remove(file)
+
+    for key, value in dd.items():  # change lists to numpy arrays
+        dd[key] = np.array(value)
+
+    dd['k'] = var_z['k']
+    dd['R'] = var_z['R']
+
+    save_f(file='./variances/var_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
 
 def compute_var_single_z(param, z):
     Grid_Temp = load_grid(param, z=z, type='Tk')
