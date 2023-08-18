@@ -1119,4 +1119,4 @@ def compute_corr_fct(param):
     end_time = time.time()
     print('Finished computing Xi at r=0. It took in total: ', end_time - start_time)
     print('  ')
-    save_f(file='./variances/Xi_corr_fct_'+param.sim.Ncell+'.pkl', obj=Dict)
+    save_f(file='./variances/Xi_corr_fct_'+str(param.sim.Ncell)+'.pkl', obj=Dict)
