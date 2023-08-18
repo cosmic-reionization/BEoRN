@@ -1053,7 +1053,7 @@ def gather_variances(param):
 
     Returns
     ---------
-    Store in a single file
+    Store in a single file all the var with shape (zz,kk)
     """
     from collections import defaultdict
 
@@ -1143,12 +1143,30 @@ def compute_corr_fct(param):
     print('Compute correlation functions of the fields, for r=0.')
 
     z_arr = def_redshifts(param)
+    Xi_TT = np.zeros((len(z_arr)))
+    Xi_aa = np.zeros((len(z_arr)))
+    Xi_Tb = np.zeros((len(z_arr)))
+    Xi_rT = np.zeros((len(z_arr)))
+    Xi_ar = np.zeros((len(z_arr)))
+    Xi_aT = np.zeros((len(z_arr)))
     Xi_rb = np.zeros((len(z_arr)))
+    Xi_ab = np.zeros((len(z_arr)))
+
     for ii, z in enumerate(z_arr):
-        Grid_xHII = load_grid(param, z=z, type='bubbles')
+        delta_xHII = delta_fct(load_grid(param, z=z, type='bubbles'))
+        delta_Tk = delta_fct(load_grid(param, z=z, type='Tk'))
+        delta_lyal = delta_fct(load_grid(param, z=z, type='lyal'))
         delta_b = load_delta_b(param, z_string_format(z))
-        Xi_rb[ii] = np.mean(delta_b * delta_fct(Grid_xHII))
-    Dict = {'z': np.array(z_arr), 'Xi_rb': Xi_rb}
+        Xi_TT[ii] = np.mean(delta_Tk ** 2)
+        Xi_aa[ii] = np.mean(delta_lyal ** 2)
+        Xi_Tb[ii] = np.mean(delta_b * delta_Tk)
+        Xi_rT[ii] = np.mean(delta_xHII * delta_Tk)
+        Xi_ar[ii] = np.mean(delta_xHII * delta_lyal)
+        Xi_aT[ii] = np.mean(delta_Tk * delta_lyal)
+        Xi_rb[ii] = np.mean(delta_xHII * delta_b)
+        Xi_ab[ii] = np.mean(delta_b * delta_lyal)
+
+    Dict = {'z': np.array(z_arr),'Xi_TT':Xi_TT,'Xi_aa':Xi_aa,'Xi_Tb':Xi_Tb,'Xi_rT':Xi_rT,'Xi_ar':Xi_ar,'Xi_aT':Xi_aT,'Xi_rb':Xi_rb,'Xi_ab':Xi_ab}
     end_time = time.time()
     print('Finished computing Xi at r=0. It took in total: ', end_time - start_time)
     print('  ')
