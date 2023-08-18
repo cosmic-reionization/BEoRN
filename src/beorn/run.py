@@ -1114,9 +1114,9 @@ def compute_corr_fct(param):
     for ii, z in enumerate(z_arr):
         Grid_xHII = load_grid(param, z=z, type='bubbles')
         delta_b = load_delta_b(param, z_string_format(z))
-        Xi_rb[ii] = np.mean(delta_b * delta_fct(Grid_xHII)) 
+        Xi_rb[ii] = np.mean(delta_b * delta_fct(Grid_xHII))
     Dict = {'z': np.array(z_arr), 'Xi_rb': Xi_rb}
     end_time = time.time()
     print('Finished computing Xi at r=0. It took in total: ', end_time - start_time)
     print('  ')
-    save_f(file='./variances/Xi_corr_fct.pkl', obj=Dict)
+    save_f(file='./variances/Xi_corr_fct_'+param.sim.Ncell+'.pkl', obj=Dict)
