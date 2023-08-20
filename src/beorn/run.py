@@ -240,7 +240,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
                 Grid_Temp += T_adiab_fluctu(z, param, delta_b)
 
-                
+
             if read_temp:
                 Grid_Temp = load_grid(param, z=z, type='Tk')
             if read_ion:
@@ -293,6 +293,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                   'x_coll': np.mean(Grid_xcoll)}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,third_order=third_order)
+
     save_f(file='./physics/GS_PS_' + z_str, obj=GS_PS_dict)
 
     if param.sim.store_grids:
@@ -587,6 +588,8 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
     Lbox = param.sim.Lbox  # Mpc/h
 
     print('Computing Power Spectra with all cross correlations.')
+    if third_order:
+        print('...including third order perturbations in delta_reio.')
 
     kbins = def_k_bins(param)
 
@@ -623,19 +626,19 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
                        'PS_T_xHII': PS_T_xHII, 'PS_lyal_xHII': PS_lyal_xHII, 'PS_rho_xHII': PS_rho_xHII,
                        'PS_rho_xal': PS_rho_xal, 'PS_rho_T': PS_rho_T}
 
-    if third_order :
+    if third_order:
         PS_rTT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_raa = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
-        PS_rTb =   t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rTa =  t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
-        PS_rab =  t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rTb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rTa = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rab = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
         PS_rrT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_rra = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_rrb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_rho, box_dims=Lbox, kbins=kbins)[0]
         PS_rbb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII, delta_rho ** 2, box_dims=Lbox, kbins=kbins)[0]
         Dict_3rd_order = {'PS_rTT': PS_rTT, 'PS_raa': PS_raa, 'PS_rTb': PS_rTb, 'PS_rTa': PS_rTa, 'PS_rab': PS_rab,
                           'PS_rrT': PS_rrT, 'PS_rra': PS_rra, 'PS_rrb': PS_rrb, 'PS_rbb': PS_rbb}
-        dict_cross_corr =  Merge(Dict_3rd_order, dict_cross_corr)
+        dict_cross_corr = Merge(Dict_3rd_order, dict_cross_corr)
 
     return Merge(GS_PS_dict, dict_cross_corr)
 
