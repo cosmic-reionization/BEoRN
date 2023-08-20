@@ -129,116 +129,118 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             Grid_xal = np.array([0])
             print('universe is fully inoinzed. Return [1] for the xHII, T and [0] for dTb.')
         else:
-            Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
-            Pos_Halos_Grid = np.array([Pos_Halos / LBox * nGrid]).astype(int)[0]
-            Pos_Halos_Grid[np.where(
-                Pos_Halos_Grid == nGrid)] = nGrid - 1  # we don't want Pos_Halos_Grid==nGrid. This only happens if Pos_Bubbles=LBox
-            Grid_xHII_i = np.zeros((nGrid, nGrid, nGrid))
-            Grid_Temp = np.zeros((nGrid, nGrid, nGrid))
-            Grid_xal = np.zeros((nGrid, nGrid, nGrid))
-            for i in range(len(M_Bin)):
-                indices = np.where(Indexing == i)[
-                    0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
-                Mh_ = grid_model.Mh_history[ind_z, i]
+            if not read_temp or not read_lyal or not read_ion:
+                Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
+                Pos_Halos_Grid = np.array([Pos_Halos / LBox * nGrid]).astype(int)[0]
+                Pos_Halos_Grid[np.where(
+                    Pos_Halos_Grid == nGrid)] = nGrid - 1  # we don't want Pos_Halos_Grid==nGrid. This only happens if Pos_Bubbles=LBox
+                Grid_xHII_i = np.zeros((nGrid, nGrid, nGrid))
+                Grid_Temp = np.zeros((nGrid, nGrid, nGrid))
+                Grid_xal = np.zeros((nGrid, nGrid, nGrid))
+                for i in range(len(M_Bin)):
+                    indices = np.where(Indexing == i)[
+                        0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
+                    Mh_ = grid_model.Mh_history[ind_z, i]
 
-                if len(indices) > 0 and Mh_ > param.source.M_min:
-                    radial_grid = grid_model.r_grid_cell / (1 + zgrid)  # pMpc/h
-                    x_HII_profile = np.zeros((len(radial_grid)))
-                    x_HII_profile[np.where(radial_grid < grid_model.R_bubble[ind_z, i] / (1 + zgrid))] = 1
-                    Temp_profile = grid_model.rho_heat[ind_z, :, i]
+                    if len(indices) > 0 and Mh_ > param.source.M_min:
+                        radial_grid = grid_model.r_grid_cell / (1 + zgrid)  # pMpc/h
+                        x_HII_profile = np.zeros((len(radial_grid)))
+                        x_HII_profile[np.where(radial_grid < grid_model.R_bubble[ind_z, i] / (1 + zgrid))] = 1
+                        Temp_profile = grid_model.rho_heat[ind_z, :, i]
 
-                    r_lyal = grid_model.r_lyal  # np.logspace(-5, 2, 1000, base=10)     ##    physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
-                    rho_alpha_ = grid_model.rho_alpha[ind_z, :, i]  # rho_alpha(r_lyal, Mh_, zgrid, param)[0]
-                    x_alpha_prof = 1.81e11 * (rho_alpha_) / (
-                            1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
+                        r_lyal = grid_model.r_lyal  # np.logspace(-5, 2, 1000, base=10)     ##    physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
+                        rho_alpha_ = grid_model.rho_alpha[ind_z, :, i]  # rho_alpha(r_lyal, Mh_, zgrid, param)[0]
+                        x_alpha_prof = 1.81e11 * (rho_alpha_) / (
+                                1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
 
-                    ### This is the position of halos in base "nGrid". We use this to speed up the code.
-                    ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
-                    base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,
-                                                                                  1] + nGrid ** 2 * Pos_Halos_Grid[
-                                                                                                        indices][:, 2]
-                    unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
+                        ### This is the position of halos in base "nGrid". We use this to speed up the code.
+                        ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
+                        base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,
+                                                                                      1] + nGrid ** 2 * Pos_Halos_Grid[
+                                                                                                            indices][:, 2]
+                        unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
 
-                    ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
-                    YY_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2) // nGrid
-                    XX_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2 - YY_indice * nGrid)
+                        ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
+                        YY_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2) // nGrid
+                        XX_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2 - YY_indice * nGrid)
 
-                    # if cic:
-                    #    coef_cic = CIC_coefficients(param,H_X, H_Y, H_Z)
+                        # if cic:
+                        #    coef_cic = CIC_coefficients(param,H_X, H_Y, H_Z)
 
-                    ## Every halos in mass bin i are assumed to have mass M_bin[i].
-                    if ion:
-                        profile_xHII = interp1d(radial_grid * (1 + z), x_HII_profile, bounds_error=False,
-                                                fill_value=(1, 0))
-                        kernel_xHII = profile_to_3Dkernel(profile_xHII, nGrid, LBox)
-                        if not np.any(kernel_xHII > 0):
-                            ### if the bubble volume is smaller than the grid size,we paint central cell with ion fraction value
-                            # kernel_xHII[int(nGrid / 2), int(nGrid / 2), int(nGrid / 2)] = np.trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (LBox / nGrid / (1 + z)) ** 3
-                            Grid_xHII_i[XX_indice, YY_indice, ZZ_indice] += np.trapz(
-                                x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (LBox / nGrid / (
-                                    1 + z)) ** 3 * nbr_of_halos
+                        ## Every halos in mass bin i are assumed to have mass M_bin[i].
+                        if ion:
+                            profile_xHII = interp1d(radial_grid * (1 + z), x_HII_profile, bounds_error=False,
+                                                    fill_value=(1, 0))
+                            kernel_xHII = profile_to_3Dkernel(profile_xHII, nGrid, LBox)
+                            if not np.any(kernel_xHII > 0):
+                                ### if the bubble volume is smaller than the grid size,we paint central cell with ion fraction value
+                                # kernel_xHII[int(nGrid / 2), int(nGrid / 2), int(nGrid / 2)] = np.trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (LBox / nGrid / (1 + z)) ** 3
+                                Grid_xHII_i[XX_indice, YY_indice, ZZ_indice] += np.trapz(
+                                    x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (LBox / nGrid / (
+                                        1 + z)) ** 3 * nbr_of_halos
 
-                        else:
-                            renorm = np.trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (
-                                    LBox / (1 + z)) ** 3 / np.mean(kernel_xHII)
-                            # extra_ion = put_profiles_group(Pos_Halos_Grid[indices], kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(kernel_xHII) / 1e-7 * renorm
+                            else:
+                                renorm = np.trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (
+                                        LBox / (1 + z)) ** 3 / np.mean(kernel_xHII)
+                                # extra_ion = put_profiles_group(Pos_Halos_Grid[indices], kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(kernel_xHII) / 1e-7 * renorm
 
-                            extra_ion = put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
-                                                           kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(
-                                kernel_xHII) / 1e-7 * renorm
-                            # bubble_volume = np.trapz(4 * np.pi * radial_grid ** 2 * x_HII_profile, radial_grid)
-                            # print('bubble volume is ', len(indices) * bubble_volume,'pMpc, grid volume is', np.sum(extra_ion)* (LBox /nGrid/ (1 + z)) ** 3 )
-                            Grid_xHII_i += extra_ion
+                                extra_ion = put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
+                                                               kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(
+                                    kernel_xHII) / 1e-7 * renorm
+                                # bubble_volume = np.trapz(4 * np.pi * radial_grid ** 2 * x_HII_profile, radial_grid)
+                                # print('bubble volume is ', len(indices) * bubble_volume,'pMpc, grid volume is', np.sum(extra_ion)* (LBox /nGrid/ (1 + z)) ** 3 )
+                                Grid_xHII_i += extra_ion
 
-                    if lyal:
-                        ### We use this stacked_kernel functions to impose periodic boundary conditions when the lyal or T profiles extend outside the box size. Very important for Lyman-a.
-                        kernel_xal = stacked_lyal_kernel(r_lyal * (1 + z), x_alpha_prof, LBox, nGrid,
-                                                         nGrid_min=param.sim.nGrid_min_lyal)
-                        renorm = np.trapz(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal) / (
-                                LBox / (1 + z)) ** 3 / np.mean(kernel_xal)
-                        if np.any(kernel_xal > 0):
-                            # Grid_xal += put_profiles_group(Pos_Halos_Grid[indices], kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum( kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
-                            Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
-                                                           kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum(
-                                kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
+                        if lyal:
+                            ### We use this stacked_kernel functions to impose periodic boundary conditions when the lyal or T profiles extend outside the box size. Very important for Lyman-a.
+                            kernel_xal = stacked_lyal_kernel(r_lyal * (1 + z), x_alpha_prof, LBox, nGrid,
+                                                             nGrid_min=param.sim.nGrid_min_lyal)
+                            renorm = np.trapz(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal) / (
+                                    LBox / (1 + z)) ** 3 / np.mean(kernel_xal)
+                            if np.any(kernel_xal > 0):
+                                # Grid_xal += put_profiles_group(Pos_Halos_Grid[indices], kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum( kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
+                                Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
+                                                               kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum(
+                                    kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
 
-                    if temp:
-                        kernel_T = stacked_T_kernel(radial_grid * (1 + z), Temp_profile, LBox, nGrid,
-                                                    nGrid_min=param.sim.nGrid_min_heat)
-                        renorm = np.trapz(Temp_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (
-                                LBox / (1 + z)) ** 3 / np.mean(kernel_T)
-                        if np.any(kernel_T > 0):
-                            # Grid_Temp += put_profiles_group(Pos_Halos_Grid[indices],  kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(kernel_T) / 1e-7 * renorm
-                            Grid_Temp += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
-                                                            kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(
-                                kernel_T) / 1e-7 * renorm
+                        if temp:
+                            kernel_T = stacked_T_kernel(radial_grid * (1 + z), Temp_profile, LBox, nGrid,
+                                                        nGrid_min=param.sim.nGrid_min_heat)
+                            renorm = np.trapz(Temp_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (
+                                    LBox / (1 + z)) ** 3 / np.mean(kernel_T)
+                            if np.any(kernel_T > 0):
+                                # Grid_Temp += put_profiles_group(Pos_Halos_Grid[indices],  kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(kernel_T) / 1e-7 * renorm
+                                Grid_Temp += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
+                                                                kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(
+                                    kernel_T) / 1e-7 * renorm
 
-                    end_time = time.time()
-                    print(len(indices), 'halos in mass bin ', i,
-                          '. It took ' + print_time(end_time - start_time) + ' to paint the profiles.')
+                        end_time = time.time()
+                        print(len(indices), 'halos in mass bin ', i,
+                              '. It took ' + print_time(end_time - start_time) + ' to paint the profiles.')
 
-            print('.... Done painting profiles. ')
+                print('.... Done painting profiles. ')
 
-            print('Dealing with the overlap of ionised bubbles.... ')
-            Grid_Storage = np.copy(Grid_xHII_i)
+                print('Dealing with the overlap of ionised bubbles.... ')
+                Grid_Storage = np.copy(Grid_xHII_i)
 
-            t_start_spreading = time.time()
-            if np.sum(Grid_Storage) < nGrid ** 3 and ion:
-                Grid_xHII = Spreading_Excess_Fast(param, Grid_Storage)
-            else:
-                Grid_xHII = np.array([1])
+                t_start_spreading = time.time()
+                if np.sum(Grid_Storage) < nGrid ** 3 and ion:
+                    Grid_xHII = Spreading_Excess_Fast(param, Grid_Storage)
+                else:
+                    Grid_xHII = np.array([1])
 
-            print('.... Done. It took:', print_time(time.time() - t_start_spreading),
-                  'to redistribute excess photons from the overlapping regions.')
+                print('.... Done. It took:', print_time(time.time() - t_start_spreading),
+                      'to redistribute excess photons from the overlapping regions.')
 
-            if np.all(Grid_xHII == 0):
-                Grid_xHII = np.array([0])
-            if np.all(Grid_xHII == 1):
-                print('universe is fully inoinzed. Return [1] for Grid_xHII.')
-                Grid_xHII = np.array([1])
+                if np.all(Grid_xHII == 0):
+                    Grid_xHII = np.array([0])
+                if np.all(Grid_xHII == 1):
+                    print('universe is fully inoinzed. Return [1] for Grid_xHII.')
+                    Grid_xHII = np.array([1])
 
-            Grid_Temp += T_adiab_fluctu(z, param, delta_b)
+                Grid_Temp += T_adiab_fluctu(z, param, delta_b)
 
+                
             if read_temp:
                 Grid_Temp = load_grid(param, z=z, type='Tk')
             if read_ion:
