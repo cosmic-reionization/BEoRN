@@ -1151,11 +1151,19 @@ def compute_corr_fct(param):
     Xi_aT = np.zeros((len(z_arr)))
     Xi_rb = np.zeros((len(z_arr)))
     Xi_ab = np.zeros((len(z_arr)))
+
     Xi_rba = np.zeros((len(z_arr)))
     Xi_rbT = np.zeros((len(z_arr)))
     Xi_raT = np.zeros((len(z_arr)))
     Xi_raa = np.zeros((len(z_arr)))
     Xi_rTT = np.zeros((len(z_arr)))
+
+    Xi_aTb = np.zeros((len(z_arr)))
+    Xi_aTrb = np.zeros((len(z_arr)))
+    Xi_aab = np.zeros((len(z_arr)))
+    Xi_aarb = np.zeros((len(z_arr)))
+    Xi_TTb = np.zeros((len(z_arr)))
+    Xi_TTrb = np.zeros((len(z_arr)))
 
     for ii, z in enumerate(z_arr):
         delta_xHII = delta_fct(load_grid(param, z=z, type='bubbles'))
@@ -1170,14 +1178,23 @@ def compute_corr_fct(param):
         Xi_aT[ii] = np.mean(delta_Tk * delta_lyal)
         Xi_rb[ii] = np.mean(delta_xHII * delta_b)
         Xi_ab[ii] = np.mean(delta_b * delta_lyal)
+
         Xi_rba[ii] = np.mean(delta_xHII * delta_b * delta_lyal)
         Xi_rbT[ii] = np.mean(delta_xHII * delta_b * delta_Tk)
         Xi_raT[ii] = np.mean(delta_xHII * delta_lyal * delta_Tk)
         Xi_raa[ii] = np.mean(delta_xHII * delta_lyal ** 2)
         Xi_rTT[ii] = np.mean(delta_xHII * delta_Tk ** 2)
 
+        Xi_aTb[ii] = np.mean(delta_lyal * delta_Tk * delta_b)
+        Xi_aTrb[ii] = np.mean(delta_lyal * delta_Tk * delta_xHII * delta_b)
+        Xi_aab[ii] = np.mean(delta_lyal ** 2 * delta_b)
+        Xi_aarb[ii] = np.mean(delta_lyal ** 2 * delta_xHII * delta_b)
+        Xi_TTb[ii] = np.mean(delta_Tk ** 2 * delta_b)
+        Xi_TTrb[ii] = np.mean(delta_Tk ** 2 * delta_xHII * delta_b)
+
     Dict = {'z': np.array(z_arr),'Xi_TT':Xi_TT,'Xi_aa':Xi_aa,'Xi_Tb':Xi_Tb,'Xi_rT':Xi_rT,'Xi_ar':Xi_ar,'Xi_aT':Xi_aT,'Xi_rb':Xi_rb,'Xi_ab':Xi_ab,
-            'Xi_rba':Xi_rba,'Xi_rbT':Xi_rbT,'Xi_raT':Xi_raT,'Xi_raa':Xi_raa,'Xi_rTT':Xi_rTT}
+            'Xi_rba':Xi_rba,'Xi_rbT':Xi_rbT,'Xi_raT':Xi_raT,'Xi_raa':Xi_raa,'Xi_rTT':Xi_rTT,
+            'Xi_aTb ': Xi_aTb, 'Xi_aTrb': Xi_aTrb, 'Xi_aab ': Xi_aab, 'Xi_aarb': Xi_aarb, 'Xi_TTb ': Xi_TTb,'Xi_TTrb': Xi_TTrb}
     end_time = time.time()
     print('Finished computing Xi at r=0. It took in total: ', end_time - start_time)
     print('  ')
