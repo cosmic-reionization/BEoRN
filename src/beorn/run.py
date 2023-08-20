@@ -58,7 +58,7 @@ def compute_profiles(param):
 
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
-                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False):
+                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False,third_order = False):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
 
@@ -290,7 +290,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
                   'x_coll': np.mean(Grid_xcoll)}
     if cross_corr:
-        GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b)
+        GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,third_order=third_order)
     save_f(file='./physics/GS_PS_' + z_str, obj=GS_PS_dict)
 
     if param.sim.store_grids:
@@ -366,7 +366,7 @@ def def_k_bins(param):
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
-                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False):
+                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False,third_order=False):
     """
     Parameters
     ----------
@@ -412,14 +412,14 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                     print('----- Painting 3D map for z =', z, '-------')
                     paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                               read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                              cross_corr=cross_corr)
+                                              cross_corr=cross_corr,third_order = False)
                     print('----- Snapshot at z = ', z, ' is done -------')
                     print(' ')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                           read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                          cross_corr=cross_corr)
+                                          cross_corr=cross_corr,third_order=False)
                 print('----- Snapshot at z = ', z, ' is done -------')
                 print(' ')
 
@@ -579,7 +579,7 @@ def delta_fct(grid):
     return grid / np.mean(grid) - 1
 
 
-def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho):
+def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho,third_order=False):
     import tools21cm as t2c
     nGrid = param.sim.Ncell
     Lbox = param.sim.Lbox  # Mpc/h
@@ -620,6 +620,20 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
     dict_cross_corr = {'PS_xHII': PS_xHII, 'PS_T': PS_T, 'PS_xal': PS_xal, 'PS_rho': PS_rho, 'PS_T_lyal': PS_T_lyal,
                        'PS_T_xHII': PS_T_xHII, 'PS_lyal_xHII': PS_lyal_xHII, 'PS_rho_xHII': PS_rho_xHII,
                        'PS_rho_xal': PS_rho_xal, 'PS_rho_T': PS_rho_T}
+
+    if third_order :
+        PS_rTT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_raa = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rTb =   t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rTa =  t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rab =  t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rrT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_rra = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rrb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rbb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII, delta_rho ** 2, box_dims=Lbox, kbins=kbins)[0]
+        Dict_3rd_order = {'PS_rTT': PS_rTT, 'PS_raa': PS_raa, 'PS_rTb': PS_rTb, 'PS_rTa': PS_rTa, 'PS_rab': PS_rab,
+                          'PS_rrT': PS_rrT, 'PS_rra': PS_rra, 'PS_rrb': PS_rrb, 'PS_rbb': PS_rbb}
+        dict_cross_corr =  Merge(Dict_3rd_order, dict_cross_corr)
 
     return Merge(GS_PS_dict, dict_cross_corr)
 
@@ -1194,8 +1208,8 @@ def compute_corr_fct(param):
 
     Dict = {'z': np.array(z_arr),'Xi_TT':Xi_TT,'Xi_aa':Xi_aa,'Xi_Tb':Xi_Tb,'Xi_rT':Xi_rT,'Xi_ar':Xi_ar,'Xi_aT':Xi_aT,'Xi_rb':Xi_rb,'Xi_ab':Xi_ab,
             'Xi_rba':Xi_rba,'Xi_rbT':Xi_rbT,'Xi_raT':Xi_raT,'Xi_raa':Xi_raa,'Xi_rTT':Xi_rTT,
-            'Xi_aTb ': Xi_aTb, 'Xi_aTrb': Xi_aTrb, 'Xi_aab ': Xi_aab, 'Xi_aarb': Xi_aarb, 'Xi_TTb ': Xi_TTb,'Xi_TTrb': Xi_TTrb}
+            'Xi_aTb': Xi_aTb, 'Xi_aTrb': Xi_aTrb, 'Xi_aab': Xi_aab, 'Xi_aarb': Xi_aarb, 'Xi_TTb': Xi_TTb,'Xi_TTrb': Xi_TTrb}
     end_time = time.time()
-    print('Finished computing Xi at r=0. It took in total: ', end_time - start_time)
+    print('Finished computing Xi at r=0. It took in total: ', print_time(end_time - start_time))
     print('  ')
     save_f(file='./variances/Xi_corr_fct_'+str(param.sim.Ncell)+'.pkl', obj=Dict)
