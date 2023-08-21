@@ -629,15 +629,27 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
     if third_order:
         PS_rTT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_raa = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rbb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
         PS_rTb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rTa = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
-        PS_rab = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_aTr = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_abr = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
         PS_rrT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_rra = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_rrb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rbb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII, delta_rho ** 2, box_dims=Lbox, kbins=kbins)[0]
-        Dict_3rd_order = {'PS_rTT': PS_rTT, 'PS_raa': PS_raa, 'PS_rTb': PS_rTb, 'PS_rTa': PS_rTa, 'PS_rab': PS_rab,
-                          'PS_rrT': PS_rrT, 'PS_rra': PS_rra, 'PS_rrb': PS_rrb, 'PS_rbb': PS_rbb}
+
+        PS_rTrT = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_rara = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rbrb = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rarb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_XHII * delta_rho, box_dims=Lbox,
+                                                   kbins=kbins)[0]
+        PS_rTrb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_rho, box_dims=Lbox,
+                                                   kbins=kbins)[0]
+        PS_rTra = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_x_al, box_dims=Lbox,
+                                                   kbins=kbins)[0]
+
+        Dict_3rd_order = {'PS_rTT':PS_rTT ,'PS_raa':PS_raa ,'PS_rbb':PS_rbb ,'PS_rTb':PS_rTb ,'PS_aTr':PS_aTr ,
+                          'PS_abr':PS_abr ,'PS_rrT':PS_rrT ,'PS_rra':PS_rra ,'PS_rrb':PS_rrb ,'PS_rTrT':PS_rTrT,
+                          'PS_rara':PS_rara,'PS_rbrb':PS_rbrb,'PS_rarb':PS_rarb,'PS_rTrb':PS_rTrb,'PS_rTra':PS_rTra}
         dict_cross_corr = Merge(Dict_3rd_order, dict_cross_corr)
 
     return Merge(GS_PS_dict, dict_cross_corr)
