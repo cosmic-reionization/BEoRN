@@ -43,8 +43,6 @@ def source_par():
         "f0_esc": 0.15,                   # photon escape fraction f_esc = f0_esc * (M/Mp)^pl_esc
         "Mp_esc": 1e10,
         "pl_esc": 0.0,
-
-
     }
 
     return Bunch(par)
@@ -90,7 +88,8 @@ def cosmo_par():
     'Ol' : 0.68,
     'rho_c' : 2.775e11,
     'h' : 0.68,
-    's8': None,
+    's8': 0.83,
+    'ns': 0.96,
     'ps': pkg_resources.resource_filename('beorn', "files/PCDM_Planck.dat"),      ### This is the path to the input Linear Power Spectrum
     'corr_fct' : pkg_resources.resource_filename('beorn', "files/corr_fct.dat"),  ### This is the path where the corresponding correlation function will be stored. You can change it to anything.
     'HI_frac' : 1-0.08,       # fraction of Helium. Only used when running H_He_Final. 1-fraction is Helium then.  0.2453 of total mass is in He according to BBN, so in terms of number density it is  1/(1+4*(1-f_He_bymass)/f_He_bymass)  ~0.075.
@@ -115,15 +114,15 @@ def hmf_par(): ## Parameters related to analytical halo mass function (PS formal
     par = {
         ### HMF parameters that we use to normalise the collapsed fraction.
         "filter": 'tophat',  # tophat, sharpk or smoothk
-        "c": 1,    # scale to halo mass relation (1 for tophat, 2.5 for sharp-k, 3 for smooth-k)
-        "q": 0.85,  # q for f(nu) [0.707,1,1] for [ST,smoothk or sharpk,PS] (q = 0.8 with tophat fits better the high redshift z>6 HMF)
-        "p": 0.3,  # p for f(nu) [0.3,0.3,0] for [ST,smoothk or sharpk,PS]
-        "delta_c": 1.686,  # critical density
-        "A": 0.322,  # A = 0.322 except 0.5 for PS Spherical collapse (to double check)
+        "c": 1,              # scale to halo mass relation (1 for tophat, 2.5 for sharp-k, 3 for smooth-k)
+        "q": 0.85,           # q for f(nu) [0.707,1,1] for [ST,smoothk or sharpk,PS] (q = 0.8 with tophat fits better the high redshift z>6 HMF)
+        "p": 0.3,            # p for f(nu) [0.3,0.3,0] for [ST,smoothk or sharpk,PS]
+        "delta_c": 1.686,    # critical density
+        "A": 0.322,          # A = 0.322 except 0.5 for PS Spherical collapse (to double check)
         "m_min": 1e4,
         "m_max": 1e16,
         "Mbin": 300,
-        'z': [0],  # output z values. Should be a list.
+        'z': [0],            # output z values. Should be a list.
         }
     return Bunch(par)
 

@@ -4,7 +4,7 @@ Basic functions to load and save profiles, 3D maps etc...
 
 import pickle
 import numpy as np
-from .constants import rhoc0
+from .constants import rhoc0, Tcmb0
 
 def load_f(file):
     import pickle
@@ -35,6 +35,8 @@ def load_halo(param, z_str):
     halo_catalog['Z'] = halo_catalog['Z'][indices]
 
     return halo_catalog
+
+
 
 
 def format_file_name(param,dir_name,z,qty):

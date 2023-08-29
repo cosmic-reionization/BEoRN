@@ -4,7 +4,8 @@ Generate the xHII field from the non linear density field using the excursion se
 import copy
 
 import numpy as np
-from .constants import *; from.cosmo import *
+from .constants import *;
+from .cosmo import *
 from astropy.convolution import convolve_fft
 from .halomassfunction import HMF as halomassfct
 from .run import load_delta_b
@@ -14,6 +15,7 @@ from .astro import f_esc, f_star_Halo
 import warnings
 from .compute_profiles import Ngdot_ion
 from .functions import *
+
 
 def run_excursion_set(param):
     """
@@ -34,10 +36,10 @@ def run_excursion_set(param):
     catalog_dir = param.sim.halo_catalogs
     model_name = param.sim.model_name
 
-    if catalog_dir is None :
+    if catalog_dir is None:
         print('You should specify param.sim.halo_catalogs. Should be a file containing the halo catalogs.')
-    print('Applying excursion set formalism to produce ionisation maps, with', nGrid,'pixels per dim. Box size is',LBox ,'cMpc/h.')
-
+    print('Applying excursion set formalism to produce ionisation maps, with', nGrid, 'pixels per dim. Box size is',
+          LBox, 'cMpc/h.')
 
     if param.sim.cores > 1:
         import mpi4py.MPI
@@ -49,21 +51,20 @@ def run_excursion_set(param):
 
     for ii, filename in enumerate(os.listdir(catalog_dir)):
         if rank == ii % size:
-            print('Core nbr',rank,'is taking care of snap',filename[4:-5])
-            if exists('./grid_output/xHII_exc_set_' + str(nGrid)+ '_' + model_name + '_snap' + filename[4:-5]):
-                print('xHII map for snapshot ',filename[4:-5],'already painted. Skiping.')
+            print('Core nbr', rank, 'is taking care of snap', filename[4:-5])
+            if exists('./grid_output/xHII_exc_set_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
+                print('xHII map for snapshot ', filename[4:-5], 'already painted. Skiping.')
             else:
                 print('----- Excursion set for snapshot nbr :', filename[4:-5], '-------')
-                excursion_set(filename,param)
+                excursion_set(filename, param)
                 print('----- Snapshot nbr :', filename[4:-5], ' is done -------')
 
     end_time = datetime.datetime.now()
-    print('DONE. Stored the xHII grid. It took in total: ',end_time-start_time,'to do the excursion set.')
+    print('DONE. Stored the xHII grid. It took in total: ', end_time - start_time, 'to do the excursion set.')
     print('  ')
 
 
-
-def excursion_set(filename,param):
+def excursion_set(filename, param):
     """
     Produces xHII map with excursion set formalism for a single snapshot
 
@@ -77,31 +78,30 @@ def excursion_set(filename,param):
     Nothing
     """
 
-
-    nGrid       = param.sim.Ncell
-    Lbox        = param.sim.Lbox
+    nGrid = param.sim.Ncell
+    Lbox = param.sim.Lbox
     catalog_dir = param.sim.halo_catalogs
-    catalog     = catalog_dir + filename
+    catalog = catalog_dir + filename
     model_name = param.sim.model_name
     halo_catalog = load_f(catalog)
     z = halo_catalog['z']
-    delta_field = load_delta_b(param,filename) # load the overdensity field delta = rho/rho_bar-1
+    delta_field = load_delta_b(param, filename)  # load the overdensity field delta = rho/rho_bar-1
     Mmin = param.source.M_min
     M0 = np.logspace(np.log10(Mmin), 15, 100, base=10)
     n_rec = param.exc_set.n_rec
     Nion = param.source.Nion
 
-    fcoll_ion_ST = Nion * f_coll_norm(param,Mmin,z)/n_rec
-    #fcoll_PS = f_coll_PS(param,Mmin,z)
-    #renorm = fcoll_ST / fcoll_PS
-    #print('renorm is : ', round(renorm, 5))
+    fcoll_ion_ST = Nion * f_coll_norm(param, Mmin, z) / n_rec
+    # fcoll_PS = f_coll_PS(param,Mmin,z)
+    # renorm = fcoll_ST / fcoll_PS
+    # print('renorm is : ', round(renorm, 5))
 
     pixel_size = Lbox / nGrid
     x = np.linspace(-Lbox / 2, Lbox / 2, nGrid)  # y, z will be the same.
     rx, ry, rz = np.meshgrid(x, x, x, sparse=True)
     rgrid = np.sqrt(rx ** 2 + ry ** 2 + rz ** 2)
 
-    ion_map  = np.zeros((nGrid, nGrid, nGrid)) # This will be our output xHII map.
+    ion_map = np.zeros((nGrid, nGrid, nGrid))  # This will be our output xHII map.
     stepping = pixel_size * param.exc_set.stepping
     Rsmoothing_Max = param.exc_set.R_max  # Mpc/h, max distance to which we smooth
 
@@ -110,27 +110,40 @@ def excursion_set(filename,param):
 
     dc_z = delta_c(z, param)
 
-    print('pixel size is:', round(pixel_size,4), 'cMpc/h. With a stepping of ',param.exc_set.stepping  ,'pixel.')
+    print('pixel size is:', round(pixel_size, 4), 'cMpc/h. With a stepping of ', param.exc_set.stepping, 'pixel.')
 
     Rsmoothing_Max = 50  # Mpc/h, max distance to which we smooth
-    #Smoothing_scales = np.flip(np.arange(pixel_size, Rsmoothing_Max, stepping))
-    Rsmoothing = pixel_size #Rsmoothing_Max
-    while Rsmoothing < Rsmoothing_Max: #pixel_size:
+    # Smoothing_scales = np.flip(np.arange(pixel_size, Rsmoothing_Max, stepping))
+    Rsmoothing = pixel_size  # Rsmoothing_Max
+    while Rsmoothing < Rsmoothing_Max:  # pixel_size:
         kern = profile_kern(rgrid, Rsmoothing)
-        smooth_rho_ov_rhobar = convolve_fft(delta_field + 1, kern, boundary='wrap', normalize_kernel=True,allow_huge=True)  ## rho_smooth/rho_bar
+        smooth_rho_ov_rhobar = convolve_fft(delta_field + 1, kern, boundary='wrap', normalize_kernel=True,
+                                            allow_huge=True)  ## rho_smooth/rho_bar
         Msmooth = M_of_R(Rsmoothing, param)
 
         Var_Rsmooth = np.interp(Msmooth, M0, Var_M0)
         ## Now to the smoothed density field.
         ## nion_arr collapsed fraction of matter in stars (or actually more of matter in "ionising photons")
-        min_rho = np.min(smooth_rho_ov_rhobar) #rho/rho_bar
+        min_rho = np.min(smooth_rho_ov_rhobar)  # rho/rho_bar
         max_rho = np.max(smooth_rho_ov_rhobar)
-        rho_norm_array = np.linspace(min_rho,max_rho,100)
+        rho_norm_array = np.linspace(min_rho, max_rho, 100)
         ind_max = np.argmin(np.abs(M0 - Msmooth))  # integrate only up to the Mass contained in Rsmooth
         M_range = M0[:ind_max]
 
-                # to avoid computing the integral for each grid pixel, we do this interpolation trick
-        nion_arr = np.trapz(Nion * np.nan_to_num(f_esc(param,M_range) * f_star_Halo(param,M_range) * np.abs(dVarM0_dM[:ind_max]) * f_Conditional(dc_z, Var_M0[:ind_max], ((rho_norm_array[:,None]-1)/D(1/(1+z),param)),Var_Rsmooth)),M_range)
+        # to avoid computing the integral for each grid pixel, we do this interpolation trick
+        nion_arr = np.trapz(Nion * np.nan_to_num(
+            f_esc(param, M_range) * f_star_Halo(param, M_range) * np.abs(dVarM0_dM[:ind_max]) * f_Conditional(dc_z,
+                                                                                                              Var_M0[
+                                                                                                              :ind_max],
+                                                                                                              ((
+                                                                                                                           rho_norm_array[
+                                                                                                                           :,
+                                                                                                                           None] - 1) / D(
+                                                                                                                  1 / (
+                                                                                                                              1 + z),
+                                                                                                                  param)),
+                                                                                                              Var_Rsmooth)),
+                            M_range)
 
         ## when nion_arr turns negative, it means that delta_rho/D(z) is larger than delta(z).
         ## hence the cell has collapsed in a halo of mass at least M(Rsmooth)
@@ -142,14 +155,14 @@ def excursion_set(filename,param):
         nion_arr = nion_arr.clip(max=1)
         nion_grid = np.interp(smooth_rho_ov_rhobar, rho_norm_array, nion_arr)
 
-        #renorm = fcoll_ST / (np.mean(nion_grid) / Nion) ## renormalize to the collapsed fraction given by ST HMF (including fstar and fesc..)
-        #nion_grid = renorm * nion_grid
+        # renorm = fcoll_ST / (np.mean(nion_grid) / Nion) ## renormalize to the collapsed fraction given by ST HMF (including fstar and fesc..)
+        # nion_grid = renorm * nion_grid
 
         nion_grid = nion_grid / np.mean(nion_grid) * fcoll_ion_ST
         ion_map[np.where(nion_grid >= 1)] = 1
 
-        if len(np.where(nion_grid >= 1)[0])==0:
-            print('Stopping at Rsmoothing  =',np.round(Rsmoothing,3),'Mpc/h')
+        if len(np.where(nion_grid >= 1)[0]) == 0:
+            print('Stopping at Rsmoothing  =', np.round(Rsmoothing, 3), 'Mpc/h')
             break  ## when there is no more ionized cell, we stop the loop
         Rsmoothing = param.exc_set.stepping * Rsmoothing
 
@@ -161,9 +174,11 @@ def excursion_set(filename,param):
     min_rho = np.min(delta_field + 1)  # rho/rho_bar
     max_rho = np.max(delta_field + 1)
     rho_norm_array = np.linspace(min_rho, max_rho, 100)
-    nion_arr = np.trapz(Nion * np.nan_to_num(f_esc(param, M0) * f_star_Halo(param, M0) * np.abs(dVarM0_dM) * f_Conditional(dc_z, Var_M0, ( (rho_norm_array[:, None] - 1) / D(1 / (1 + z), param)), Var_cell)), M0)
+    nion_arr = np.trapz(Nion * np.nan_to_num(
+        f_esc(param, M0) * f_star_Halo(param, M0) * np.abs(dVarM0_dM) * f_Conditional(dc_z, Var_M0, (
+                    (rho_norm_array[:, None] - 1) / D(1 / (1 + z), param)), Var_cell)), M0)
     nion_arr[np.where(nion_arr < 0)] = Nion * np.interp(Mcell, M0, f_esc(param, M0) * f_star_Halo(param, M0))
-    nion_arr = nion_arr/n_rec
+    nion_arr = nion_arr / n_rec
     nion_arr = nion_arr.clip(max=1)
     nion_grid = np.interp(delta_field + 1, rho_norm_array, nion_arr)
     nion_grid = nion_grid / np.mean(nion_grid) * fcoll_ion_ST
@@ -171,11 +186,85 @@ def excursion_set(filename,param):
     ion_map[np.where(nion_grid >= 1)] = 1
     nion_grid = nion_grid.clip(max=1)
     ion_map[np.where(ion_map == 0)] = nion_grid[np.where(ion_map == 0)]
-    print('Done for z = ',z,', xHII = ',np.mean(ion_map))
+    print('Done for z = ', z, ', xHII = ', np.mean(ion_map))
 
-    save_f(file = './grid_output/xHII_exc_set_' + str(nGrid)+ '_' + model_name + '_snap' + filename[4:-5], obj = ion_map)
+    save_f(file='./grid_output/xHII_exc_set_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5], obj=ion_map)
 
 
+def exc_set_barrier(param, xHII_norm, zz):
+    """
+    delta(sigma) : critial density above which a point belong to an ionised bubble with size sigma(R)
+
+    Parameters
+    ----------
+    param: Beorn parameter dictionnary.
+    xHII_norm : ion history to which we normalize the barrier
+
+    Returns
+    -------
+    delta
+    """
+    Mmin = param.source.M_min
+    M0 = np.logspace(np.log10(Mmin), 15, 100, base=10)
+    n_rec = param.exc_set.n_rec
+    Nion = param.source.Nion
+    Ob, Om = param.cosmo.Ob, param.cosmo.Om
+
+    var, dvardm = Variance(param, M0)
+    dlnvardlnm = dvardm * M0 / var
+
+    dcz = delta_c(zz, param)
+    N_barrier = 20
+    # var_array   = np.linspace(0, var_int(Mmin), N_barrier)
+    var_array = np.linspace(0, np.max(var), N_barrier)
+
+    delta_array = np.linspace(0, 45, 500)
+    delta_barrier = np.zeros((len(zz), len(var_array)))
+    XHII_target=[]
+    f_esc_, f_star_ = f_esc(param, M0), f_star_Halo(param, M0)
+    for i in range(len(zz)):
+        # renormialise
+        dndlnm_PS = Om * rhoc0 * f_Conditional(dcz[i], var, [0], [0]) * np.abs(dlnvardlnm) * var / M0
+        n_ion_mean_PS = 1 / (Ob * rhoc0) * np.trapz((Ob / Om) * f_star_ * f_esc_ * dndlnm_PS, M0) / n_rec
+        print('xHII PS is : ', round(n_ion_mean_PS * Nion, 3))
+        factor = xHII_norm[i] / (n_ion_mean_PS * Nion)
+        print('normalisation factor is : ', round(factor, 3))
+
+        for j in range(N_barrier):
+            f_cond = f_Conditional(dcz[i, None, None], var[:, None], delta_array[None, :], var_array[j, None, None])
+            itd = factor * f_star_[:, None] * f_esc_[:, None] * Nion / n_rec * f_cond * np.abs(
+                dlnvardlnm[:, None]) * var[:, None] / M0[:, None]
+            itd = np.nan_to_num(itd)
+            r_ion = np.trapz(itd, M0, axis=0)
+
+            # r_ion = np.array(r_ion).clip(min=0)
+            # r_ion[np.where(np.gradient(r_ion, delta_array) < 0)] = 0
+            # idx_barr = np.argmin(np.abs(r_ion - 1.0))
+            if (r_ion[0] >= 1):
+                idx_barr = 0
+            else:
+                # idx_barr = np.argmin(np.abs(r_ion - 1.0))
+                idx_barr = np.argmax(r_ion > 1.0)
+            delta_barrier[i, j] = delta_array[idx_barr]
+
+            # Sometimes no value of delta_array can give r_ion=1. In that case the barrier should be infinite
+            if r_ion[idx_barr] < 0.90:
+                delta_barrier[i, j] = 10000  # np.inf
+            if j==0:
+                XHII_target.append(r_ion[0])
+
+    var_array = np.tile(var_array, (len(zz), 1))
+
+    # straight barrier (better or worse?)
+    d0 = delta_barrier[:, 0]
+    # average slope between first and second
+    slope1 = (delta_barrier[:, 1] - delta_barrier[:, 0]) / (var_array[:, 1] - var_array[:, 0])
+    slope2 = (delta_barrier[:, 2] - delta_barrier[:, 1]) / (var_array[:, 2] - var_array[:, 1])
+    slope = (slope1 + slope2) / 2
+    del_bar_straight = lambda var: d0[:, None] + slope[:, None] * var
+    delta_barrier_straight = del_bar_straight(var_array)
+
+    return M0, var_array, delta_barrier_straight, d0, slope
 
 
 def profile_kern(r, size):
@@ -193,8 +282,7 @@ def profile_kern_sharpk(r, size):
     return W_tophat(np.abs(r / size))
 
 
-
-def f_coll_norm(param,Mmin,z):
+def f_coll_norm(param, Mmin, z):
     """
     param : beorn param file
     Fraction of total matter that "collapsed" into ionising photons.
@@ -206,12 +294,15 @@ def f_coll_norm(param,Mmin,z):
     HMF = halomassfct(par)
     HMF.generate_HMF(par)
     ind_min = np.argmin(np.abs(HMF.tab_M - Mmin))
-    #fcoll_ST = np.trapz(f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0  # integral of dndlnM dM
-    fcoll_ion_ST = np.trapz(f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0
+    # fcoll_ST = np.trapz(f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0  # integral of dndlnM dM
+    fcoll_ion_ST = np.trapz(
+        f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],
+        HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0
 
     return fcoll_ion_ST
 
-def f_coll_PS(param,Mmin,z):
+
+def f_coll_PS(param, Mmin, z):
     """
     param : beorn param file
     Fraction of total matter that "collapsed" into ionising photons assuming a PS HMF (i.e p=0,q=1)
@@ -226,16 +317,20 @@ def f_coll_PS(param,Mmin,z):
     HMF = halomassfct(par)
     HMF.generate_HMF(par)
     ind_min = np.argmin(np.abs(HMF.tab_M - Mmin))
-    fcoll_PS = np.trapz( f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0  # integral de dndlnM dM
+    fcoll_PS = np.trapz(
+        f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],
+        HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0  # integral de dndlnM dM
     return fcoll_PS
+
 
 def W_tophat(x):
     """
     Tophat filter in Fourier space.
     """
-    return 3*(np.sin(x)-x*np.cos(x))/x**3
+    return 3 * (np.sin(x) - x * np.cos(x)) / x ** 3
 
-def Variance(param,mm):
+
+def Variance(param, mm):
     """
     param : beorn param file
     Sigma^2 at z=0. Used to compute the barrier.
@@ -249,22 +344,33 @@ def Variance(param,mm):
     return Var, dVar_dM
 
 
-def f_Conditional(dc,S,dc0,S0):
+def f_Conditional(dc, S, dc0, S0):
     """
     Conditional first crossing distribution. Neede for the subhalo mass function in the fcoll formula.
     """
 
     warnings.filterwarnings("ignore")
-    return (dc-dc0)/np.sqrt(2*np.pi*(S-S0)**3)*np.exp(-(dc-dc0)**2/2/(S-S0))
+    Delta_d = dc - dc0
+    Delta_S = S - S0
+    Delta_d[np.where(Delta_d <= 0)] = 0
+    Delta_S[np.where(Delta_S <= 0)] = 1e-50
+
+    return Delta_d / np.sqrt(2 * np.pi * Delta_S ** 3) * np.exp(-Delta_d ** 2 / 2 / Delta_S)
+
 
 delta_c0 = 1.686
-def delta_c(z,par):
-    return par.exc_set.delta_c / D(1/(z+1),par)
 
-def R_of_M(M,par):
+
+def delta_c(z, par):
+    return par.hmf.delta_c / D(1 / (z + 1), par)
+
+
+def R_of_M(M, par):
     return (3 * M / (4 * rhoc0 * par.cosmo.Om * np.pi)) ** (1. / 3)
-def M_of_R(R,par):
-    return 4 * rhoc0 * par.cosmo.Om * np.pi * R**3/3
+
+
+def M_of_R(R, par):
+    return 4 * rhoc0 * par.cosmo.Om * np.pi * R ** 3 / 3
 
 
 def HMF_par(param):
@@ -283,24 +389,23 @@ def HMF_par(param):
     """
 
     par = dm.par()
-    par.cosmo.Om   = param.cosmo.Om
-    par.cosmo.Ob   = param.cosmo.Ob
-    par.cosmo.Ol   = 1 - param.cosmo.Om
-    par.cosmo.h    = param.cosmo.h
-    par.PS.c       = param.exc_set.c
+    par.cosmo.Om = param.cosmo.Om
+    par.cosmo.Ob = param.cosmo.Ob
+    par.cosmo.Ol = 1 - param.cosmo.Om
+    par.cosmo.h = param.cosmo.h
+    par.PS.c = param.exc_set.c
     par.PS.delta_c = param.exc_set.delta_c
-    par.PS.p       = param.exc_set.p
-    par.PS.filter  = param.exc_set.filter
-    par.PS.q       = param.exc_set.q
-    par.PS.A       = param.exc_set.A
+    par.PS.p = param.exc_set.p
+    par.PS.filter = param.exc_set.filter
+    par.PS.q = param.exc_set.q
+    par.PS.A = param.exc_set.A
     return par
-
-
 
 
 from beorn.astro import f_star_Halo, f_esc
 
-def Nion_(Mh,param):
+
+def Nion_(Mh, param):
     """
     Number of ionising photons for a given halo. This function is used for the Sem Num method of Majumdar 2014.
 
@@ -313,16 +418,15 @@ def Nion_(Mh,param):
     -------
     The total number of ionising photons produced by Mh.
     """
-    Nion, Om, Ob, h0 = param.source.Nion, param.cosmo.Om,param.cosmo.Ob,param.cosmo.h
+    Nion, Om, Ob, h0 = param.source.Nion, param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
     if param.source.type == 'Ghara':
         print('CAREFUL, Ghara source type is chosen, Nion becomes just a fine tuning multiplicative factor')
-        return param.source.Nion * 1.33 * 1e43 * Mh/h0 * 1e7 * sec_per_year ### multiplying by 10 Myr expressed in seconds
-    else :
-        return f_star_Halo(param,Mh) * f_esc(param,Mh) * Ob/Om * Mh/h0 / m_p_in_Msun * Nion
+        return param.source.Nion * 1.33 * 1e43 * Mh / h0 * 1e7 * sec_per_year  ### multiplying by 10 Myr expressed in seconds
+    else:
+        return f_star_Halo(param, Mh) * f_esc(param, Mh) * Ob / Om * Mh / h0 / m_p_in_Msun * Nion
 
 
-
-def Nion_new(Mh,z,param):
+def Nion_new(Mh, z, param):
     """
     NOT USED !!
     Consistent way of computing this for a non flat fesc and fstar (integral of Nion_dot)
@@ -338,12 +442,10 @@ def Nion_new(Mh,z,param):
     The total number of ionising photons produced by Mh.
     """
     zmax = 30
-    zz   = np.arange(z,zmax,0.2)
-    Mh_z = Mh * np.exp(-param.source.alpha_MAR*(zz-z))
-    dNion_dz = Ngdot_ion(param, zz, Mh_z)/((zz + 1) * Hubble(zz, param)  )*sec_per_year
-    return np.trapz(dNion_dz,zz)
-
-
+    zz = np.arange(z, zmax, 0.2)
+    Mh_z = Mh * np.exp(-param.source.alpha_MAR * (zz - z))
+    dNion_dz = Ngdot_ion(param, zz, Mh_z) / ((zz + 1) * Hubble(zz, param)) * sec_per_year
+    return np.trapz(dNion_dz, zz)
 
 
 def run_Sem_Num(param):
@@ -365,9 +467,10 @@ def run_Sem_Num(param):
     catalog_dir = param.sim.halo_catalogs
     model_name = param.sim.model_name
 
-    if catalog_dir is None :
+    if catalog_dir is None:
         print('You should specify param.sim.halo_catalogs. Should be a file containing the halo catalogs.')
-    print('Applying Sem Numerical Method on top of halos to produce ionisation maps, with', nGrid,'pixels per dim. Box size is',LBox ,'cMpc/h.')
+    print('Applying Sem Numerical Method on top of halos to produce ionisation maps, with', nGrid,
+          'pixels per dim. Box size is', LBox, 'cMpc/h.')
 
     if param.sim.cores > 1:
         import mpi4py.MPI
@@ -379,23 +482,20 @@ def run_Sem_Num(param):
 
     for ii, filename in enumerate(os.listdir(catalog_dir)):
         if rank == ii % size:
-            print('Core nbr',rank,'is taking care of snap',filename[4:-5])
-            if exists('./grid_output/xHII_Sem_Num_' + str(nGrid)+ '_' + model_name + '_snap' + filename[4:-5]):
-                print('xHII map for snapshot ',filename[4:-5],'already painted. Skiping.')
+            print('Core nbr', rank, 'is taking care of snap', filename[4:-5])
+            if exists('./grid_output/xHII_Sem_Num_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
+                print('xHII map for snapshot ', filename[4:-5], 'already painted. Skiping.')
             else:
                 print('----- SemNum for snapshot nbr :', filename[4:-5], '-------')
-                Sem_Num(filename,param)
+                Sem_Num(filename, param)
                 print('----- Snapshot nbr :', filename[4:-5], ' is done -------')
 
     end_time = datetime.datetime.now()
-    print('DONE. Stored the xHII grid. It took in total: ',end_time-start_time,'to do the Semi Num method.')
+    print('DONE. Stored the xHII grid. It took in total: ', end_time - start_time, 'to do the Semi Num method.')
     print('  ')
 
 
-
-
-
-def Sem_Num(filename,param):
+def Sem_Num(filename, param):
     """
     Produces xHII map with Sem Num method for a single snapshot.
 
@@ -410,14 +510,15 @@ def Sem_Num(filename,param):
     """
 
     start_time = datetime.datetime.now()
-    nGrid       = param.sim.Ncell
-    Lbox        = param.sim.Lbox
-    z_start     = param.solver.z_max
+    nGrid = param.sim.Ncell
+    Lbox = param.sim.Lbox
+    z_start = param.solver.z_max
     halo_catalog = load_f(param.sim.halo_catalogs + filename)
     model_name = param.sim.model_name
-    H_Masses, H_X, H_Y, H_Z, z = halo_catalog['M'], halo_catalog['X'], halo_catalog['Y'], halo_catalog['Z'], halo_catalog['z']
+    H_Masses, H_X, H_Y, H_Z, z = halo_catalog['M'], halo_catalog['X'], halo_catalog['Y'], halo_catalog['Z'], \
+                                 halo_catalog['z']
 
-    delta_field = load_delta_b(param,filename) # load the overdensity field delta = rho/rho_bar-1
+    delta_field = load_delta_b(param, filename)  # load the overdensity field delta = rho/rho_bar-1
 
     n_rec = param.exc_set.n_rec
     Nion, Om, Ob, h0 = param.source.Nion, param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
@@ -427,8 +528,8 @@ def Sem_Num(filename,param):
     rx, ry, rz = np.meshgrid(x, x, x, sparse=True)
     rgrid = np.sqrt(rx ** 2 + ry ** 2 + rz ** 2)
 
-    ion_map  = np.zeros((nGrid, nGrid, nGrid))  # This will be our final xHII map.
-    Rsmoothing_Max = param.exc_set.R_max        # Mpc/h, max distance to which we smooth
+    ion_map = np.zeros((nGrid, nGrid, nGrid))  # This will be our final xHII map.
+    Rsmoothing_Max = param.exc_set.R_max  # Mpc/h, max distance to which we smooth
 
     M_Bin = np.logspace(np.log10(param.sim.Mh_bin_min), np.log10(param.sim.Mh_bin_max), param.sim.binn, base=10)
     Mh_bin_z = M_Bin * np.exp(-param.source.alpha_MAR * (z - z_start))
@@ -447,47 +548,54 @@ def Sem_Num(filename,param):
 
         Nion_grid = np.zeros((nGrid, nGrid, nGrid))  # grid containing the value of Nion (see Majumdar14 eq.3)
 
-
         for ih in range(len(Mh_bin_z)):
-            if param.source.M_min<Mh_bin_z[ih]:
-               # source_grid = np.zeros((nGrid, nGrid, nGrid))
+            if param.source.M_min < Mh_bin_z[ih]:
+                # source_grid = np.zeros((nGrid, nGrid, nGrid))
                 indices = np.where(Indexing == ih)
 
-                base_nGrid_position = Pos_Bubbles_Grid[indices][:, 0] + nGrid * Pos_Bubbles_Grid[indices][:, 1] + nGrid ** 2 * Pos_Bubbles_Grid[ indices][:, 2]
+                base_nGrid_position = Pos_Bubbles_Grid[indices][:, 0] + nGrid * Pos_Bubbles_Grid[indices][:,
+                                                                                1] + nGrid ** 2 * Pos_Bubbles_Grid[
+                                                                                                      indices][:, 2]
                 unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
 
                 ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
                 YY_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2) // nGrid
                 XX_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2 - YY_indice * nGrid)
-                Nion_grid[XX_indice, YY_indice, ZZ_indice] += Nion_(Mh_bin_z[ih],param) * nbr_of_halos
+                Nion_grid[XX_indice, YY_indice, ZZ_indice] += Nion_(Mh_bin_z[ih], param) * nbr_of_halos
 
-                #for i, j, k in Pos_Bubbles_Grid[indices]:
+                # for i, j, k in Pos_Bubbles_Grid[indices]:
                 #   source_grid[i, j, k] += 1
-                #Nion_grid += source_grid * Nion_(Mh_bin_z[ih], param)
-            #Nion_grid += source_grid * Nion_new(Mh_bin_z[ih],z, param)
+                # Nion_grid += source_grid * Nion_(Mh_bin_z[ih], param)
+            # Nion_grid += source_grid * Nion_new(Mh_bin_z[ih],z, param)
 
-
-        print('Ion Fraction should be  ',round(np.sum(Nion_grid)/(rhoc0*Ob/h0/m_p_in_Msun * Lbox**3)/n_rec, 3)) #theoretically expected value (Nion_to/N_H_tot)
+        print('Ion Fraction should be  ', round(np.sum(Nion_grid) / (rhoc0 * Ob / h0 / m_p_in_Msun * Lbox ** 3) / n_rec,
+                                                3))  # theoretically expected value (Nion_to/N_H_tot)
 
         Rsmoothing = pixel_size
         ii = 0
-        nbr_ion_pix = 1 # arbitraty value larger than 0
-        while Rsmoothing < Rsmoothing_Max and nbr_ion_pix > 0 and np.mean(ion_map) < 1: # to stop the while loop earlier if there is no more ionisation.
+        nbr_ion_pix = 1  # arbitraty value larger than 0
+        while Rsmoothing < Rsmoothing_Max and nbr_ion_pix > 0 and np.mean(
+                ion_map) < 1:  # to stop the while loop earlier if there is no more ionisation.
             kern = profile_kern(rgrid, Rsmoothing)
-            smooth_delta = convolve_fft(delta_field, kern, boundary='wrap', normalize_kernel=True,allow_huge=True)  # Smooth the density field
-            nbr_H = (smooth_delta + 1) * rhoc0 * Ob / h0 / m_p_in_Msun * pixel_size ** 3 # Grid with smoothed number of H atom per pixel.
-            Nion_grid_smoothed = convolve_fft(Nion_grid, kern, boundary='wrap', normalize_kernel=True,allow_huge=True)  ## Grid with smoothed the nbr of ionising photons
-            ion_map[np.where(Nion_grid_smoothed / nbr_H / n_rec >= 1)] = 1  # compare Nion and nH in each pixel. Ionised when Nion/N_H/n_rec >= 1
+            smooth_delta = convolve_fft(delta_field, kern, boundary='wrap', normalize_kernel=True,
+                                        allow_huge=True)  # Smooth the density field
+            nbr_H = (
+                                smooth_delta + 1) * rhoc0 * Ob / h0 / m_p_in_Msun * pixel_size ** 3  # Grid with smoothed number of H atom per pixel.
+            Nion_grid_smoothed = convolve_fft(Nion_grid, kern, boundary='wrap', normalize_kernel=True,
+                                              allow_huge=True)  ## Grid with smoothed the nbr of ionising photons
+            ion_map[np.where(
+                Nion_grid_smoothed / nbr_H / n_rec >= 1)] = 1  # compare Nion and nH in each pixel. Ionised when Nion/N_H/n_rec >= 1
             Rsmoothing = Rsmoothing * 1.1
             nbr_ion_pix = len(np.where(Nion_grid_smoothed / nbr_H / n_rec >= 1)[0])
             if ii % 5 == 0:
-                print('Rsmoothing is', Rsmoothing, 'there are ', len(np.where(Nion_grid_smoothed / nbr_H / 1.5 >= 1)[0]),'ionisations.', 'mean Nion is')
+                print('Rsmoothing is', Rsmoothing, 'there are ',
+                      len(np.where(Nion_grid_smoothed / nbr_H / 1.5 >= 1)[0]), 'ionisations.', 'mean Nion is')
             ii += 1
 
         ##partial ionisations
         nbr_H = (delta_field + 1) * rhoc0 * Ob / h0 / m_p_in_Msun * pixel_size ** 3
-        ion_map[np.where(Nion_grid / nbr_H/n_rec >= 1)] = 1
-        xHII_partial = Nion_grid / nbr_H/n_rec
+        ion_map[np.where(Nion_grid / nbr_H / n_rec >= 1)] = 1
+        xHII_partial = Nion_grid / nbr_H / n_rec
         indices_partial = np.where(ion_map < 1)
         ion_map[indices_partial] = xHII_partial[indices_partial]
 
@@ -495,5 +603,5 @@ def Sem_Num(filename,param):
         ion_map = np.array([1])
 
     end_time = datetime.datetime.now()
-    print('Done with z=', z,': xHII =', np.mean(ion_map),'it took :',end_time-start_time)
-    save_f(file = './grid_output/xHII_Sem_Num_' + str(nGrid)+ '_' + model_name + '_snap' + filename[4:-5], obj = ion_map)
+    print('Done with z=', z, ': xHII =', np.mean(ion_map), 'it took :', end_time - start_time)
+    save_f(file='./grid_output/xHII_Sem_Num_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5], obj=ion_map)
