@@ -86,7 +86,7 @@ def simulate_matter_21cmfast(param, IC=None, data_dir=None):
                                     POWER_INDEX=param.cosmo.ns,
                                     )
 
-    random_seed = 123456
+    random_seed = param.sim.random_seed
     print('random seed is : ', random_seed)
     print('We will store halo catalogs in ', param.sim.halo_catalogs,'and density fields in ', param.sim.dens_field)
 

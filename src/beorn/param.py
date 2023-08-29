@@ -77,6 +77,7 @@ def sim_par(): ## used when computing and painting profiles on a grid
         "approx" : True,            ## when spreading the excess ionisation fraction and running distance_tranform_edt, whether or not to do the subgrid approx.
         "nGrid_min_heat": 4,             ## stacked_T_kernel
         "nGrid_min_lyal": 32,            ## stacked_lyal_kernel
+        "random_seed": 12345,            ## when using 21cmFAST 2LPT solver.
     }
     return Bunch(par)
 
