@@ -58,7 +58,7 @@ def compute_profiles(param):
 
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
-                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False,third_order = False):
+                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
 
@@ -157,7 +157,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                         ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
                         base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,
                                                                                       1] + nGrid ** 2 * Pos_Halos_Grid[
-                                                                                                            indices][:, 2]
+                                                                                                            indices][:,
+                                                                                                        2]
                         unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
 
                         ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
@@ -184,7 +185,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                         LBox / (1 + z)) ** 3 / np.mean(kernel_xHII)
                                 # extra_ion = put_profiles_group(Pos_Halos_Grid[indices], kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(kernel_xHII) / 1e-7 * renorm
 
-                                extra_ion = put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
+                                extra_ion = put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
+                                                               nbr_of_halos,
                                                                kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(
                                     kernel_xHII) / 1e-7 * renorm
                                 # bubble_volume = np.trapz(4 * np.pi * radial_grid ** 2 * x_HII_profile, radial_grid)
@@ -199,8 +201,10 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                     LBox / (1 + z)) ** 3 / np.mean(kernel_xal)
                             if np.any(kernel_xal > 0):
                                 # Grid_xal += put_profiles_group(Pos_Halos_Grid[indices], kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum( kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
-                                Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
-                                                               kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum(
+                                Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
+                                                               nbr_of_halos,
+                                                               kernel_xal * 1e-7 / np.sum(
+                                                                   kernel_xal)) * renorm * np.sum(
                                     kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
 
                         if temp:
@@ -210,7 +214,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                     LBox / (1 + z)) ** 3 / np.mean(kernel_T)
                             if np.any(kernel_T > 0):
                                 # Grid_Temp += put_profiles_group(Pos_Halos_Grid[indices],  kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(kernel_T) / 1e-7 * renorm
-                                Grid_Temp += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)), nbr_of_halos,
+                                Grid_Temp += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
+                                                                nbr_of_halos,
                                                                 kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(
                                     kernel_T) / 1e-7 * renorm
 
@@ -239,7 +244,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                     Grid_xHII = np.array([1])
 
                 Grid_Temp += T_adiab_fluctu(z, param, delta_b)
-
 
             if read_temp:
                 Grid_Temp = load_grid(param, z=z, type='Tk')
@@ -292,7 +296,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
                   'x_coll': np.mean(Grid_xcoll)}
     if cross_corr:
-        GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,third_order=third_order)
+        GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
+                                                third_order=third_order)
 
     save_f(file='./physics/GS_PS_' + z_str, obj=GS_PS_dict)
 
@@ -369,7 +374,7 @@ def def_k_bins(param):
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
-                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False,third_order=False):
+                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False):
     """
     Parameters
     ----------
@@ -415,14 +420,14 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                     print('----- Painting 3D map for z =', z, '-------')
                     paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                               read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                              cross_corr=cross_corr,third_order = third_order)
+                                              cross_corr=cross_corr, third_order=third_order)
                     print('----- Snapshot at z = ', z, ' is done -------')
                     print(' ')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                           read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                          cross_corr=cross_corr,third_order=third_order)
+                                          cross_corr=cross_corr, third_order=third_order)
                 print('----- Snapshot at z = ', z, ' is done -------')
                 print(' ')
 
@@ -582,7 +587,7 @@ def delta_fct(grid):
     return grid / np.mean(grid) - 1
 
 
-def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho,third_order=False):
+def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho, third_order=False):
     import tools21cm as t2c
     nGrid = param.sim.Ncell
     Lbox = param.sim.Lbox  # Mpc/h
@@ -627,12 +632,18 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
                        'PS_rho_xal': PS_rho_xal, 'PS_rho_T': PS_rho_T}
 
     if third_order:
-        PS_rTT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[0]
-        PS_raa = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
-        PS_rbb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rTb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_aTr = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
-        PS_abr = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rTT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[
+            0]
+        PS_raa = \
+        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rbb = \
+        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rTb = \
+        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_aTr = \
+        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_abr = \
+        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
         PS_rrT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_rra = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_rrb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_rho, box_dims=Lbox, kbins=kbins)[0]
@@ -640,16 +651,20 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         PS_rTrT = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_rara = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_rbrb = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rarb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_XHII * delta_rho, box_dims=Lbox,
+        PS_rarb = \
+        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_XHII * delta_rho, box_dims=Lbox,
                                                    kbins=kbins)[0]
-        PS_rTrb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_rho, box_dims=Lbox,
+        PS_rTrb = \
+        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_rho, box_dims=Lbox,
                                                    kbins=kbins)[0]
-        PS_rTra = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_x_al, box_dims=Lbox,
+        PS_rTra = \
+        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_x_al, box_dims=Lbox,
                                                    kbins=kbins)[0]
 
-        Dict_3rd_order = {'PS_rTT':PS_rTT ,'PS_raa':PS_raa ,'PS_rbb':PS_rbb ,'PS_rTb':PS_rTb ,'PS_aTr':PS_aTr ,
-                          'PS_abr':PS_abr ,'PS_rrT':PS_rrT ,'PS_rra':PS_rra ,'PS_rrb':PS_rrb ,'PS_rTrT':PS_rTrT,
-                          'PS_rara':PS_rara,'PS_rbrb':PS_rbrb,'PS_rarb':PS_rarb,'PS_rTrb':PS_rTrb,'PS_rTra':PS_rTra}
+        Dict_3rd_order = {'PS_rTT': PS_rTT, 'PS_raa': PS_raa, 'PS_rbb': PS_rbb, 'PS_rTb': PS_rTb, 'PS_aTr': PS_aTr,
+                          'PS_abr': PS_abr, 'PS_rrT': PS_rrT, 'PS_rra': PS_rra, 'PS_rrb': PS_rrb, 'PS_rTrT': PS_rTrT,
+                          'PS_rara': PS_rara, 'PS_rbrb': PS_rbrb, 'PS_rarb': PS_rarb, 'PS_rTrb': PS_rTrb,
+                          'PS_rTra': PS_rTra}
         dict_cross_corr = Merge(Dict_3rd_order, dict_cross_corr)
 
     return Merge(GS_PS_dict, dict_cross_corr)
@@ -1074,6 +1089,7 @@ def compute_variance(param):
     print('Finished computing variances. It took in total: ', end_time - start_time)
     print('  ')
 
+
 def gather_variances(param):
     """
     gather all variances files at different z into a single file
@@ -1093,7 +1109,7 @@ def gather_variances(param):
     z_arr = def_redshifts(param)
     for ii, z in enumerate(z_arr):
         z_str = z_string_format(z)
-        file = './variances/var_z' + z_str + '.pkl'
+        file = './variances/var_z' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
         if exists(file):
             var_z = load_f(file)
             for key, value in var_z.items():
@@ -1107,6 +1123,7 @@ def gather_variances(param):
     dd['R'] = var_z['R']
 
     save_f(file='./variances/var_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
+
 
 def compute_var_single_z(param, z):
     Grid_Temp = load_grid(param, z=z, type='Tk')
@@ -1134,7 +1151,7 @@ def compute_var_single_z(param, z):
     variance_Temp, R_scale, k_values = compute_var_field(param, delta_fct(Grid_Temp))
     print('nbr of scales is', len(k_values))
 
-    save_f(file='./variances/var_z' + z_string_format(z) + '.pkl',
+    save_f(file='./variances/var_z' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
            obj={'z': z, 'var_lyal': np.array(variance_lyal), 'var_xHII': np.array(variance_xHII)
                , 'var_Temp': np.array(variance_Temp), 'k': k_values, 'R': R_scale})
 
@@ -1223,10 +1240,12 @@ def compute_corr_fct(param):
         Xi_TTb[ii] = np.mean(delta_Tk ** 2 * delta_b)
         Xi_TTrb[ii] = np.mean(delta_Tk ** 2 * delta_xHII * delta_b)
 
-    Dict = {'z': np.array(z_arr),'Xi_TT':Xi_TT,'Xi_aa':Xi_aa,'Xi_Tb':Xi_Tb,'Xi_rT':Xi_rT,'Xi_ar':Xi_ar,'Xi_aT':Xi_aT,'Xi_rb':Xi_rb,'Xi_ab':Xi_ab,
-            'Xi_rba':Xi_rba,'Xi_rbT':Xi_rbT,'Xi_raT':Xi_raT,'Xi_raa':Xi_raa,'Xi_rTT':Xi_rTT,
-            'Xi_aTb': Xi_aTb, 'Xi_aTrb': Xi_aTrb, 'Xi_aab': Xi_aab, 'Xi_aarb': Xi_aarb, 'Xi_TTb': Xi_TTb,'Xi_TTrb': Xi_TTrb}
+    Dict = {'z': np.array(z_arr), 'Xi_TT': Xi_TT, 'Xi_aa': Xi_aa, 'Xi_Tb': Xi_Tb, 'Xi_rT': Xi_rT, 'Xi_ar': Xi_ar,
+            'Xi_aT': Xi_aT, 'Xi_rb': Xi_rb, 'Xi_ab': Xi_ab,
+            'Xi_rba': Xi_rba, 'Xi_rbT': Xi_rbT, 'Xi_raT': Xi_raT, 'Xi_raa': Xi_raa, 'Xi_rTT': Xi_rTT,
+            'Xi_aTb': Xi_aTb, 'Xi_aTrb': Xi_aTrb, 'Xi_aab': Xi_aab, 'Xi_aarb': Xi_aarb, 'Xi_TTb': Xi_TTb,
+            'Xi_TTrb': Xi_TTrb}
     end_time = time.time()
     print('Finished computing Xi at r=0. It took in total: ', print_time(end_time - start_time))
     print('  ')
-    save_f(file='./variances/Xi_corr_fct_'+str(param.sim.Ncell)+'.pkl', obj=Dict)
+    save_f(file='./variances/Xi_corr_fct_' + str(param.sim.Ncell) + '.pkl', obj=Dict)
