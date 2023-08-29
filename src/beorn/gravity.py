@@ -41,8 +41,6 @@ def initialise_21cmfast(param, data_dir=None):
                                     OMb=param.cosmo.Ob,
                                     POWER_INDEX=param.cosmo.ns,
                                     )
-    Tvir = M_to_Tvir(param.source.M_min / param.cosmo.h, param.solver.z_end, param)
-    astro_params = p21c.AstroParams({"ION_Tvir_MIN": Tvir})
     random_seed = param.sim.random_seed
 
     with p21c.global_params.use(INITIAL_REDSHIFT=300, CLUMPING_FACTOR=2.0):
@@ -87,7 +85,7 @@ def simulate_matter_21cmfast(param, IC=None, data_dir=None):
                                     OMb=param.cosmo.Ob,
                                     POWER_INDEX=param.cosmo.ns,
                                     )
-    
+
     random_seed = 123456
     print('random seed is : ', random_seed)
     print('We will store halo catalogs in ', param.sim.halo_catalogs,'and density fields in ', param.sim.dens_field)
