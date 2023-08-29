@@ -92,6 +92,8 @@ def simulate_matter_21cmfast(param, IC=None, data_dir=None):
 
     redshift_list = def_redshifts(param)
 
+    if param.sim.dens_field  is None or param.sim.halo_catalogs is None:
+        print('You should specify a path for param.sim.dens_field and param.sim.halo_catalogs. It should be of the form path+dir+name. For instance param.sim.dens_field = ./dir_density/dens_21cmFast_z')
     with p21c.global_params.use(INITIAL_REDSHIFT=300, CLUMPING_FACTOR=2.0):
         for redshift in redshift_list:
             if IC is None:
