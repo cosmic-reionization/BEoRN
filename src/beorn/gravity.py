@@ -74,7 +74,6 @@ def simulate_matter_21cmfast(param, IC=None, data_dir=None):
     start_time = time.time()
     print('Simulating matter evolution with 21cmFast...')
 
-    data_dir = param.sim.data_dir
     user_params = p21c.UserParams({"HII_DIM": param.sim.Ncell, "DIM": param.sim.Ncell * 3,
                                    "BOX_LEN": param.sim.Lbox / param.cosmo.h,
                                    "USE_INTERPOLATION_TABLES": True,
