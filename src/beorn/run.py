@@ -1133,8 +1133,8 @@ def compute_var_single_z(param, z):
     Lbox = param.sim.Lbox  # Mpc/h
     nGrid = param.sim.Ncell  # number of grid cells
     kmin = 2 * np.pi / Lbox
-    kmax = 2
-    kbin = int(6 * np.log10(kmax / kmin))
+    kmax = 2 * np.pi / Lbox * param.sim.Ncell
+    kbin = int(3 * np.log10(kmax / kmin))
     param.sim.kmin = kmin
     param.sim.kmax = kmax
     param.sim.kbin = kbin
