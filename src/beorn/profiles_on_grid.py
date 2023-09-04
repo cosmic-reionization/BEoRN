@@ -5,9 +5,54 @@ from skimage.measure import label
 from scipy.ndimage import distance_transform_edt
 from astropy.convolution import convolve_fft
 import datetime
-from scipy.interpolate import splrep,splev, interp1d
+from scipy.interpolate import splrep, splev, interp1d
 import time
 from .functions import print_time
+from .cloud_in_cell import CIC_coefficients
+
+
+def cumulated_number_halos(param, H_X, H_Y, H_Z, cic=False):
+    """
+     Returns the number of halo per grid pixel, for halos belonging to a mass bin.
+     This function is called in paint_profile_single_snap, in run.py
+
+     Parameters
+     ----------
+     H_X, H_Y, H_Z  : arrays with X,Y,Z positions of halos (in a mass bin), expressed in real spatial unit (Mpc/h)
+     cic  : boolean, to turn or not the cloud in cell option.
+
+     Returns
+     -------
+     unique_base_nGrid_poz : an array with all the cells occupied by halos, expressed in base nGrid
+     nbr_of_halos : array of same size with the cumulated number of halos per pixel
+    """
+    LBox = param.sim.Lbox  # Mpc/h
+    nGrid = param.sim.Ncell  # number of grid cells
+
+    if not cic:
+        Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
+        Pos_Halos_Grid = np.array([Pos_Halos / LBox * nGrid]).astype(int)[0]
+        Pos_Halos_Grid[np.where(
+            Pos_Halos_Grid == nGrid)] = nGrid - 1  # we don't want Pos_Halos_Grid==nGrid. This only happens if Pos_Bubbles=LBox
+        base_nGrid_position = Pos_Halos_Grid[:, 0] + nGrid * Pos_Halos_Grid[:, 1] + nGrid ** 2 * Pos_Halos_Grid[:, 2]
+        unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
+
+    if cic:
+        pixel_coordinates_output, cic_coeff_output = CIC_coefficients(param, H_X, H_Y, H_Z)
+        base_nGrid_cic_position = pixel_coordinates_output[0] + nGrid * pixel_coordinates_output[1] + nGrid ** 2 * \
+                                  pixel_coordinates_output[2]
+        unique_positions = np.unique(base_nGrid_cic_position)
+        cumulated_coeff = np.zeros(len(unique_positions))
+        ## cumulated cic coeff for each pixel in "unique_values"
+        for i in range(len(unique_positions)):
+            indexes = np.where(base_nGrid_cic_position == unique_positions[i])
+            cumulated_coeff[i] = np.sum(cic_coeff_output[indexes])
+            # each "unique_positions" (pixel coordinate expressed in base_n_grid) has
+            # a cumulated cic coeff of "cumulated_coeff"
+        unique_base_nGrid_poz, nbr_of_halos = unique_positions, cumulated_coeff
+
+    return unique_base_nGrid_poz, nbr_of_halos
+
 
 ## Creating a profile kernel
 def profile_to_3Dkernel(profile, nGrid, LB):
@@ -30,8 +75,7 @@ def profile_to_3Dkernel(profile, nGrid, LB):
     return kern
 
 
-
-def put_profiles_group(source_pos,nbr_of_halos, profile_kern, nGrid=None):
+def put_profiles_group(source_pos, nbr_of_halos, profile_kern, nGrid=None):
     '''
     source_pos : the position of halo centered in units number of grid cell (0..nGrid-1). shape is (3,N), with N the number of halos. (X,Y,Z)
     nbr_of_halos : the number of halos in each source_pos (>0), array of size len(source_pos)
@@ -41,13 +85,11 @@ def put_profiles_group(source_pos,nbr_of_halos, profile_kern, nGrid=None):
     '''
     if nGrid is None: nGrid = profile_kern.shape[0]
     source_grid = np.zeros((nGrid, nGrid, nGrid))
-    #for i, j, k in source_pos:
+    # for i, j, k in source_pos:
     #    source_grid[i, j, k] += 1
-    source_grid[source_pos[0],source_pos[1],source_pos[2]] = nbr_of_halos
-    out = convolve_fft(source_grid, profile_kern,boundary='wrap',normalize_kernel = False,allow_huge=True)
+    source_grid[source_pos[0], source_pos[1], source_pos[2]] = nbr_of_halos
+    out = convolve_fft(source_grid, profile_kern, boundary='wrap', normalize_kernel=False, allow_huge=True)
     return out
-
-
 
 
 def Spreading_Excess(Grid_Storage):
@@ -72,7 +114,7 @@ def Spreading_Excess(Grid_Storage):
     X_Ion_Tot_i = np.sum(Grid)
     print('initial sum of ionized fraction :', int(np.sum(Grid)))
 
-    if X_Ion_Tot_i > Grid.size :
+    if X_Ion_Tot_i > Grid.size:
         print('Universe is fully ionized.')
         return 1
 
@@ -95,7 +137,8 @@ def Spreading_Excess(Grid_Storage):
             if excess_ion > 1e-7:  ### small value but non zero to avoid doing that step when excess ion is very small
                 dist_from_boundary = distance_transform_edt(Inverted_grid)
                 dist_from_boundary[np.where(dist_from_boundary == 0)] = 2 * nGrid  ### eliminate pixels inside boundary
-                dist_from_boundary[np.where(Grid > 1)] = 2 * nGrid  ### eliminate pixels that already have excess x_ion (belonging to another connected regions..)
+                dist_from_boundary[np.where(
+                    Grid > 1)] = 2 * nGrid  ### eliminate pixels that already have excess x_ion (belonging to another connected regions..)
                 minimum = np.min(dist_from_boundary)
                 boundary = np.where(
                     dist_from_boundary == minimum)  # np.where((dist_from_boundary == minimum )& ( Grid<1))
@@ -109,7 +152,7 @@ def Spreading_Excess(Grid_Storage):
                 else:
 
                     while np.sum(1 - Grid[boundary]) < excess_ion:
-                        #print('have to go for more than 1 layer')
+                        # print('have to go for more than 1 layer')
                         sum_distributed_xion += np.sum(1 - Grid[boundary])
                         excess_ion = excess_ion - np.sum(1 - Grid[boundary])
                         Grid[boundary] = 1
@@ -137,7 +180,7 @@ def Spreading_Excess(Grid_Storage):
     return Grid
 
 
-def Spreading_Excess_Fast(param,Grid_input,plot__=False):
+def Spreading_Excess_Fast(param, Grid_input, plot__=False):
     """
     Last and fastest version of the function.
     Input : Grid_Storage, the cosmological mesh grid (X,X,X) with the ionized fractions, with overlap (pixels where x_ion>1). (X can be 256, 512 ..)
@@ -152,9 +195,9 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
     nGrid = len(Grid_input[0])
     Grid = np.copy(Grid_input)
 
-    if param.sim.thresh_pixel is None :
+    if param.sim.thresh_pixel is None:
         pix_thresh = 80 * (nGrid / 256) ** 3
-    else :
+    else:
         pix_thresh = param.sim.thresh_pixel
 
     Binary_Grid = np.copy(Grid)
@@ -163,7 +206,6 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
 
     # The first region (i=0) is the still neutral IGM, in between the bubbles
     label_image = label(Binary_Grid)
-
 
     # Periodic boundary conditions for label_image
     # assign  same label to ionised regions that are connected through left/right, up/down, front/back box boundaries
@@ -189,38 +231,39 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
     print('Imposing PBC on label_image took', print_time(time.time()-t0_PBC))
     '''''''''
 
-    x_ion_tot_i= np.sum(Grid)
-    print('initial sum of ionized fraction :', round(np.sum(Grid),3))
-
-
-
+    x_ion_tot_i = np.sum(Grid)
+    print('initial sum of ionized fraction :', round(np.sum(Grid), 3))
 
     if x_ion_tot_i > Grid.size:
         print('Universe is fully ionized.')
         Grid = np.array([1])
 
     else:
-        print('Universe not fully ionized : xHII is', round(x_ion_tot_i / Grid.size,4))
+        print('Universe not fully ionized : xHII is', round(x_ion_tot_i / Grid.size, 4))
 
         region_nbr, size_of_region = np.unique(label_image, return_counts=True)
         print(len(region_nbr), 'connected regions.')
         label_max = np.max(label_image)
 
-        small_regions  = np.where(np.isin(label_image, region_nbr[np.where(size_of_region < pix_thresh)[0]]))        ## small_regions : Gridmesh indices gathering all the connected regions that have less than 10 pixels
-        Small_regions_labels = region_nbr[np.where(size_of_region < pix_thresh)[0]]                                     ## labels of the small regions. Use this to exclude them from the for loop
+        small_regions = np.where(np.isin(label_image, region_nbr[np.where(size_of_region < pix_thresh)[
+            0]]))  ## small_regions : Gridmesh indices gathering all the connected regions that have less than 10 pixels
+        Small_regions_labels = region_nbr[np.where(size_of_region < pix_thresh)[
+            0]]  ## labels of the small regions. Use this to exclude them from the for loop
 
         initial_excess = np.sum(Grid[small_regions] - 1)
         excess_ion = initial_excess
 
-        print('there are ', len(Small_regions_labels),'connected regions with less than ',pix_thresh,' pixels. They contain a fraction ', round(excess_ion / x_ion_tot_i,4),'of the total ionisation fraction.')
+        print('there are ', len(Small_regions_labels), 'connected regions with less than ', pix_thresh,
+              ' pixels. They contain a fraction ', round(excess_ion / x_ion_tot_i, 4),
+              'of the total ionisation fraction.')
 
-
-        Grid = Spread_Single(param,Grid, small_regions, print_time=None) # Do the spreading for the small regions
+        Grid = Spread_Single(param, Grid, small_regions, print_time=None)  # Do the spreading for the small regions
         if np.any(Grid[small_regions] > 1):
             print('small regions not correctly spread')
 
-        all_regions_labels = np.array(range(1, label_max+1))  # the remaining larges overlapping ionized regions
-        large_regions_labels = all_regions_labels[np.where(np.isin(all_regions_labels, Small_regions_labels) == False)[0]]  # indices of regions that have more than pix_thresh pixels
+        all_regions_labels = np.array(range(1, label_max + 1))  # the remaining larges overlapping ionized regions
+        large_regions_labels = all_regions_labels[np.where(np.isin(all_regions_labels, Small_regions_labels) == False)[
+            0]]  # indices of regions that have more than pix_thresh pixels
 
         # Then do the spreading individually for large regions
         for i, ir in enumerate(large_regions_labels):
@@ -228,12 +271,12 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
                 if i % 100 == 0:
                     print('doing region ', i, 'over ', len(large_regions_labels), ' regions in total')
             connected_indices = np.where(label_image == ir)
-            Grid = Spread_Single(param,Grid, connected_indices,  print_time=None)
+            Grid = Spread_Single(param, Grid, connected_indices, print_time=None)
 
         if np.any(Grid > 1.):
             print('Some grid pixels are still in excess.')
 
-        print('final xion sum: ', round(np.sum(Grid),3))
+        print('final xion sum: ', round(np.sum(Grid), 3))
         X_Ion_Tot_f = np.sum(Grid)
         if int(X_Ion_Tot_f) != int(x_ion_tot_i):
             print('Something is wrong when redistributing photons from the overlapping regions. See '
@@ -242,7 +285,7 @@ def Spreading_Excess_Fast(param,Grid_input,plot__=False):
     return Grid
 
 
-def Spread_Single(param,Grid, connected_indices, print_time=None):
+def Spread_Single(param, Grid, connected_indices, print_time=None):
     """
     This spreads the excess ionizing photons for a given region.
     Input :
@@ -277,13 +320,12 @@ def Spread_Single(param,Grid, connected_indices, print_time=None):
         Delta_max = np.max((Max_X - Min_X + 0, Max_Y - Min_Y + 0, Max_Z - Min_Z + 0))
         Center_X, Center_Y, Center_Z = int((Min_X + Max_X) / 2), int((Min_Y + Max_Y) / 2), int((Min_Z + Max_Z) / 2)
 
-
-        if param.sim.approx : # Is this flag is True, then you set the subgrid size
+        if param.sim.approx:  # Is this flag is True, then you set the subgrid size
             N_subgrid = 2 * (Delta_max + 2 * Delta_pixel)  ## length of subgrid embedding the connected region
             if N_subgrid % 2 == 1:
                 N_subgrid += 1  ###Nsubgrid needs to be even to make things easier
 
-        else : # Is approx is False, then set N_subgrid >nGrid, so that we never do the subbox trick (this is to check if the trick gives good results compared to the full)
+        else:  # Is approx is False, then set N_subgrid >nGrid, so that we never do the subbox trick (this is to check if the trick gives good results compared to the full)
             N_subgrid = nGrid + 1
 
         if N_subgrid > nGrid:
@@ -323,14 +365,18 @@ def Spread_Single(param,Grid, connected_indices, print_time=None):
                               (0, Center_Z + int(N_subgrid / 2) + 0 - nGrid)): np.min(
                               (nGrid, Center_Z + int(N_subgrid / 2) + 0)) + np.max((0, int(N_subgrid / 2) - Center_Z))]
 
-            while np.sum(1 - Sub_Grid) < excess_ion:  ### just check if Sub_Grid has enough room for excess_ion. If not, increase its size N_subgrid.
+            while np.sum(
+                    1 - Sub_Grid) < excess_ion:  ### just check if Sub_Grid has enough room for excess_ion. If not, increase its size N_subgrid.
                 N_subgrid = N_subgrid + 2
                 Sub_Grid = np.full(((N_subgrid, N_subgrid, N_subgrid)), 0)
                 Sub_Grid = Sub_Grid.astype('float64')
                 Sub_Grid[:] = Grid[np.max((Center_X - int(N_subgrid / 2), 0)) - np.max(
                     (0, Center_X + int(N_subgrid / 2) + 0 - nGrid)): np.min(
                     (nGrid, Center_X + int(N_subgrid / 2) + 0)) + np.max((0, int(N_subgrid / 2) - Center_X)),
-                              np.max((Center_Y - int(N_subgrid / 2), 0)) - np.max( (0, Center_Y + int(N_subgrid / 2) + 0 - nGrid)): np.min((nGrid, Center_Y + int(N_subgrid / 2) + 0)) + np.max((0, int(N_subgrid / 2) - Center_Y)),
+                              np.max((Center_Y - int(N_subgrid / 2), 0)) - np.max(
+                                  (0, Center_Y + int(N_subgrid / 2) + 0 - nGrid)): np.min(
+                                  (nGrid, Center_Y + int(N_subgrid / 2) + 0)) + np.max(
+                                  (0, int(N_subgrid / 2) - Center_Y)),
                               np.max((Center_Z - int(N_subgrid / 2), 0)) - np.max(
                                   (0, Center_Z + int(N_subgrid / 2) + 0 - nGrid)): np.min(
                                   (nGrid, Center_Z + int(N_subgrid / 2) + 0)) + np.max(
@@ -354,7 +400,8 @@ def Spread_Single(param,Grid, connected_indices, print_time=None):
 
             dist_from_boundary = distance_transform_edt(Sub_Inverted_Grid)
             dist_from_boundary[np.where(dist_from_boundary == 0)] = 2 * N_subgrid  ### eliminate pixels inside boundary
-            dist_from_boundary[np.where(Sub_Grid >= 1)] = 2 * N_subgrid  ### eliminate pixels that already have excess x_ion (belonging to another connected regions..)
+            dist_from_boundary[np.where(
+                Sub_Grid >= 1)] = 2 * N_subgrid  ### eliminate pixels that already have excess x_ion (belonging to another connected regions..)
             minimum = np.min(dist_from_boundary)
             boundary = np.where(dist_from_boundary == minimum)
 
@@ -365,7 +412,8 @@ def Spread_Single(param,Grid, connected_indices, print_time=None):
                 Sub_Grid[boundary] = 1
                 dist_from_boundary[boundary] = N_subgrid * 2  ### exclude this layer for nex
                 minimum = np.min(dist_from_boundary)
-                boundary = np.where(dist_from_boundary == minimum)  ### new closest region to fill # you go out of the *while* when np.sum(1 - Grid[boundary]) > excess_ion
+                boundary = np.where(
+                    dist_from_boundary == minimum)  ### new closest region to fill # you go out of the *while* when np.sum(1 - Grid[boundary]) > excess_ion
 
             residual_excess = (1 - Sub_Grid[boundary]) * excess_ion / np.sum(1 - Sub_Grid[boundary])
 
@@ -416,9 +464,9 @@ def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
         box_extension += 1  ### this need to be even to make things work
 
     kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, box_extension * nGrid_min, box_extension * LBox)
-   # kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, box_extension * nGrid_min, box_extension * LBox)
-    #nGrid_extd = box_extension * nGrid_min
-    #LBox_extd = box_extension * LBox  ## size and nbr of pix of the larger box
+    # kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, box_extension * nGrid_min, box_extension * LBox)
+    # nGrid_extd = box_extension * nGrid_min
+    # LBox_extd = box_extension * LBox  ## size and nbr of pix of the larger box
 
     stacked_xal_ker = np.zeros((nGrid_min, nGrid_min, nGrid_min))
     for ii in range(box_extension):  ## loop over the box_extension**3 subboxes and stack them
@@ -439,8 +487,6 @@ def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
     return kernel_xal_HM
 
 
-
-
 def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
     """
     Same as stacked_lyal_kernel but for Temperature profiles.
@@ -451,13 +497,13 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
     profile_T_HM = interp1d(rr_T, T_array, bounds_error=False, fill_value=0)  ##screening
 
     zero_K_indices = np.where(T_array < 1e-6)[0]
-    if len(zero_K_indices)>0:
+    if len(zero_K_indices) > 0:
         ind_T_0 = np.min(zero_K_indices)  ## indice where the T profile drops, xray haven't reached that scale
-    else :
-        ind_T_0 = -1 ## if T_array is always > 1e-6, we just take the whole profile...
+    else:
+        ind_T_0 = -1  ## if T_array is always > 1e-6, we just take the whole profile...
 
     rr_T_max = rr_T[ind_T_0]  ### max radius that we need to consider to fully include the extended T profile
-    box_extension = int(rr_T_max / (LBox / 2))+1
+    box_extension = int(rr_T_max / (LBox / 2)) + 1
 
     # nGrid_min = 64
     if box_extension < 1:
@@ -467,14 +513,15 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
         box_extension += 1  ### this need to be even to make things work
 
     kernel_T_HM = profile_to_3Dkernel(profile_T_HM, box_extension * nGrid_min, box_extension * LBox)
-    #nGrid_extd = box_extension * nGrid_min
-    #LBox_extd = box_extension * LBox  ## size and nbr of pix of the larger box
+    # nGrid_extd = box_extension * nGrid_min
+    # LBox_extd = box_extension * LBox  ## size and nbr of pix of the larger box
 
     stacked_T_ker = np.zeros((nGrid_min, nGrid_min, nGrid_min))
     for ii in range(box_extension):  ## loop over the box_extension**3 subboxes and stack them
         for jj in range(box_extension):
             for kk in range(box_extension):
-                stacked_T_ker += kernel_T_HM[ii * nGrid_min:(ii + 1) * nGrid_min, jj * nGrid_min:(jj + 1) * nGrid_min, kk * nGrid_min:(kk + 1) * nGrid_min]
+                stacked_T_ker += kernel_T_HM[ii * nGrid_min:(ii + 1) * nGrid_min, jj * nGrid_min:(jj + 1) * nGrid_min,
+                                 kk * nGrid_min:(kk + 1) * nGrid_min]
 
     pix_lft = int(box_extension / 2) * nGrid_min  ### coordinate of the central subbox
     pix_rgth = (1 + int(box_extension / 2)) * nGrid_min
@@ -486,9 +533,6 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
     kernel_T_HM = profile_to_3Dkernel(profile_T_HM, nGrid, LBox) + stacked_T_ker[incr_rez, incr_rez, incr_rez]
 
     return kernel_T_HM
-
-
-
 
 
 def profile_1D_ion(r, c1=2, c2=5):  #

@@ -12,7 +12,7 @@ from .constants import cm_per_Mpc, M_sun, m_H, rhoc0, Tcmb0
 from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct
 import os
 from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
-    stacked_T_kernel
+    stacked_T_kernel, cumulated_number_halos
 from .couplings import x_coll, S_alpha
 from .global_qty import xHII_approx
 from os.path import exists
@@ -58,7 +58,7 @@ def compute_profiles(param):
 
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
-                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False):
+                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,cic=False):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
 
@@ -159,7 +159,9 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                                                                       1] + nGrid ** 2 * Pos_Halos_Grid[
                                                                                                             indices][:,
                                                                                                         2]
-                        unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
+                        #unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
+                        unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices], H_Y[indices],
+                                                                                     H_Z[indices], cic=cic)
 
                         ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
                         YY_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2) // nGrid
@@ -374,7 +376,7 @@ def def_k_bins(param):
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
-                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False):
+                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False,cic=False):
     """
     Parameters
     ----------
@@ -385,7 +387,6 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
     Returns
     -------
     Does not return anything. Loop over all snapshots in param.sim.halo_catalogs and calls paint_profile_single_snap.
-
     """
 
     start_time = time.time()
@@ -420,14 +421,14 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                     print('----- Painting 3D map for z =', z, '-------')
                     paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                               read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                              cross_corr=cross_corr, third_order=third_order)
+                                              cross_corr=cross_corr, third_order=third_order,cic=cic)
                     print('----- Snapshot at z = ', z, ' is done -------')
                     print(' ')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                           read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                          cross_corr=cross_corr, third_order=third_order)
+                                          cross_corr=cross_corr, third_order=third_order,cic=cic)
                 print('----- Snapshot at z = ', z, ' is done -------')
                 print(' ')
 
