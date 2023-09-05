@@ -301,7 +301,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
                                                 third_order=third_order)
 
-    save_f(file='./physics/GS_PS_' + z_str, obj=GS_PS_dict)
+    save_f(file='./physics/GS_PS_'  + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
 
     if param.sim.store_grids:
         if temp:
@@ -342,7 +342,7 @@ def gather_GS_PS_files(param, remove=False):
     z_arr = def_redshifts(param)
     for ii, z in enumerate(z_arr):
         z_str = z_string_format(z)
-        file = './physics/GS_PS_' + z_str
+        file = './physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str
         if exists(file):
             GS_PS = load_f(file)
             for key, value in GS_PS.items():
