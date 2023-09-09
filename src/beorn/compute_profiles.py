@@ -50,14 +50,13 @@ class profiles:
         self.M_Bin = np.logspace(np.log10(Mh_bin_min), np.log10(Mh_bin_max), binn, base=10) ## array of masses at the final redshift
 
 
-    def solve(self, param):
-        if param.source.MAR == 'EXP':
-            #Mh_history = self.M_Bin * np.exp(param.source.alpha_MAR * (np.min(self.z_arr) - self.z_arr[:,None])) #shape is [zz, Mass]
-            #dMh_dt = dMh_dt_EXP(param, Mh_history, self.z_arr[:, None])
-            Mh_history,dMh_dt = mass_accretion_EXP(self.z_arr, self.M_Bin, param)
-        elif param.source.MAR == 'EPS':
-            Mh_history,dMh_dt = mass_accretion_EPS(self.z_arr, self.M_Bin,param)
+        if param.sim.average_profiles_in_bin:
+            self.M_Bin_HR = np.logspace(np.log10(Mh_bin_min), np.log10(Mh_bin_max), 500, base=10)
 
+
+    def solve(self, param):
+
+        Mh_history,dMh_dt = mass_accretion(self.z_arr, self.M_Bin, param) #shape is [zz, Mass]
 
         zz = self.z_arr
         if param.solver.fXh == 'constant':
@@ -90,6 +89,15 @@ class profiles:
        # for i in range(len(zz)):
        #     T_history[str(zz[i])] = rho_heat_[i]
        #     rhox_history[str(zz[i])] =rho_xray_[i]
+
+        if param.sim.average_profiles_in_bin:
+            Mh_history_HR, dMh_dt_HR = mass_accretion(self.z_arr, self.M_Bin_HR, param)
+            self.rho_alpha_HR = rho_alpha_profile(param,r_lyal,Mh_history_HR, dMh_dt_HR, zz)
+            self.rho_xray_HR = rho_xray(param, self.r_grid,Mh_history_HR, dMh_dt_HR, x_e, zz)
+            self.rho_heat_HR = rho_heat(param, self.r_grid, self.rho_xray_HR, zz)
+            self.R_bubble_HR = R_bubble(param, zz, Mh_history_HR, dMh_dt_HR).clip(min=0)  # cMpc/h
+            self.Mh_history_HR = Mh_history_HR
+            self.dMh_dt_HR = dMh_dt_HR
 
         #self.rhox_history = rhox_history
         self.Mh_history = Mh_history

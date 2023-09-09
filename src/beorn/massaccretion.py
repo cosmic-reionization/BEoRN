@@ -9,6 +9,14 @@ from .constants import *
 from .cosmo import comoving_distance, Hubble, hubble
 from .halomassfunction import HMF as halomassfct
 
+def mass_accretion(zz,mm,param):
+    if param.source.MAR == 'EXP':
+        Mh_history, dMh_dt = mass_accretion_EXP(zz, mm, param)
+    elif param.source.MAR == 'EPS':
+        Mh_history, dMh_dt = mass_accretion_EPS(zz, mm, param)
+    return Mh_history, dMh_dt
+
+
 def mass_accretion_EPS(zz, mm,param):
     """
     Assuming EPS formula

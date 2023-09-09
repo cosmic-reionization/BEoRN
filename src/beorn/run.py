@@ -12,7 +12,7 @@ from .constants import cm_per_Mpc, M_sun, m_H, rhoc0, Tcmb0
 from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct
 import os
 from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
-    stacked_T_kernel, cumulated_number_halos
+    stacked_T_kernel, cumulated_number_halos, average_profile
 from .couplings import x_coll, S_alpha
 from .global_qty import xHII_approx
 from os.path import exists
@@ -138,37 +138,30 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 Grid_Temp = np.zeros((nGrid, nGrid, nGrid))
                 Grid_xal = np.zeros((nGrid, nGrid, nGrid))
                 for i in range(len(M_Bin)):
-                    indices = np.where(Indexing == i)[
-                        0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
+                    indices = np.where(Indexing == i)[0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
                     Mh_ = grid_model.Mh_history[ind_z, i]
 
                     if len(indices) > 0 and Mh_ > param.source.M_min:
                         radial_grid = grid_model.r_grid_cell / (1 + zgrid)  # pMpc/h
                         x_HII_profile = np.zeros((len(radial_grid)))
-                        x_HII_profile[np.where(radial_grid < grid_model.R_bubble[ind_z, i] / (1 + zgrid))] = 1
-                        Temp_profile = grid_model.rho_heat[ind_z, :, i]
+
+                        R_bubble, rho_alpha_, Temp_profile = average_profile(param, grid_model, H_Masses[indices],ind_z, i)
+                        x_HII_profile[np.where(radial_grid < R_bubble/ (1 + zgrid))] = 1 #grid_model.R_bubble[ind_z, i]
+                        #Temp_profile = grid_model.rho_heat[ind_z, :, i]
 
                         r_lyal = grid_model.r_lyal  # np.logspace(-5, 2, 1000, base=10)     ##    physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
-                        rho_alpha_ = grid_model.rho_alpha[ind_z, :, i]  # rho_alpha(r_lyal, Mh_, zgrid, param)[0]
-                        x_alpha_prof = 1.81e11 * (rho_alpha_) / (
-                                1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
+                        #rho_alpha_ = grid_model.rho_alpha[ind_z, :, i]  # rho_alpha(r_lyal, Mh_, zgrid, param)[0]
+                        x_alpha_prof = 1.81e11 * (rho_alpha_) / (1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
 
                         ### This is the position of halos in base "nGrid". We use this to speed up the code.
                         ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
-                        base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,
-                                                                                      1] + nGrid ** 2 * Pos_Halos_Grid[
-                                                                                                            indices][:,
-                                                                                                        2]
+                        #base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,1] + nGrid ** 2 * Pos_Halos_Grid[ indices][:,2]
                         #unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
-                        unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices], H_Y[indices],
-                                                                                     H_Z[indices], cic=cic)
+                        unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices], H_Y[indices], H_Z[indices], cic=cic)
 
                         ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
                         YY_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2) // nGrid
                         XX_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2 - YY_indice * nGrid)
-
-                        # if cic:
-                        #    coef_cic = CIC_coefficients(param,H_X, H_Y, H_Z)
 
                         ## Every halos in mass bin i are assumed to have mass M_bin[i].
                         if ion:
@@ -1183,6 +1176,35 @@ def compute_var_field(param, field):
     print('return : variance, R_scale, k_values')
     return variance, R_scale, k_values
 
+
+
+
+def compute_cross_var(param, field1,field2):
+    from .excursion_set import profile_kern
+    from astropy.convolution import convolve_fft
+
+    k_values = def_k_bins(param)
+    R_scale = np.pi / k_values
+    Lbox = param.sim.Lbox  # Mpc/h
+    nGrid = param.sim.Ncell  # number of grid cells
+
+    pixel_size = Lbox / nGrid
+    x = np.linspace(-Lbox / 2, Lbox / 2, nGrid)  # y, z will be the same.
+    rx, ry, rz = np.meshgrid(x, x, x, sparse=True)
+    rgrid = np.sqrt(rx ** 2 + ry ** 2 + rz ** 2)
+
+    variance = []
+    for Rsmoothing in R_scale:
+        if Rsmoothing > pixel_size:
+            print('R is ', round(Rsmoothing, 2))
+            kern = profile_kern(rgrid, Rsmoothing)
+            smoothed_field1 = convolve_fft(field1, kern, boundary='wrap', normalize_kernel=True, allow_huge=True)  #
+            smoothed_field2 = convolve_fft(field2, kern, boundary='wrap', normalize_kernel=True, allow_huge=True)  #
+            variance.append(np.mean(smoothed_field1*smoothed_field2))
+        else:
+            variance.append(0)
+    print('return : variance, R_scale, k_values')
+    return variance, R_scale, k_values
 
 def compute_corr_fct(param):
     if not os.path.isdir('./variances'):

@@ -11,6 +11,50 @@ from .functions import print_time
 from .cloud_in_cell import CIC_coefficients
 
 
+def average_profile(param, profile, Mh_,ind_z, i):
+    """
+     Inside a given halo mass bin, computes the average profile inside that bin (by calling the HR profiles with higher bin resolution)
+     If param.sim.average_profiles_in_bin is False, we skip this step and just return the profile of the halo mass bin.
+
+     Parameters
+     ----------
+     profile : object from the class profiles, in compute_profiles.py
+     Mh_ : array of halo masses that belong to bin i.
+     ind_z  : redshift indice
+     i : indice of the coarse mass bin
+
+     Returns
+     -------
+     mean R bubble (float), mean lyalpha (array of size r_lyal), mean Tk profiles (array of size radial_grid)
+    """
+    # i : indice of the coarse mass bin
+    if param.sim.average_profiles_in_bin:
+        Mh_history_HR = profile.Mh_history_HR
+        R_bubble_HR = profile.R_bubble_HR[ind_z, :]
+
+        HR_indexing = np.argmin(np.abs(np.log10(Mh_[:, None] / Mh_history_HR[ind_z, :])), axis=1)
+        HR_indices, nbr_count = np.unique(HR_indexing, return_counts=True)
+
+        ### these are the profiles with finer resolution for each individual halo masses that are in the mass bin
+        R_bubbles_in = R_bubble_HR[HR_indices]
+        rho_alpha_in = profile.rho_alpha_HR[ind_z, :, HR_indices]
+        Tk_in = profile.rho_heat_HR[ind_z, :, HR_indices]
+
+        ### this is then the new mean profiles accounting for the non uniform distrib of halos inside bin.
+        mean_R_bubble_in_bin = np.sum(R_bubbles_in * nbr_count) / np.sum(nbr_count)
+        mean_rho_alpha_in_bin = np.sum(nbr_count[:, None] * rho_alpha_in, axis=0) / np.sum(nbr_count)  # .shape
+        mean_Tk_in_bin = np.sum(nbr_count[:, None] * Tk_in, axis=0) / np.sum(nbr_count)  # .shape
+
+    else:  # no averaging, just the usual thing with coarse M_Bin
+        mean_R_bubble_in_bin = profile.R_bubble[ind_z, i]
+        mean_rho_alpha_in_bin = profile.rho_alpha[ind_z, :, i]
+        mean_Tk_in_bin = profile.rho_heat[ind_z, :, i]
+
+    return mean_R_bubble_in_bin, mean_rho_alpha_in_bin, mean_Tk_in_bin
+
+
+
+
 def cumulated_number_halos(param, H_X, H_Y, H_Z, cic=False):
     """
      Returns the number of halo per grid pixel, for halos belonging to a mass bin.

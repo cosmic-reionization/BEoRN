@@ -61,6 +61,7 @@ def sim_par(): ## used when computing and painting profiles on a grid
         "Mh_bin_min" : 1e5,
         "Mh_bin_max" : 1e14,
         "binn" : 12,                # to define the initial halo mass at z_ini = solver.z
+        "average_profiles_in_bin" : False,  # inside one mass bin, halos are un-evenly distributed. The profile corresponding to the mass bin should hence be a weidghted average...
         "model_name": 'SED',        # Give a name to your sim, will be used to name all the files created.
         "Ncell" : 128,              # nbr of pixels of the final grid.
         "Lbox" : 100,               # Box lenght, in [Mpc/h]
