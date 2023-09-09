@@ -11,7 +11,21 @@ from .functions import print_time
 from .cloud_in_cell import CIC_coefficients
 
 
-def average_profile(param, profile, Mh_,ind_z, i):
+def log_binning(array1, array2):
+    """
+     Parameters
+     ----------
+     array1, array2 : 2 arrays of different sizes.
+
+     Returns
+     -------
+     Return the indices of the bins (array2) to which each value in input array (array1) belongs, in logarithmic scale
+    """
+    # np.argmin(np.abs(np.log10(Mh_[:, None] / Mh_history_HR[ind_z, :])), axis=1)
+    return np.digitize(x=np.log10(array1), bins=np.log10(array2), right=False)
+
+
+def average_profile(param, profile, Mh_, ind_z, i):
     """
      Inside a given halo mass bin, computes the average profile inside that bin (by calling the HR profiles with higher bin resolution)
      If param.sim.average_profiles_in_bin is False, we skip this step and just return the profile of the halo mass bin.
@@ -32,7 +46,8 @@ def average_profile(param, profile, Mh_,ind_z, i):
         Mh_history_HR = profile.Mh_history_HR
         R_bubble_HR = profile.R_bubble_HR[ind_z, :]
 
-        HR_indexing = np.argmin(np.abs(np.log10(Mh_[:, None] / Mh_history_HR[ind_z, :])), axis=1)
+        HR_indexing = log_binning(Mh_, Mh_history_HR[ind_z,
+                                       :])  # np.argmin(np.abs(np.log10(Mh_[:, None] / Mh_history_HR[ind_z, :])), axis=1)
         HR_indices, nbr_count = np.unique(HR_indexing, return_counts=True)
 
         ### these are the profiles with finer resolution for each individual halo masses that are in the mass bin
@@ -51,8 +66,6 @@ def average_profile(param, profile, Mh_,ind_z, i):
         mean_Tk_in_bin = profile.rho_heat[ind_z, :, i]
 
     return mean_R_bubble_in_bin, mean_rho_alpha_in_bin, mean_Tk_in_bin
-
-
 
 
 def cumulated_number_halos(param, H_X, H_Y, H_Z, cic=False):

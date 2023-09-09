@@ -12,7 +12,7 @@ from .constants import cm_per_Mpc, M_sun, m_H, rhoc0, Tcmb0
 from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct
 import os
 from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
-    stacked_T_kernel, cumulated_number_halos, average_profile
+    stacked_T_kernel, cumulated_number_halos, average_profile, log_binning
 from .couplings import x_coll, S_alpha
 from .global_qty import xHII_approx
 from os.path import exists
@@ -97,8 +97,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     grid_model = load_f(file='./profiles/' + model_name + '.pkl')
     ind_z = np.argmin(np.abs(grid_model.z_history - z))
     zgrid = grid_model.z_history[ind_z]
-    Indexing = np.argmin(np.abs(np.log10(H_Masses[:, None] / grid_model.Mh_history[ind_z, :])),
-                         axis=1)  # (M_Bin * np.exp(-param.source.alpha_MAR * (z - z_start))))
+    Indexing = log_binning(H_Masses,grid_model.Mh_history[ind_z, :])
+        #np.argmin(np.abs(np.log10(H_Masses[:, None] / grid_model.Mh_history[ind_z, :])), axis=1)
     print('There are', H_Masses.size, 'halos at z=', z, )
     print('Looping over halo mass bins and painting profiles on 3D grid .... ')
     if H_Masses.size == 0:

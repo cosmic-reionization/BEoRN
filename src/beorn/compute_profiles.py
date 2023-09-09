@@ -51,7 +51,7 @@ class profiles:
 
 
         if param.sim.average_profiles_in_bin:
-            self.M_Bin_HR = np.logspace(np.log10(Mh_bin_min), np.log10(Mh_bin_max), 500, base=10)
+            self.M_Bin_HR = np.logspace(np.log10(Mh_bin_min), np.log10(Mh_bin_max), param.sim.HR_binning, base=10)
 
 
     def solve(self, param):
