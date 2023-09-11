@@ -24,7 +24,7 @@ from .functions import *
 
 def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
              check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
-             variance=False,compute_corr_fct = False
+             variance=False,compute_corr_fct_ = False
              ):
 
     """
@@ -81,7 +81,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
         GS = compute_glob_qty(param)
         save_f(file='./physics/GS_approx' + '_' + param.sim.model_name + '.pkl', obj=GS)
 
-    if compute_corr_fct: ## compute the correlation function at r=0 (variance of unsmoothed fields). We use this for the correction to GS.
+    if compute_corr_fct_: ## compute the correlation function at r=0 (variance of unsmoothed fields). We use this for the correction to GS.
         if rank == 3 % size:
             print(' ------------ COMPUTING CORRELATION FUNCTIONS AT R=0  ------------ ')
             compute_corr_fct(param)
