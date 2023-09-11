@@ -1126,8 +1126,9 @@ def gather_variances(param):
 
 
 def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
-    
-    print('Computing variance for xal, xHII and Temp at z =',z,'....')
+
+    z_str = z_string_format(z)
+    print('Computing variance for xal, xHII and Temp at z = '+z_str+'....')
     tstart = time.time()
     
     if (Grid_xHII == np.array([0])).all():
