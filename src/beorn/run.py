@@ -22,10 +22,11 @@ from .cosmo import dTb_factor
 from .functions import *
 
 
-def run_code(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
+def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
              check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
              variance=False,compute_corr_fct = False
              ):
+
     """
     Function to run the code. Several options are available.
 
@@ -37,19 +38,25 @@ def run_code(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, r
     ------- Does not return anything. However, it solves the RT equation for a range of halo masses,
     following their evolution from cosmic dawn to the end of reionization. It stores the profile in a directory "./profiles"
     """
+
     from mpi4py import MPI
     comm = MPI.COMM_WORLD
     import mpi4py.MPI
     rank = mpi4py.MPI.COMM_WORLD.Get_rank()
     size = mpi4py.MPI.COMM_WORLD.Get_size()
 
-    print(' ------------ BEORN STARTS ------------ ')
     if rank == 0:
-        compute_profiles(param)
-
+        print(' ------------ BEORN STARTS ------------ ')
     comm.Barrier()
 
-    print(' ------------ PAINTING BOXES ------------ ')
+    if compute_profile:
+        if rank == 0:
+            compute_profiles(param)
+        comm.Barrier()
+
+    if rank == 0:
+        print(' ------------ PAINTING BOXES ------------ ')
+    comm.Barrier()
 
     paint_boxes(param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp, check_exists=check_exists,
                 read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
