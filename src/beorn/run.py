@@ -47,6 +47,9 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
 
     if rank == 0:
         print(' ------------ BEORN STARTS ------------ ')
+        if variance :
+            if not os.path.isdir('./variances'):
+                os.mkdir('./variances')
     comm.Barrier()
 
     if compute_profile:
@@ -109,6 +112,8 @@ def compute_profiles(param):
 
     if not os.path.isdir('./physics'):
         os.mkdir('./physics')
+
+
 
     model_name = param.sim.model_name
     pkl_name = './profiles/' + model_name + '.pkl'
