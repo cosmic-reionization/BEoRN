@@ -14,12 +14,62 @@ import os
 from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
     stacked_T_kernel, cumulated_number_halos, average_profile, log_binning, bin_edges_log
 from .couplings import x_coll, S_alpha
-from .global_qty import xHII_approx
+from .global_qty import xHII_approx, compute_glob_qty
 from os.path import exists
 import tools21cm as t2c
 import scipy
 from .cosmo import dTb_factor
 from .functions import *
+
+
+def run_code(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
+             check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
+             variance=False,compute_corr_fct = False
+             ):
+    """
+    Function to run the code. Several options are available.
+
+    Parameters
+    ----------
+    param : BEoRN dictionnary containing all the input parameters
+
+    Returns
+    ------- Does not return anything. However, it solves the RT equation for a range of halo masses,
+    following their evolution from cosmic dawn to the end of reionization. It stores the profile in a directory "./profiles"
+    """
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    import mpi4py.MPI
+    rank = mpi4py.MPI.COMM_WORLD.Get_rank()
+    size = mpi4py.MPI.COMM_WORLD.Get_size()
+
+    if rank == 0:
+        compute_profiles(param)
+
+    comm.Barrier()
+
+    paint_boxes(param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp, check_exists=check_exists,
+                read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
+                cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance)
+
+    comm.Barrier()
+
+    if rank == 0:
+        gather_GS_PS_files(param, remove=True)
+
+    if variance:
+        if rank == 1 % size:
+            gather_variances(param)
+
+    if rank == 2 % size:
+        GS = compute_glob_qty(param)
+        save_f(file='./physics/GS_approx' + '_' + param.sim.model_name + '.pkl', obj=GS)
+
+    if compute_corr_fct: ## compute the correlation function at r=0 (variance of unsmoothed fields). We use this for the correction to GS.
+        if rank == 3 % size:
+            compute_corr_fct(param)
+
+    return None
 
 
 def compute_profiles(param):
@@ -58,7 +108,8 @@ def compute_profiles(param):
 
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
-                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,cic=False,variance=False):
+                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,
+                              cic=False, variance=False):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
 
@@ -101,15 +152,14 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     # if H_Masses is digitized to bin_edges_log[i] it means it should take the value of M_Bin[i-1] (bin 0 is what's on the left...)
     # M_Bin                0.   1.    2.    3.  ...
     # bin_edges_log     0.  | 1. |  2. |  3. |  4. ....
-    Indexing = log_binning(H_Masses,bin_edges_log(grid_model.Mh_history[ind_z, :]))
+    Indexing = log_binning(H_Masses, bin_edges_log(grid_model.Mh_history[ind_z, :]))
     Indexing = Indexing - 1
 
-    if any(Indexing<0):
+    if any(Indexing < 0):
         print('Need lower Mmin ! ')
         exit()
 
-
-        #np.argmin(np.abs(np.log10(H_Masses[:, None] / grid_model.Mh_history[ind_z, :])), axis=1)
+        # np.argmin(np.abs(np.log10(H_Masses[:, None] / grid_model.Mh_history[ind_z, :])), axis=1)
     print('There are', H_Masses.size, 'halos at z=', z, )
     print('Looping over halo mass bins and painting profiles on 3D grid .... ')
     if H_Masses.size == 0:
@@ -143,31 +193,37 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             if not read_temp or not read_lyal or not read_ion:
                 Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
                 Pos_Halos_Grid = np.array([Pos_Halos / LBox * nGrid]).astype(int)[0]
-                Pos_Halos_Grid[np.where(Pos_Halos_Grid == nGrid)] = nGrid - 1  # we don't want Pos_Halos_Grid==nGrid. This only happens if Pos_Bubbles=LBox
+                Pos_Halos_Grid[np.where(
+                    Pos_Halos_Grid == nGrid)] = nGrid - 1  # we don't want Pos_Halos_Grid==nGrid. This only happens if Pos_Bubbles=LBox
                 Grid_xHII_i = np.zeros((nGrid, nGrid, nGrid))
                 Grid_Temp = np.zeros((nGrid, nGrid, nGrid))
                 Grid_xal = np.zeros((nGrid, nGrid, nGrid))
                 for i in range(len(M_Bin)):
-                    indices = np.where(Indexing == i)[0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
+                    indices = np.where(Indexing == i)[
+                        0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
                     Mh_ = grid_model.Mh_history[ind_z, i]
 
                     if len(indices) > 0 and Mh_ > param.source.M_min:
                         radial_grid = grid_model.r_grid_cell / (1 + zgrid)  # pMpc/h
                         x_HII_profile = np.zeros((len(radial_grid)))
 
-                        R_bubble, rho_alpha_, Temp_profile = average_profile(param, grid_model, H_Masses[indices],ind_z, i)
-                        x_HII_profile[np.where(radial_grid < R_bubble/ (1 + zgrid))] = 1 #grid_model.R_bubble[ind_z, i]
-                        #Temp_profile = grid_model.rho_heat[ind_z, :, i]
+                        R_bubble, rho_alpha_, Temp_profile = average_profile(param, grid_model, H_Masses[indices],
+                                                                             ind_z, i)
+                        x_HII_profile[
+                            np.where(radial_grid < R_bubble / (1 + zgrid))] = 1  # grid_model.R_bubble[ind_z, i]
+                        # Temp_profile = grid_model.rho_heat[ind_z, :, i]
 
                         r_lyal = grid_model.r_lyal  # np.logspace(-5, 2, 1000, base=10)     ##    physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
-                        #rho_alpha_ = grid_model.rho_alpha[ind_z, :, i]  # rho_alpha(r_lyal, Mh_, zgrid, param)[0]
-                        x_alpha_prof = 1.81e11 * (rho_alpha_) / (1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
+                        # rho_alpha_ = grid_model.rho_alpha[ind_z, :, i]  # rho_alpha(r_lyal, Mh_, zgrid, param)[0]
+                        x_alpha_prof = 1.81e11 * (rho_alpha_) / (
+                                    1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
 
                         ### This is the position of halos in base "nGrid". We use this to speed up the code.
                         ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
-                        #base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,1] + nGrid ** 2 * Pos_Halos_Grid[ indices][:,2]
-                        #unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
-                        unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices], H_Y[indices], H_Z[indices], cic=cic)
+                        # base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,1] + nGrid ** 2 * Pos_Halos_Grid[ indices][:,2]
+                        # unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
+                        unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices], H_Y[indices],
+                                                                                     H_Z[indices], cic=cic)
 
                         ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
                         YY_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2) // nGrid
@@ -206,7 +262,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                     LBox / (1 + z)) ** 3 / np.mean(kernel_xal)
                             if np.any(kernel_xal > 0):
                                 # Grid_xal += put_profiles_group(Pos_Halos_Grid[indices], kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum( kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
-                                Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),nbr_of_halos,
+                                Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
+                                                               nbr_of_halos,
                                                                kernel_xal * 1e-7 / np.sum(
                                                                    kernel_xal)) * renorm * np.sum(
                                     kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
@@ -277,7 +334,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     PS_dTb, k_bins = t2c.power_spectrum.power_spectrum_1d(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
                                                           kbins=def_k_bins(param))
 
-
     if not RSD:
         dTb_RSD_mean = 0
         PS_dTb_RSD = 0
@@ -298,11 +354,12 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
                                                 third_order=third_order)
-    save_f(file='./physics/GS_PS_'  + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
+    save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
 
     if variance:
         import copy
-        param_copy = copy.deepcopy(param) # we do this since in compute_var we change the kbins to go to smaller scales.
+        param_copy = copy.deepcopy(
+            param)  # we do this since in compute_var we change the kbins to go to smaller scales.
         compute_var_single_z(param_copy, z, Grid_xal, Grid_xHII, Grid_Temp)
 
     if param.sim.store_grids:
@@ -318,7 +375,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 # save_f(file='./grid_output/dTb_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_dTb)
             else:
                 save_grid(param, z=z, grid=Grid_dTb_RSD, type='dTb')
-
 
 
 def gather_GS_PS_files(param, remove=False):
@@ -375,7 +431,8 @@ def def_k_bins(param):
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
-                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False,cic=False,variance=False):
+                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
+                variance=False):
     """
     Parameters
     ----------
@@ -420,14 +477,15 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                     print('----- Painting 3D map for z =', z, '-------')
                     paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                               read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                              cross_corr=cross_corr, third_order=third_order,cic=cic,variance=variance)
+                                              cross_corr=cross_corr, third_order=third_order, cic=cic,
+                                              variance=variance)
                     print('----- Snapshot at z = ', z, ' is done -------')
                     print(' ')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                           read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                          cross_corr=cross_corr, third_order=third_order,cic=cic,variance=variance)
+                                          cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance)
                 print('----- Snapshot at z = ', z, ' is done -------')
                 print(' ')
 
@@ -635,15 +693,17 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         PS_rTT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[
             0]
         PS_raa = \
-        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[
+                0]
         PS_rbb = \
-        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
         PS_rTb = \
-        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
         PS_aTr = \
-        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_abr = \
-        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[
+                0]
         PS_rrT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_rra = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_rrb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_rho, box_dims=Lbox, kbins=kbins)[0]
@@ -652,14 +712,14 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         PS_rara = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_rbrb = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
         PS_rarb = \
-        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_XHII * delta_rho, box_dims=Lbox,
-                                                   kbins=kbins)[0]
+            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_XHII * delta_rho, box_dims=Lbox,
+                                                       kbins=kbins)[0]
         PS_rTrb = \
-        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_rho, box_dims=Lbox,
-                                                   kbins=kbins)[0]
+            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_rho, box_dims=Lbox,
+                                                       kbins=kbins)[0]
         PS_rTra = \
-        t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_x_al, box_dims=Lbox,
-                                                   kbins=kbins)[0]
+            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_x_al, box_dims=Lbox,
+                                                       kbins=kbins)[0]
 
         Dict_3rd_order = {'PS_rTT': PS_rTT, 'PS_raa': PS_raa, 'PS_rbb': PS_rbb, 'PS_rTb': PS_rTb, 'PS_aTr': PS_aTr,
                           'PS_abr': PS_abr, 'PS_rrT': PS_rrT, 'PS_rra': PS_rra, 'PS_rrb': PS_rrb, 'PS_rTrT': PS_rTrT,
@@ -1129,9 +1189,8 @@ def gather_variances(param):
 
 
 def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
-
     z_str = z_string_format(z)
-    print('Computing variance for xal, xHII and Temp at z = '+z_str+'....')
+    print('Computing variance for xal, xHII and Temp at z = ' + z_str + '....')
     tstart = time.time()
     nGrid = param.sim.Ncell
 
@@ -1152,7 +1211,8 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
            obj={'z': z, 'var_lyal': np.array(variance_lyal), 'var_xHII': np.array(variance_xHII)
                , 'var_Temp': np.array(variance_Temp), 'k': k_values, 'R': R_scale})
 
-    print('.... Done computing variance. It took :', print_time(time.time()-tstart))
+    print('.... Done computing variance. It took :', print_time(time.time() - tstart))
+
 
 def compute_var_field(param, field):
     from .excursion_set import profile_kern
@@ -1188,7 +1248,7 @@ def compute_var_field(param, field):
     return variance, R_scale, k_values
 
 
-def compute_cross_var(param, field1,field2):
+def compute_cross_var(param, field1, field2):
     from .excursion_set import profile_kern
     from astropy.convolution import convolve_fft
 
@@ -1209,7 +1269,7 @@ def compute_cross_var(param, field1,field2):
             kern = profile_kern(rgrid, Rsmoothing)
             smoothed_field1 = convolve_fft(field1, kern, boundary='wrap', normalize_kernel=True, allow_huge=True)  #
             smoothed_field2 = convolve_fft(field2, kern, boundary='wrap', normalize_kernel=True, allow_huge=True)  #
-            variance.append(np.mean(smoothed_field1*smoothed_field2))
+            variance.append(np.mean(smoothed_field1 * smoothed_field2))
         else:
             variance.append(0)
     print('return : variance, R_scale, k_values')
