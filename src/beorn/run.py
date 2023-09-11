@@ -58,7 +58,7 @@ def compute_profiles(param):
 
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
-                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,cic=False):
+                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,cic=False,variance=False):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
 
@@ -143,8 +143,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             if not read_temp or not read_lyal or not read_ion:
                 Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
                 Pos_Halos_Grid = np.array([Pos_Halos / LBox * nGrid]).astype(int)[0]
-                Pos_Halos_Grid[np.where(
-                    Pos_Halos_Grid == nGrid)] = nGrid - 1  # we don't want Pos_Halos_Grid==nGrid. This only happens if Pos_Bubbles=LBox
+                Pos_Halos_Grid[np.where(Pos_Halos_Grid == nGrid)] = nGrid - 1  # we don't want Pos_Halos_Grid==nGrid. This only happens if Pos_Bubbles=LBox
                 Grid_xHII_i = np.zeros((nGrid, nGrid, nGrid))
                 Grid_Temp = np.zeros((nGrid, nGrid, nGrid))
                 Grid_xal = np.zeros((nGrid, nGrid, nGrid))
@@ -207,8 +206,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                     LBox / (1 + z)) ** 3 / np.mean(kernel_xal)
                             if np.any(kernel_xal > 0):
                                 # Grid_xal += put_profiles_group(Pos_Halos_Grid[indices], kernel_xal * 1e-7 / np.sum(kernel_xal)) * renorm * np.sum( kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
-                                Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
-                                                               nbr_of_halos,
+                                Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),nbr_of_halos,
                                                                kernel_xal * 1e-7 / np.sum(
                                                                    kernel_xal)) * renorm * np.sum(
                                     kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
@@ -279,6 +277,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     PS_dTb, k_bins = t2c.power_spectrum.power_spectrum_1d(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
                                                           kbins=def_k_bins(param))
 
+
     if not RSD:
         dTb_RSD_mean = 0
         PS_dTb_RSD = 0
@@ -299,8 +298,10 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
                                                 third_order=third_order)
-
     save_f(file='./physics/GS_PS_'  + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
+
+    if variance:
+        compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp)
 
     if param.sim.store_grids:
         if temp:
@@ -371,7 +372,7 @@ def def_k_bins(param):
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
-                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False,cic=False):
+                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False,cic=False,variance=False):
     """
     Parameters
     ----------
@@ -416,14 +417,14 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                     print('----- Painting 3D map for z =', z, '-------')
                     paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                               read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                              cross_corr=cross_corr, third_order=third_order,cic=cic)
+                                              cross_corr=cross_corr, third_order=third_order,cic=cic,variance=variance)
                     print('----- Snapshot at z = ', z, ' is done -------')
                     print(' ')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                           read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                          cross_corr=cross_corr, third_order=third_order,cic=cic)
+                                          cross_corr=cross_corr, third_order=third_order,cic=cic,variance=variance)
                 print('----- Snapshot at z = ', z, ' is done -------')
                 print(' ')
 
@@ -1078,7 +1079,10 @@ def compute_variance(param):
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
             print('----- Computing variance for z =', z, '-------')
-            compute_var_single_z(param, z)
+            Grid_Temp = load_grid(param, z=z, type='Tk')
+            Grid_xHII = load_grid(param, z=z, type='bubbles')
+            Grid_xal = load_grid(param, z=z, type='lyal')
+            compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp)
             print('----- Variance at z = ', z, ' is computed -------')
 
     end_time = time.time()
@@ -1121,20 +1125,11 @@ def gather_variances(param):
     save_f(file='./variances/var_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
 
 
-def compute_var_single_z(param, z):
-    Grid_Temp = load_grid(param, z=z, type='Tk')
-    Grid_xHII = load_grid(param, z=z, type='bubbles')
-    Grid_xal = load_grid(param, z=z, type='lyal')
-
-    Lbox = param.sim.Lbox  # Mpc/h
-    nGrid = param.sim.Ncell  # number of grid cells
-    kmin = 2 * np.pi / Lbox
-    kmax = 2 * np.pi / Lbox * param.sim.Ncell
-    kbin = int(3 * np.log10(kmax / kmin))
-    param.sim.kmin = kmin
-    param.sim.kmax = kmax
-    param.sim.kbin = kbin
-
+def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
+    
+    print('Computing variance for xal, xHII and Temp at z =',z,'....')
+    tstart = time.time()
+    
     if (Grid_xHII == np.array([0])).all():
         Grid_xHII = np.full((nGrid, nGrid, nGrid), 0)
     if (Grid_xHII == np.array([1])).all():
@@ -1145,20 +1140,28 @@ def compute_var_single_z(param, z):
     variance_lyal, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xal))
     variance_xHII, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xHII))
     variance_Temp, R_scale, k_values = compute_var_field(param, delta_fct(Grid_Temp))
+
     print('nbr of scales is', len(k_values))
 
     save_f(file='./variances/var_z' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
            obj={'z': z, 'var_lyal': np.array(variance_lyal), 'var_xHII': np.array(variance_xHII)
                , 'var_Temp': np.array(variance_Temp), 'k': k_values, 'R': R_scale})
 
+    print('.... Done computing variance. It took :', print_time(time.time()-tstart))
 
 def compute_var_field(param, field):
     from .excursion_set import profile_kern
     from astropy.convolution import convolve_fft
+    Lbox = param.sim.Lbox  # Mpc/h
+    kmin = 2 * np.pi / Lbox
+    kmax = 2 * np.pi / Lbox * param.sim.Ncell
+    kbin = int(2 * np.log10(kmax / kmin))
+    param.sim.kmin = kmin
+    param.sim.kmax = kmax
+    param.sim.kbin = kbin
 
     k_values = def_k_bins(param)
     R_scale = np.pi / k_values
-    Lbox = param.sim.Lbox  # Mpc/h
     nGrid = param.sim.Ncell  # number of grid cells
 
     pixel_size = Lbox / nGrid
@@ -1207,6 +1210,7 @@ def compute_cross_var(param, field1,field2):
             variance.append(0)
     print('return : variance, R_scale, k_values')
     return variance, R_scale, k_values
+
 
 def compute_corr_fct(param):
     if not os.path.isdir('./variances'):
