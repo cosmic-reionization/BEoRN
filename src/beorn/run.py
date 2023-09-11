@@ -1130,7 +1130,8 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
     z_str = z_string_format(z)
     print('Computing variance for xal, xHII and Temp at z = '+z_str+'....')
     tstart = time.time()
-    
+    nGrid = param.sim.Ncell
+
     if (Grid_xHII == np.array([0])).all():
         Grid_xHII = np.full((nGrid, nGrid, nGrid), 0)
     if (Grid_xHII == np.array([1])).all():
@@ -1144,7 +1145,7 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
 
     print('nbr of scales is', len(k_values))
 
-    save_f(file='./variances/var_z' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
+    save_f(file='./variances/var_z' + str(nGrid) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
            obj={'z': z, 'var_lyal': np.array(variance_lyal), 'var_xHII': np.array(variance_xHII)
                , 'var_Temp': np.array(variance_Temp), 'k': k_values, 'R': R_scale})
 
