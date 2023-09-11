@@ -43,10 +43,13 @@ def run_code(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, r
     rank = mpi4py.MPI.COMM_WORLD.Get_rank()
     size = mpi4py.MPI.COMM_WORLD.Get_size()
 
+    print(' ------------ BEORN STARTS ------------ ')
     if rank == 0:
         compute_profiles(param)
 
     comm.Barrier()
+
+    print(' ------------ PAINTING BOXES ------------ ')
 
     paint_boxes(param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp, check_exists=check_exists,
                 read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
@@ -55,18 +58,22 @@ def run_code(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, r
     comm.Barrier()
 
     if rank == 0:
+        print(' ------------ MERGING PS FILES  ------------ ')
         gather_GS_PS_files(param, remove=True)
 
     if variance:
         if rank == 1 % size:
+            print(' ------------ COMPUTING VARIANCES OF SMOOTHED FIELDS LYA, T, XHII  ------------ ')
             gather_variances(param)
 
     if rank == 2 % size:
+        print(' ------------ COMPUTING GLOBAL QUANTITIES FROM PROFILES AND HALO CATALOGS  ------------ ')
         GS = compute_glob_qty(param)
         save_f(file='./physics/GS_approx' + '_' + param.sim.model_name + '.pkl', obj=GS)
 
     if compute_corr_fct: ## compute the correlation function at r=0 (variance of unsmoothed fields). We use this for the correction to GS.
         if rank == 3 % size:
+            print(' ------------ COMPUTING CORRELATION FUNCTIONS AT R=0  ------------ ')
             compute_corr_fct(param)
 
     return None
