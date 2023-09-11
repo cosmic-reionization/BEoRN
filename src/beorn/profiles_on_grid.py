@@ -21,8 +21,26 @@ def log_binning(array1, array2):
      -------
      Return the indices of the bins (array2) to which each value in input array (array1) belongs, in logarithmic scale
     """
+
     # np.argmin(np.abs(np.log10(Mh_[:, None] / Mh_history_HR[ind_z, :])), axis=1)
     return np.digitize(x=np.log10(array1), bins=np.log10(array2), right=False)
+
+
+
+def bin_edges_log(array):
+    """
+     Parameters
+     ----------
+     array : array
+
+     Returns
+     -------
+     An array whose bins centers correspond to the values of array1, with log scaling.
+    """
+
+    Mh_bin_array = np.concatenate(([array[0] / 2], np.sqrt(array[1:] * array[:-1]), [2 * array[-1]]))
+    return Mh_bin_array
+
 
 
 def average_profile(param, profile, Mh_, ind_z, i):
@@ -46,9 +64,14 @@ def average_profile(param, profile, Mh_, ind_z, i):
         Mh_history_HR = profile.Mh_history_HR
         R_bubble_HR = profile.R_bubble_HR[ind_z, :]
 
-        HR_indexing = log_binning(Mh_, Mh_history_HR[ind_z,
-                                       :])  # np.argmin(np.abs(np.log10(Mh_[:, None] / Mh_history_HR[ind_z, :])), axis=1)
+        # if Mh_ is digitized to M_bin_edges[i] it means it should take the value of M_Bin[i-1] (bin 0 is what's on the left...)
+        # Mh_history_HR       0.   1.    2.    3.  ...
+        # M_bin_edges     0.  | 1. |  2. |  3. |  4. ....
+        M_bin_edges = bin_edges_log(Mh_history_HR[ind_z, :])
+        HR_indexing = log_binning(Mh_,M_bin_edges )  # np.argmin(np.abs(np.log10(Mh_[:, None] / Mh_history_HR[ind_z, :])), axis=1)
+
         HR_indices, nbr_count = np.unique(HR_indexing, return_counts=True)
+        HR_indices = HR_indices-1
 
         ### these are the profiles with finer resolution for each individual halo masses that are in the mass bin
         R_bubbles_in = R_bubble_HR[HR_indices]

@@ -12,7 +12,7 @@ from .constants import cm_per_Mpc, M_sun, m_H, rhoc0, Tcmb0
 from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct
 import os
 from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
-    stacked_T_kernel, cumulated_number_halos, average_profile, log_binning
+    stacked_T_kernel, cumulated_number_halos, average_profile, log_binning, bin_edges_log
 from .couplings import x_coll, S_alpha
 from .global_qty import xHII_approx
 from os.path import exists
@@ -97,7 +97,18 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     grid_model = load_f(file='./profiles/' + model_name + '.pkl')
     ind_z = np.argmin(np.abs(grid_model.z_history - z))
     zgrid = grid_model.z_history[ind_z]
-    Indexing = log_binning(H_Masses,grid_model.Mh_history[ind_z, :])
+
+    # if H_Masses is digitized to bin_edges_log[i] it means it should take the value of M_Bin[i-1] (bin 0 is what's on the left...)
+    # M_Bin                0.   1.    2.    3.  ...
+    # bin_edges_log     0.  | 1. |  2. |  3. |  4. ....
+    Indexing = log_binning(H_Masses,bin_edges_log(grid_model.Mh_history[ind_z, :]))
+    Indexing = Indexing - 1
+
+    if any(Indexing<0):
+        print('Need lower Mmin ! ')
+        exit()
+
+
         #np.argmin(np.abs(np.log10(H_Masses[:, None] / grid_model.Mh_history[ind_z, :])), axis=1)
     print('There are', H_Masses.size, 'halos at z=', z, )
     print('Looping over halo mass bins and painting profiles on 3D grid .... ')
@@ -247,9 +258,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             if read_lyal:
                 Grid_xal = load_grid(param, z=z, type='lyal')
             else:
-                # save_f(file='./grid_output/S_alpha_z'+str(z)+'.pkl',obj = S_alpha(z, Grid_Temp,1 - Grid_xHII))
-                # save_f(file='./grid_output/rho_alpha_z' + str(z) + '.pkl', obj = Grid_xal)
-                # print('Salpha is :',S_alpha(z, Grid_Temp,1 - Grid_xHII) )
                 if S_al:
                     print('--- Including Salpha fluctuations in dTb ---')
                     Grid_xal = Grid_xal * S_alpha(z, Grid_Temp,
@@ -267,8 +275,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                     print('--- NOT including xcoll in dTb ---')
                     Grid_xtot = Grid_xal
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
-            # factor * np.sqrt(1 + z) * (1 - Tcmb0 * (1 + z) / Grid_Temp) * (1 - Grid_xHII) * (
-            #            delta_b + 1) * Grid_xtot / (1 + Grid_xtot)
 
     PS_dTb, k_bins = t2c.power_spectrum.power_spectrum_1d(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
                                                           kbins=def_k_bins(param))
@@ -299,20 +305,16 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     if param.sim.store_grids:
         if temp:
             save_grid(param, z=z, grid=Grid_Temp, type='Tk')
-        # save_f(file='./grid_output/T_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_Temp)
         if ion:
             save_grid(param, z=z, grid=Grid_xHII, type='bubbles')
-            # save_f(file='./grid_output/xHII_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_xHII)
         if lyal:
             save_grid(param, z=z, grid=Grid_xal, type='lyal')
-            # save_f(file='./grid_output/xal_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_xal)
         if dTb:
             if not RSD:
                 save_grid(param, z=z, grid=Grid_dTb, type='dTb')
                 # save_f(file='./grid_output/dTb_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_dTb)
             else:
                 save_grid(param, z=z, grid=Grid_dTb_RSD, type='dTb')
-                # save_f(file='./grid_output/dTb_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_dTb_RSD)
 
 
 def gather_GS_PS_files(param, remove=False):
