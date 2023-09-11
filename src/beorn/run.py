@@ -301,7 +301,9 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     save_f(file='./physics/GS_PS_'  + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
 
     if variance:
-        compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp)
+        import copy
+        param_copy = copy.deepcopy(param) # we do this since in compute_var we change the kbins to go to smaller scales.
+        compute_var_single_z(param_copy, z, Grid_xal, Grid_xHII, Grid_Temp)
 
     if param.sim.store_grids:
         if temp:
@@ -316,6 +318,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 # save_f(file='./grid_output/dTb_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_dTb)
             else:
                 save_grid(param, z=z, grid=Grid_dTb_RSD, type='dTb')
+
 
 
 def gather_GS_PS_files(param, remove=False):
@@ -1154,6 +1157,7 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
 def compute_var_field(param, field):
     from .excursion_set import profile_kern
     from astropy.convolution import convolve_fft
+
     Lbox = param.sim.Lbox  # Mpc/h
     kmin = 2 * np.pi / Lbox
     kmax = 2 * np.pi / Lbox * param.sim.Ncell
@@ -1182,8 +1186,6 @@ def compute_var_field(param, field):
             variance.append(0)
     print('return : variance, R_scale, k_values')
     return variance, R_scale, k_values
-
-
 
 
 def compute_cross_var(param, field1,field2):
