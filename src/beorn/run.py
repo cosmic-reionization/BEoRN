@@ -20,7 +20,6 @@ import tools21cm as t2c
 import scipy
 from .cosmo import dTb_factor
 from .functions import *
-from memory_profiler import profile
 
 
 
@@ -127,7 +126,6 @@ def compute_profiles(param):
     end_time = time.time()
     print('It took ' + print_time(end_time - start_time) + ' to compute the profiles.')
 
-@profile
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
                               read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,
                               cic=False, variance=False):
