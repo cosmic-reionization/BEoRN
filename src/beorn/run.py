@@ -20,6 +20,8 @@ import tools21cm as t2c
 import scipy
 from .cosmo import dTb_factor
 from .functions import *
+from memory_profiler import profile
+
 
 
 def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
@@ -125,7 +127,7 @@ def compute_profiles(param):
     end_time = time.time()
     print('It took ' + print_time(end_time - start_time) + ' to compute the profiles.')
 
-
+@profile
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
                               read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,
                               cic=False, variance=False):
@@ -265,13 +267,18 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                         LBox / (1 + z)) ** 3 / np.mean(kernel_xHII)
                                 # extra_ion = put_profiles_group(Pos_Halos_Grid[indices], kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(kernel_xHII) / 1e-7 * renorm
 
-                                extra_ion = put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
+
+                                #extra_ion
+                                Grid_xHII_i += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
                                                                nbr_of_halos,
                                                                kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(
                                     kernel_xHII) / 1e-7 * renorm
                                 # bubble_volume = np.trapz(4 * np.pi * radial_grid ** 2 * x_HII_profile, radial_grid)
                                 # print('bubble volume is ', len(indices) * bubble_volume,'pMpc, grid volume is', np.sum(extra_ion)* (LBox /nGrid/ (1 + z)) ** 3 )
-                                Grid_xHII_i += extra_ion
+                                #Grid_xHII_i += extra_ion
+
+                            del kernel_xHII
+
 
                         if lyal:
                             ### We use this stacked_kernel functions to impose periodic boundary conditions when the lyal or T profiles extend outside the box size. Very important for Lyman-a.
@@ -286,6 +293,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                                                kernel_xal * 1e-7 / np.sum(
                                                                    kernel_xal)) * renorm * np.sum(
                                     kernel_xal) / 1e-7  # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
+                            del kernel_xal
 
                         if temp:
                             kernel_T = stacked_T_kernel(radial_grid * (1 + z), Temp_profile, LBox, nGrid,
@@ -298,6 +306,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                                                 nbr_of_halos,
                                                                 kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(
                                     kernel_T) / 1e-7 * renorm
+                            del kernel_T
 
                         end_time = time.time()
                         print(len(indices), 'halos in mass bin ', i,
@@ -306,11 +315,11 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 print('.... Done painting profiles. ')
 
                 print('Dealing with the overlap of ionised bubbles.... ')
-                Grid_Storage = np.copy(Grid_xHII_i)
+                #Grid_Storage = np.copy(Grid_xHII_i)
 
                 t_start_spreading = time.time()
-                if np.sum(Grid_Storage) < nGrid ** 3 and ion:
-                    Grid_xHII = Spreading_Excess_Fast(param, Grid_Storage)
+                if np.sum(Grid_xHII_i) < nGrid ** 3 and ion:
+                    Grid_xHII = Spreading_Excess_Fast(param, Grid_xHII_i)
                 else:
                     Grid_xHII = np.array([1])
 
