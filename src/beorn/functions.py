@@ -202,8 +202,8 @@ def cross_PS(arr1, arr2, box_dims, kbins):
     return t2c.power_spectrum.cross_power_spectrum_1d(arr1, arr2, box_dims=box_dims, kbins=kbins)
 
 
-def auto_PS(arr1, arr2, box_dims, kbins):
-    return t2c.power_spectrum.power_spectrum_1d(arr1, arr2, box_dims=box_dims, kbins=kbins)
+def auto_PS(arr1, box_dims, kbins):
+    return t2c.power_spectrum.power_spectrum_1d(arr1, box_dims=box_dims, kbins=kbins)
 
 
 from datetime import timedelta
