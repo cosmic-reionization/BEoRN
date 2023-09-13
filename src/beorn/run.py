@@ -22,12 +22,11 @@ from .cosmo import dTb_factor
 from .functions import *
 
 
-
-def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
+def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
+             read_lyal=False,
              check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
-             variance=False,compute_corr_fct_ = False
+             variance=False, compute_corr_fct_=False
              ):
-
     """
     Function to run the code. Several options are available.
 
@@ -48,7 +47,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
 
     if rank == 0:
         print(' ------------ BEORN STARTS ------------ ')
-        if variance :
+        if variance:
             if not os.path.isdir('./variances'):
                 os.mkdir('./variances')
     comm.Barrier()
@@ -82,7 +81,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
         GS = compute_glob_qty(param)
         save_f(file='./physics/GS_approx' + '_' + param.sim.model_name + '.pkl', obj=GS)
 
-    if compute_corr_fct_: ## compute the correlation function at r=0 (variance of unsmoothed fields). We use this for the correction to GS.
+    if compute_corr_fct_:  ## compute the correlation function at r=0 (variance of unsmoothed fields). We use this for the correction to GS.
         if rank == 3 % size:
             print(' ------------ COMPUTING CORRELATION FUNCTIONS AT R=0  ------------ ')
             compute_corr_fct(param)
@@ -114,8 +113,6 @@ def compute_profiles(param):
     if not os.path.isdir('./physics'):
         os.mkdir('./physics')
 
-
-
     model_name = param.sim.model_name
     pkl_name = './profiles/' + model_name + '.pkl'
     grid_model = rad.profiles(param)
@@ -125,6 +122,7 @@ def compute_profiles(param):
     print(' ')
     end_time = time.time()
     print('It took ' + print_time(end_time - start_time) + ' to compute the profiles.')
+
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
                               read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,
@@ -235,7 +233,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                         r_lyal = grid_model.r_lyal  # np.logspace(-5, 2, 1000, base=10)     ##    physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
                         # rho_alpha_ = grid_model.rho_alpha[ind_z, :, i]  # rho_alpha(r_lyal, Mh_, zgrid, param)[0]
                         x_alpha_prof = 1.81e11 * (rho_alpha_) / (
-                                    1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
+                                1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
 
                         ### This is the position of halos in base "nGrid". We use this to speed up the code.
                         ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
@@ -265,18 +263,16 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                         LBox / (1 + z)) ** 3 / np.mean(kernel_xHII)
                                 # extra_ion = put_profiles_group(Pos_Halos_Grid[indices], kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(kernel_xHII) / 1e-7 * renorm
 
-
-                                #extra_ion
+                                # extra_ion
                                 Grid_xHII_i += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
-                                                               nbr_of_halos,
-                                                               kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(
+                                                                  nbr_of_halos,
+                                                                  kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(
                                     kernel_xHII) / 1e-7 * renorm
                                 # bubble_volume = np.trapz(4 * np.pi * radial_grid ** 2 * x_HII_profile, radial_grid)
                                 # print('bubble volume is ', len(indices) * bubble_volume,'pMpc, grid volume is', np.sum(extra_ion)* (LBox /nGrid/ (1 + z)) ** 3 )
-                                #Grid_xHII_i += extra_ion
+                                # Grid_xHII_i += extra_ion
 
                             del kernel_xHII
-
 
                         if lyal:
                             ### We use this stacked_kernel functions to impose periodic boundary conditions when the lyal or T profiles extend outside the box size. Very important for Lyman-a.
@@ -313,7 +309,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 print('.... Done painting profiles. ')
 
                 print('Dealing with the overlap of ionised bubbles.... ')
-                #Grid_Storage = np.copy(Grid_xHII_i)
+                # Grid_Storage = np.copy(Grid_xHII_i)
 
                 t_start_spreading = time.time()
                 if np.sum(Grid_xHII_i) < nGrid ** 3 and ion:
@@ -357,8 +353,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                     Grid_xtot = Grid_xal
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
 
-    PS_dTb, k_bins = t2c.power_spectrum.power_spectrum_1d(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
-                                                          kbins=def_k_bins(param))
+    PS_dTb, k_bins = auto_PS(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
+                             kbins=def_k_bins(param))
 
     if not RSD:
         dTb_RSD_mean = 0
@@ -368,7 +364,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         Grid_dTb_RSD = dTb_RSD(param, z, delta_b, Grid_dTb)
         delta_Grid_dTb_RSD = Grid_dTb_RSD / np.mean(Grid_dTb_RSD) - 1
         PS_dTb_RSD = \
-            t2c.power_spectrum.power_spectrum_1d(delta_Grid_dTb_RSD, box_dims=LBox, kbins=def_k_bins(param))[0]
+            auto_PS(delta_Grid_dTb_RSD, box_dims=LBox, kbins=def_k_bins(param))[0]
         dTb_RSD_mean = np.mean(Grid_dTb_RSD)
 
         ##
@@ -564,8 +560,8 @@ def grid_dTb(param, ion='bubbles', RSD=False):
             # Grid_Tspin = ((1 / T_cmb_z + (Grid_xcoll+Grid_xal) / Grid_Temp) / (1 + Grid_xcoll+Grid_xal)) ** -1
 
             Grid_dTb = factor * np.sqrt(1 + zz_) * (1 - T_cmb_z / Grid_Tspin) * Grid_xHI * (delta_b + 1)
-            PS_dTb, k_bins = t2c.power_spectrum.power_spectrum_1d(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
-                                                                  kbins=def_k_bins(param))
+            PS_dTb, k_bins = auto_PS(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
+                                     kbins=def_k_bins(param))
 
             if not RSD:
                 dTb_RSD_mean = 0
@@ -575,7 +571,7 @@ def grid_dTb(param, ion='bubbles', RSD=False):
                 Grid_dTb_RSD = dTb_RSD(param, z, delta_b, Grid_dTb)
                 delta_Grid_dTb_RSD = Grid_dTb_RSD / np.mean(Grid_dTb_RSD) - 1
                 PS_dTb_RSD = \
-                    t2c.power_spectrum.power_spectrum_1d(delta_Grid_dTb_RSD, box_dims=LBox, kbins=def_k_bins(param))[0]
+                    auto_PS(delta_Grid_dTb_RSD, box_dims=LBox, kbins=def_k_bins(param))[0]
                 dTb_RSD_mean = np.mean(Grid_dTb_RSD)
 
             GS_PS_dict = {'z': zz_, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
@@ -695,62 +691,73 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
 
     dens_field = param.sim.dens_field
     if dens_field is not None:
-        PS_rho = t2c.power_spectrum.power_spectrum_1d(delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rho_xHII = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rho_xal = t2c.power_spectrum.cross_power_spectrum_1d(delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rho_T = t2c.power_spectrum.cross_power_spectrum_1d(delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rho = auto_PS(delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rho_xHII = cross_PS(delta_XHII, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rho_xal = cross_PS(delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rho_T = cross_PS(delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
     else:
         PS_rho, PS_rho_xHII, PS_rho_xal, PS_rho_T = 0, 0, 0, 0  # rho/rhomean-1
         print('no density field provided.')
 
-    PS_xHII = t2c.power_spectrum.power_spectrum_1d(delta_XHII, box_dims=Lbox, kbins=kbins)[0]
-    PS_T = t2c.power_spectrum.power_spectrum_1d(delta_T, box_dims=Lbox, kbins=kbins)[0]
-    PS_xal = t2c.power_spectrum.power_spectrum_1d(delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+    PS_xHII = auto_PS(delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+    PS_T = auto_PS(delta_T, box_dims=Lbox, kbins=kbins)[0]
+    PS_xal = auto_PS(delta_x_al, box_dims=Lbox, kbins=kbins)[0]
 
-    PS_T_lyal = t2c.power_spectrum.cross_power_spectrum_1d(delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
-    PS_T_xHII = t2c.power_spectrum.cross_power_spectrum_1d(delta_T, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
-    PS_lyal_xHII = t2c.power_spectrum.cross_power_spectrum_1d(delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+    PS_T_lyal = cross_PS(delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+    PS_T_xHII = cross_PS(delta_T, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+    PS_lyal_xHII = cross_PS(delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
 
     dict_cross_corr = {'PS_xHII': PS_xHII, 'PS_T': PS_T, 'PS_xal': PS_xal, 'PS_rho': PS_rho, 'PS_T_lyal': PS_T_lyal,
                        'PS_T_xHII': PS_T_xHII, 'PS_lyal_xHII': PS_lyal_xHII, 'PS_rho_xHII': PS_rho_xHII,
                        'PS_rho_xal': PS_rho_xal, 'PS_rho_T': PS_rho_T}
 
     if third_order:
-        PS_rTT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[
-            0]
-        PS_raa = \
-            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[
-                0]
-        PS_rbb = \
-            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rTb = \
-            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_aTr = \
-            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
-        PS_abr = \
-            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[
-                0]
-        PS_rrT = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
-        PS_rra = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
-        PS_rrb = t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII ** 2, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_ra_a = cross_PS(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_r_aa = cross_PS(delta_XHII, delta_x_al ** 2, box_dims=Lbox, kbins=kbins)[0]
 
-        PS_rTrT = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_T, box_dims=Lbox, kbins=kbins)[0]
-        PS_rara = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
-        PS_rbrb = t2c.power_spectrum.power_spectrum_1d(delta_XHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
-        PS_rarb = \
-            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_x_al, delta_XHII * delta_rho, box_dims=Lbox,
-                                                       kbins=kbins)[0]
-        PS_rTrb = \
-            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_rho, box_dims=Lbox,
-                                                       kbins=kbins)[0]
-        PS_rTra = \
-            t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII * delta_T, delta_XHII * delta_x_al, box_dims=Lbox,
-                                                       kbins=kbins)[0]
+        PS_rb_b = cross_PS(delta_XHII * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
 
-        Dict_3rd_order = {'PS_rTT': PS_rTT, 'PS_raa': PS_raa, 'PS_rbb': PS_rbb, 'PS_rTb': PS_rTb, 'PS_aTr': PS_aTr,
-                          'PS_abr': PS_abr, 'PS_rrT': PS_rrT, 'PS_rra': PS_rra, 'PS_rrb': PS_rrb, 'PS_rTrT': PS_rTrT,
-                          'PS_rara': PS_rara, 'PS_rbrb': PS_rbrb, 'PS_rarb': PS_rarb, 'PS_rTrb': PS_rTrb,
-                          'PS_rTra': PS_rTra}
+        PS_rT_T = cross_PS(delta_XHII * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_r_TT = cross_PS(delta_XHII, delta_T ** 2, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_ab_r = cross_PS(delta_rho * delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+        PS_rb_a = cross_PS(delta_XHII * delta_rho, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_ra_b = cross_PS(delta_XHII * delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_rT_b = cross_PS(delta_XHII * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_rb_T = cross_PS(delta_XHII * delta_rho, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_Tb_r = cross_PS(delta_T * delta_rho, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_aT_r = cross_PS(delta_x_al * delta_T, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+        PS_ar_T = cross_PS(delta_XHII * delta_x_al, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_Tr_a = cross_PS(delta_XHII * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_Tr_r = cross_PS(delta_T * delta_XHII, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+        PS_ar_r = cross_PS(delta_x_al * delta_XHII, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+        PS_br_r = cross_PS(delta_rho * delta_XHII, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_rT_rT = auto_PS(delta_XHII * delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_ra_ra = auto_PS(delta_XHII * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rb_rb = auto_PS(delta_XHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_raa_r = cross_PS(delta_XHII * delta_x_al ** 2, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+        PS_rTT_r = cross_PS(delta_XHII * delta_T ** 2, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_rba_r = cross_PS(delta_XHII * delta_rho * delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+        PS_rTa_r = cross_PS(delta_XHII * delta_T * delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+        PS_rTb_r = cross_PS(delta_XHII * delta_T * delta_rho, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_rb_ra = cross_PS(delta_XHII * delta_rho, delta_XHII * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rT_ra = cross_PS(delta_XHII * delta_T, delta_XHII * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_rT_rb = cross_PS(delta_XHII * delta_T, delta_XHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
+
+        Dict_3rd_order = {'PS_ra_a': PS_ra_a, 'PS_r_aa': PS_r_aa, 'PS_rb_b': PS_rb_b, 'PS_rT_T': PS_rT_T,
+                          'PS_r_TT': PS_r_TT, 'PS_ab_r': PS_ab_r, 'PS_rb_a': PS_rb_a, 'PS_ra_b': PS_ra_b,
+                          'PS_rT_b': PS_rT_b, 'PS_rb_T': PS_rb_T, 'PS_Tb_r': PS_Tb_r, 'PS_aT_r': PS_aT_r,
+                          'PS_ar_T': PS_ar_T, 'PS_Tr_a': PS_Tr_a, 'PS_Tr_r': PS_Tr_r, 'PS_ar_r': PS_ar_r,
+                          'PS_br_r': PS_br_r, 'PS_rT_rT': PS_rT_rT, 'PS_ra_ra': PS_ra_ra, 'PS_rb_rb': PS_rb_rb,
+                          'PS_raa_r': PS_raa_r, 'PS_rTT_r': PS_rTT_r, 'PS_rba_r': PS_rba_r, 'PS_rTa_r': PS_rTa_r,
+                          'PS_rTb_r': PS_rTb_r, 'PS_rb_ra': PS_rb_ra, 'PS_rT_ra': PS_rT_ra, 'PS_rT_rb': PS_rT_rb}
         dict_cross_corr = Merge(Dict_3rd_order, dict_cross_corr)
 
     return Merge(GS_PS_dict, dict_cross_corr)
@@ -847,17 +854,17 @@ def compute_PS(param, Tspin=False, RSD=False, ion='bubbles', cross_corr=False):
         dens_field = param.sim.dens_field
         if dens_field is not None:
             delta_rho = load_delta_b(param, z_string_format(z))
-            PS_rho[ii] = t2c.power_spectrum.power_spectrum_1d(delta_rho, box_dims=Lbox, kbins=kbins)[0]
+            PS_rho[ii] = auto_PS(delta_rho, box_dims=Lbox, kbins=kbins)[0]
             if cross_corr:
                 PS_rho_xHII[ii] = \
-                    t2c.power_spectrum.cross_power_spectrum_1d(delta_XHII, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+                    cross_PS(delta_XHII, delta_rho, box_dims=Lbox, kbins=kbins)[0]
                 PS_rho_xal[ii] = \
-                    t2c.power_spectrum.cross_power_spectrum_1d(delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+                    cross_PS(delta_x_al, delta_rho, box_dims=Lbox, kbins=kbins)[0]
                 PS_rho_T[ii] = \
-                    t2c.power_spectrum.cross_power_spectrum_1d(delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+                    cross_PS(delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
             if Tspin:
                 PS_rho_Ts[ii] = \
-                    t2c.power_spectrum.cross_power_spectrum_1d(delta_Tspin, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+                    cross_PS(delta_Tspin, delta_rho, box_dims=Lbox, kbins=kbins)[0]
         else:
             delta_rho = 0, 0  # rho/rhomean-1
             print('no density field provided.')
@@ -865,31 +872,31 @@ def compute_PS(param, Tspin=False, RSD=False, ion='bubbles', cross_corr=False):
         if RSD:
             Grid_dTb_RSD = dTb_RSD(param, zz_, delta_rho, Grid_dTb)
             delta_Grid_dTb_RSD = Grid_dTb_RSD / np.mean(Grid_dTb_RSD) - 1
-            PS_dTb_RSD[ii] = t2c.power_spectrum.power_spectrum_1d(delta_Grid_dTb_RSD, box_dims=Lbox, kbins=kbins)[0]
+            PS_dTb_RSD[ii] = auto_PS(delta_Grid_dTb_RSD, box_dims=Lbox, kbins=kbins)[0]
             dTb_RSD_arr[ii] = np.mean(Grid_dTb_RSD)
 
         z_arr[ii] = zz_
         if cross_corr:
-            PS_xHII[ii] = t2c.power_spectrum.power_spectrum_1d(delta_XHII, box_dims=Lbox, kbins=kbins)[0]
-            PS_T[ii] = t2c.power_spectrum.power_spectrum_1d(delta_T, box_dims=Lbox, kbins=kbins)[0]
-            PS_xal[ii] = t2c.power_spectrum.power_spectrum_1d(delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+            PS_xHII[ii] = auto_PS(delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_T[ii] = auto_PS(delta_T, box_dims=Lbox, kbins=kbins)[0]
+            PS_xal[ii] = auto_PS(delta_x_al, box_dims=Lbox, kbins=kbins)[0]
 
-        PS_dTb[ii], k_bins = t2c.power_spectrum.power_spectrum_1d(delta_dTb, box_dims=Lbox, kbins=kbins)
+        PS_dTb[ii], k_bins = auto_PS(delta_dTb, box_dims=Lbox, kbins=kbins)
         dTb_arr[ii] = np.mean(Grid_dTb)
 
         if cross_corr:
-            PS_T_lyal[ii] = t2c.power_spectrum.cross_power_spectrum_1d(delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[
+            PS_T_lyal[ii] = cross_PS(delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[
                 0]
-            PS_T_xHII[ii] = t2c.power_spectrum.cross_power_spectrum_1d(delta_T, delta_XHII, box_dims=Lbox, kbins=kbins)[
+            PS_T_xHII[ii] = cross_PS(delta_T, delta_XHII, box_dims=Lbox, kbins=kbins)[
                 0]
             PS_lyal_xHII[ii] = \
-                t2c.power_spectrum.cross_power_spectrum_1d(delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+                cross_PS(delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
 
         if Tspin:
-            PS_Ts[ii] = t2c.power_spectrum.power_spectrum_1d(delta_Tspin, box_dims=Lbox, kbins=kbins)[0]
+            PS_Ts[ii] = auto_PS(delta_Tspin, box_dims=Lbox, kbins=kbins)[0]
             PS_Ts_xHII[ii] = \
-                t2c.power_spectrum.cross_power_spectrum_1d(delta_Tspin, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
-            PS_T_Ts[ii] = t2c.power_spectrum.cross_power_spectrum_1d(delta_Tspin, delta_T, box_dims=Lbox, kbins=kbins)[
+                cross_PS(delta_Tspin, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_T_Ts[ii] = cross_PS(delta_Tspin, delta_T, box_dims=Lbox, kbins=kbins)[
                 0]
 
     Dict = {'z': z_arr, 'k': k_bins, 'PS_xHII': PS_xHII, 'PS_T': PS_T, 'PS_xal': PS_xal, 'PS_dTb': PS_dTb,
@@ -1051,9 +1058,9 @@ def saturated_Tspin(param, ion='bubbles'):
         delta_dTb = Grid_dTb / np.mean(Grid_dTb) - 1
         xHII.append(np.mean(Grid_xHII))
         dTb.append(np.mean(Grid_dTb))
-        PS_rho[ii] = t2c.power_spectrum.power_spectrum_1d(delta_b, box_dims=Lbox, kbins=kbins)[0]
-        PS_xHII[ii], k_bins = t2c.power_spectrum.power_spectrum_1d(delta_XHII, box_dims=Lbox, kbins=kbins)
-        PS_dTb[ii] = t2c.power_spectrum.power_spectrum_1d(delta_dTb, box_dims=Lbox, kbins=kbins)[0]
+        PS_rho[ii] = auto_PS(delta_b, box_dims=Lbox, kbins=kbins)[0]
+        PS_xHII[ii], k_bins = auto_PS(delta_XHII, box_dims=Lbox, kbins=kbins)
+        PS_dTb[ii] = auto_PS(delta_dTb, box_dims=Lbox, kbins=kbins)[0]
 
     z_arr, xHII, dTb = np.array(zz), np.array(xHII), np.array(dTb)
     Dict = {'z': z_arr, 'k': k_bins, 'dTb': dTb, 'xHII': xHII, 'PS_dTb': PS_dTb, 'PS_xHII': PS_xHII, 'PS_rho': PS_rho}

@@ -5,6 +5,7 @@ Basic functions to load and save profiles, 3D maps etc...
 import pickle
 import numpy as np
 from .constants import rhoc0, Tcmb0
+import tools21cm as t2c
 
 def load_f(file):
     import pickle
@@ -37,9 +38,7 @@ def load_halo(param, z_str):
     return halo_catalog
 
 
-
-
-def format_file_name(param,dir_name,z,qty):
+def format_file_name(param, dir_name, z, qty):
     """
     Parameters
     ----------
@@ -94,7 +93,7 @@ def load_grid(param, z, type=None):
         elif np.all(grid == 1):
             Ncell = param.sim.Ncell
             return np.zeros((Ncell, Ncell, Ncell)) + 1
-        else :
+        else:
             return grid
     else:
         print('grid type should be dTb, lyal, Tk, exc_set, sem_num, or bubbles. Abort')
@@ -126,11 +125,11 @@ def save_grid(param, z, grid, type=None):
     elif type == 'Tk':
         save_f(file=dir_name + 'Tk_' + nGrid + '_' + out_name + '_z' + z_str, obj=grid)
     elif type == 'exc_set':
-        save_f(file=dir_name + 'xHII_exc_set_' + nGrid  + '_' + out_name + '_z' + z_str, obj=grid)
+        save_f(file=dir_name + 'xHII_exc_set_' + nGrid + '_' + out_name + '_z' + z_str, obj=grid)
     elif type == 'sem_num':
         save_f(file=dir_name + 'xHII_Sem_Num_' + nGrid + '_' + out_name + '_z' + z_str, obj=grid)
     elif type == 'bubbles':
-        save_f(file=dir_name + 'xHII_' + nGrid  + '_' + out_name + '_z' + z_str, obj=grid)
+        save_f(file=dir_name + 'xHII_' + nGrid + '_' + out_name + '_z' + z_str, obj=grid)
     else:
         print('grid type should be dTb, lyal, exc_set, sem_num, or bubbles. Abort')
         exit()
@@ -156,8 +155,6 @@ def z_string_format(zz):
     return txt.zfill(5)
 
 
-
-
 def def_redshifts(param):
     """
     Parameters
@@ -169,7 +166,8 @@ def def_redshifts(param):
     The input redshifts where profiles will be computed. It should correspond to some input density fields and halo catalogs.
     """
     if isinstance(param.solver.Nz, int):
-        print('param.solver.Nz is given as an integer. We define z values in linspace from ', param.solver.z_max, 'to ', param.solver.z_min)
+        print('param.solver.Nz is given as an integer. We define z values in linspace from ', param.solver.z_max, 'to ',
+              param.solver.z_min)
         z_arr = np.linspace(param.solver.z_max, param.solver.z_min, param.solver.Nz)
     elif isinstance(param.solver.Nz, list):
         print('param.solver.Nz is given as a list.')
@@ -185,27 +183,31 @@ def def_redshifts(param):
     return z_arr
 
 
-
-
-
-
-def Beta(zz,PS,qty='Tk'):
-    if qty=='Tk':
-        Tcmb = Tcmb0 *  (1 + zz)
+def Beta(zz, PS, qty='Tk'):
+    if qty == 'Tk':
+        Tcmb = Tcmb0 * (1 + zz)
         beta_T = Tcmb / (PS['Tk'] - Tcmb)
         return beta_T
     elif qty == 'lyal':
         x_al = PS['x_al']
-        x_tot = x_al+ PS['x_coll']
+        x_tot = x_al + PS['x_coll']
         return x_al / x_tot / (1 + x_tot)
-    elif qty=='reio':
-        return -PS['x_HII']/(1-PS['x_HII'])
+    elif qty == 'reio':
+        return -PS['x_HII'] / (1 - PS['x_HII'])
     else:
         print('qty should be either Tk, lyal, or reio.')
 
 
+def cross_PS(arr1, arr2, box_dims, kbins):
+    return t2c.power_spectrum.cross_power_spectrum_1d(arr1, arr2, box_dims=box_dims, kbins=kbins)
+
+
+def auto_PS(arr1, arr2, box_dims, kbins):
+    return t2c.power_spectrum.power_spectrum_1d(arr1, arr2, box_dims=box_dims, kbins=kbins)
+
 
 from datetime import timedelta
+
 
 def print_time(delta_t):
     """
@@ -220,9 +222,7 @@ def print_time(delta_t):
     return "{:0>8}".format(str(timedelta(seconds=round(delta_t))))
 
 
-
-
-def load_pkdgrav_density_field(file,LBox,nGrid):
+def load_pkdgrav_density_field(file, LBox, nGrid):
     """
     Parameters
     ----------
