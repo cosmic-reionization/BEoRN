@@ -382,7 +382,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         import copy
         param_copy = copy.deepcopy(
             param)  # we do this since in compute_var we change the kbins to go to smaller scales.
-        compute_var_single_z(param_copy, z, Grid_xal, Grid_xHII, Grid_Temp)
+        compute_var_single_z(param_copy, z, Grid_xal, Grid_xHII, Grid_Temp,k_bins)
 
     if param.sim.store_grids:
         if temp:
@@ -1221,7 +1221,8 @@ def gather_variances(param):
     save_f(file='./variances/var_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
 
 
-def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
+def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,k_bins):
+    # k_bins : extra kbins to measure the variance at same k values as PS
     z_str = z_string_format(z)
     print('Computing variance for xal, xHII and Temp at z = ' + z_str + '....')
     tstart = time.time()
@@ -1234,9 +1235,9 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
     if (Grid_xal == np.array([0])).all():
         Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
 
-    variance_lyal, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xal))
-    variance_xHII, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xHII))
-    variance_Temp, R_scale, k_values = compute_var_field(param, delta_fct(Grid_Temp))
+    variance_lyal, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xal),k_bins)
+    variance_xHII, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xHII),k_bins)
+    variance_Temp, R_scale, k_values = compute_var_field(param, delta_fct(Grid_Temp),k_bins)
 
     print('nbr of scales is', len(k_values))
 
@@ -1247,7 +1248,7 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp):
     print('.... Done computing variance. It took :', print_time(time.time() - tstart))
 
 
-def compute_var_field(param, field):
+def compute_var_field(param, field,k_bins):
     from .excursion_set import profile_kern
     from astropy.convolution import convolve_fft
 
@@ -1260,6 +1261,8 @@ def compute_var_field(param, field):
     param.sim.kbin = kbin
 
     k_values = def_k_bins(param)
+    k_values = np.sort(np.unique(np.concatenate((k_values,k_bins))))
+    
     R_scale = np.pi / k_values
     nGrid = param.sim.Ncell  # number of grid cells
 
