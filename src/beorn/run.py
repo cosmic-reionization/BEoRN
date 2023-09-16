@@ -1154,7 +1154,7 @@ def dTb_RSD(param, zz, delta_b, grid_dTb):
     return dT_rsd
 
 
-def compute_variance(param):
+def compute_variance(param,k_bins):
     if not os.path.isdir('./variances'):
         os.mkdir('./variances')
 
@@ -1178,7 +1178,7 @@ def compute_variance(param):
             Grid_Temp = load_grid(param, z=z, type='Tk')
             Grid_xHII = load_grid(param, z=z, type='bubbles')
             Grid_xal = load_grid(param, z=z, type='lyal')
-            compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp)
+            compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,k_bins)
             print('----- Variance at z = ', z, ' is computed -------')
 
     end_time = time.time()
@@ -1262,7 +1262,7 @@ def compute_var_field(param, field,k_bins):
 
     k_values = def_k_bins(param)
     k_values = np.sort(np.unique(np.concatenate((k_values,k_bins))))
-    
+
     R_scale = np.pi / k_values
     nGrid = param.sim.Ncell  # number of grid cells
 
