@@ -1378,3 +1378,85 @@ def compute_corr_fct(param):
     print('Finished computing Xi at r=0. It took in total: ', print_time(end_time - start_time))
     print('  ')
     save_f(file='./variances/Xi_corr_fct_' + str(param.sim.Ncell) + '.pkl', obj=Dict)
+
+
+
+
+
+
+
+
+
+def investigate_xal(param):
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    if not os.path.isdir('./physics'):
+        os.mkdir('./physics')
+
+    start_time = time.time()
+    print('Computnig PS of xal/(1+xal).')
+
+    if param.sim.cores > 1:
+        import mpi4py.MPI
+        rank = mpi4py.MPI.COMM_WORLD.Get_rank()
+        size = mpi4py.MPI.COMM_WORLD.Get_size()
+    else:
+        rank = 0
+        size = 1
+
+    kbins = def_k_bins(param)
+    z_arr = def_redshifts(param)
+    Ncell = param.sim.Ncell
+    Lbox = param.sim.Lbox
+
+    for ii, z in enumerate(z_arr):
+        z = np.round(z, 2)
+        z_str = z_string_format(z)
+        if rank == ii % size:
+            print('Core nbr', rank, 'is taking care of z = ', z)
+            print('----- Investigating xal for z =', z, '-------')
+            Grid_xal = load_grid(param, z=z, type='lyal')
+            PS_xal,kk = auto_PS(delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)
+            PS_xal_over_1_plus_xal = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)), box_dims=Lbox, kbins=kbins)[0]
+            mean_xal = np.mean(Grid_xal)
+            mean_1_ov_1_plus_xal = np.mean(Grid_xal/(Grid_xal+1))
+            var_1_ov_1_plus_xal = np.var(Grid_xal / (Grid_xal + 1))
+
+            print('----- Investigating xal at z = ', z, ' is computed -------')
+
+
+            Dict = {'z': z, 'k': kk, 'PS_xal': PS_xal, 'PS_xal_over_1_plus_xal': PS_xal_over_1_plus_xal, 'xal': mean_xal, '1_ov_1_pl_xal': mean_1_ov_1_plus_xal,'var_1_ov_1_plus_xal':var_1_ov_1_plus_xal}
+            save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
+                   obj=Dict)
+
+
+
+    comm.Barrier()
+
+
+    if rank == 0:
+        from collections import defaultdict
+        dd = defaultdict(list)
+
+
+        for ii, z in enumerate(z_arr):
+            z_str = z_string_format(z)
+            file = './physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
+            if exists(file):
+                xal_z = load_f(file)
+                for key, value in xal_z.items():
+                    dd[key].append(value)
+                os.remove(file)
+
+        
+        for key, value in dd.items():  # change lists to numpy arrays
+            dd[key] = np.array(value)
+
+        dd['k'] = xal_z['k']
+
+        save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
+
+
+        end_time = time.time()
+        print('Finished investigating xal. It took in total: ', end_time - start_time)
+        print('  ')
