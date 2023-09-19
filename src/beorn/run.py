@@ -1421,8 +1421,9 @@ def investigate_xal(param):
             delta_b = load_delta_b(param, z_str)
 
             PS_xal,kk = auto_PS(delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)
-            PS_xal_term_x_temps_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)), box_dims=Lbox, kbins=kbins)[0]
-            PS_xal_over_1_plus_xal = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)), box_dims=Lbox, kbins=kbins)[0]
+            PS_xal_term_x_temps_term= auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)), box_dims=Lbox, kbins=kbins)[0]
+            PS_xal_matter           = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1+delta_b)), box_dims=Lbox, kbins=kbins)[0]
+            PS_xal_over_1_plus_xal  = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)), box_dims=Lbox, kbins=kbins)[0]
             PS_xal_term_x_reio_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-Grid_xHII)), box_dims=Lbox, kbins=kbins)[0]
             PS_xal_Temp_matter_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)), box_dims=Lbox, kbins=kbins)[0]
             PS_xal_reio_Temp_matter_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)*(1-Grid_xHII)), box_dims=Lbox, kbins=kbins)[0]
@@ -1432,6 +1433,8 @@ def investigate_xal(param):
             mean_xHII = np.mean(Grid_xHII)
             mean_Temp = np.mean(Grid_Temp)
             mean_xal_reio = np.mean(Grid_xal/(Grid_xal+1)*(1-Grid_xHII))
+            mean_xal_temp = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp))
+            mean_xal_matter = np.mean(Grid_xal/(Grid_xal+1)*(1+delta_b))
             mean_xal_temp_matter = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b))
             mean_xal_reio_temp_matter = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)*(1-Grid_xHII))
             mean_1_ov_1_plus_xal = np.mean(Grid_xal/(Grid_xal+1))
@@ -1443,7 +1446,8 @@ def investigate_xal(param):
             Dict = {'z': z, 'k': kk, 'PS_xal': PS_xal, 'PS_xal_over_1_plus_xal': PS_xal_over_1_plus_xal,'PS_xal_term_x_temps_term':PS_xal_term_x_temps_term,
                     'xal': mean_xal, '1_ov_1_pl_xal': mean_1_ov_1_plus_xal,'var_1_ov_1_plus_xal':var_1_ov_1_plus_xal,'PS_xal_term_x_reio_term'      : PS_xal_term_x_reio_term,
                 'PS_xal_Temp_matter_term': PS_xal_Temp_matter_term      ,'PS_xal_reio_Temp_matter_term'  : PS_xal_reio_Temp_matter_term ,'mean_xal'   : mean_xal,
-                'mean_xHII'  : mean_xHII ,'mean_Temp'  : mean_Temp ,'mean_xal_reio' : mean_xal_reio,'mean_xal_temp_matter'  : mean_xal_temp_matter ,'mean_xal_reio_temp_matter'  : mean_xal_reio_temp_matter }
+                'mean_xHII'  : mean_xHII ,'mean_Temp'  : mean_Temp ,'mean_xal_reio' : mean_xal_reio,'mean_xal_temp_matter'  : mean_xal_temp_matter ,'mean_xal_reio_temp_matter'  : mean_xal_reio_temp_matter,'mean_xal_temp':mean_xal_temp,
+                   'mean_xal_matter':mean_xal_matter ,'PS_xal_matter':PS_xal_matter}
             save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
 
