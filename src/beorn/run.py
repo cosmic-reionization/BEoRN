@@ -9,7 +9,7 @@ import numpy as np
 import time
 import datetime
 from .constants import cm_per_Mpc, M_sun, m_H, rhoc0, Tcmb0
-from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct
+from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct, T_cmb
 import os
 from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
     stacked_T_kernel, cumulated_number_halos, average_profile, log_binning, bin_edges_log
@@ -1415,17 +1415,35 @@ def investigate_xal(param):
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
             print('----- Investigating xal for z =', z, '-------')
+            Grid_Temp = load_grid(param, z=z, type='Tk')
+            Grid_xHII = load_grid(param, z=z, type='bubbles')
             Grid_xal = load_grid(param, z=z, type='lyal')
+            delta_b = load_delta_b(param, z_str)
+
             PS_xal,kk = auto_PS(delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)
+            PS_xal_term_x_temps_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)), box_dims=Lbox, kbins=kbins)[0]
             PS_xal_over_1_plus_xal = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)), box_dims=Lbox, kbins=kbins)[0]
-            mean_xal = np.mean(Grid_xal)
+            PS_xal_term_x_reio_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-Grid_xHII)), box_dims=Lbox, kbins=kbins)[0]
+            PS_xal_Temp_matter_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)), box_dims=Lbox, kbins=kbins)[0]
+            PS_xal_reio_Temp_matter_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)*(1-Grid_xHII)), box_dims=Lbox, kbins=kbins)[0]
+
+
+            mean_xal  = np.mean(Grid_xal)
+            mean_xHII = np.mean(Grid_xHII)
+            mean_Temp = np.mean(Grid_Temp)
+            mean_xal_reio = np.mean(Grid_xal/(Grid_xal+1)*(1-Grid_xHII))
+            mean_xal_temp_matter = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b))
+            mean_xal_reio_temp_matter = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)*(1-Grid_xHII))
             mean_1_ov_1_plus_xal = np.mean(Grid_xal/(Grid_xal+1))
             var_1_ov_1_plus_xal = np.var(Grid_xal / (Grid_xal + 1))
 
             print('----- Investigating xal at z = ', z, ' is computed -------')
 
 
-            Dict = {'z': z, 'k': kk, 'PS_xal': PS_xal, 'PS_xal_over_1_plus_xal': PS_xal_over_1_plus_xal, 'xal': mean_xal, '1_ov_1_pl_xal': mean_1_ov_1_plus_xal,'var_1_ov_1_plus_xal':var_1_ov_1_plus_xal}
+            Dict = {'z': z, 'k': kk, 'PS_xal': PS_xal, 'PS_xal_over_1_plus_xal': PS_xal_over_1_plus_xal,'PS_xal_term_x_temps_term':PS_xal_term_x_temps_term,
+                    'xal': mean_xal, '1_ov_1_pl_xal': mean_1_ov_1_plus_xal,'var_1_ov_1_plus_xal':var_1_ov_1_plus_xal,'PS_xal_term_x_reio_term'      : PS_xal_term_x_reio_term,
+                'PS_xal_Temp_matter_term': PS_xal_Temp_matter_term      ,'PS_xal_reio_Temp_matter_term'  : PS_xal_reio_Temp_matter_term ,'mean_xal'   : mean_xal,
+                'mean_xHII'  : mean_xHII ,'mean_Temp'  : mean_Temp ,'mean_xal_reio' : mean_xal_reio,'mean_xal_temp_matter'  : mean_xal_temp_matter ,'mean_xal_reio_temp_matter'  : mean_xal_reio_temp_matter }
             save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
 
@@ -1448,7 +1466,7 @@ def investigate_xal(param):
                     dd[key].append(value)
                 os.remove(file)
 
-        
+
         for key, value in dd.items():  # change lists to numpy arrays
             dd[key] = np.array(value)
 
