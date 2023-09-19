@@ -1407,6 +1407,7 @@ def investigate_xal(param):
     kbins = def_k_bins(param)
     z_arr = def_redshifts(param)
     Ncell = param.sim.Ncell
+    nGrid = Ncell
     Lbox = param.sim.Lbox
 
     for ii, z in enumerate(z_arr):
@@ -1419,6 +1420,16 @@ def investigate_xal(param):
             Grid_xHII = load_grid(param, z=z, type='bubbles')
             Grid_xal = load_grid(param, z=z, type='lyal')
             delta_b = load_delta_b(param, z_str)
+
+            if Grid_Temp.size == 1:  ## to avoid error when measuring power spectrum
+                Grid_Temp = np.full((nGrid, nGrid, nGrid), 1)
+            if Grid_xHII.size == 1:
+                if Grid_xHII == np.array([0]):
+                    Grid_xHII = np.full((nGrid, nGrid, nGrid), 0)  ## to avoid div by zero
+                elif Grid_xHII == np.array([0]):
+                    Grid_xHII = np.full((nGrid, nGrid, nGrid), 1)  ## to avoid div by zero
+            if Grid_xal.size == 1:
+                Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
 
             PS_xal,kk = auto_PS(delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)
             PS_xal_term_x_temps_term= auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)), box_dims=Lbox, kbins=kbins)[0]
