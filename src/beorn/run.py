@@ -1441,6 +1441,9 @@ def investigate_xal(param):
             mean_xal_reio_temp_matter = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)*(1-Grid_xHII))
             mean_1_ov_1_plus_xal = np.mean(Grid_xal/(Grid_xal+1))
             var_1_ov_1_plus_xal = np.var(Grid_xal / (Grid_xal + 1))
+            cross_var_temp_xal = np.mean(delta_fct(Grid_xal)*delta_fct(Grid_Temp))
+            var_xal = np.mean(delta_fct(Grid_xal)**2)
+            var_temp = np.mean(delta_fct(Grid_Temp)**2)
 
             print('----- Investigating xal at z = ', z, ' is computed -------')
 
@@ -1449,7 +1452,7 @@ def investigate_xal(param):
                     'xal': mean_xal, '1_ov_1_pl_xal': mean_1_ov_1_plus_xal,'var_1_ov_1_plus_xal':var_1_ov_1_plus_xal,'PS_xal_term_x_reio_term'      : PS_xal_term_x_reio_term,
                 'PS_xal_Temp_matter_term': PS_xal_Temp_matter_term      ,'PS_xal_reio_Temp_matter_term'  : PS_xal_reio_Temp_matter_term ,'mean_xal'   : mean_xal,
                 'mean_xHII'  : mean_xHII ,'mean_Temp'  : mean_Temp ,'mean_xal_reio' : mean_xal_reio,'mean_xal_temp_matter'  : mean_xal_temp_matter ,'mean_xal_reio_temp_matter'  : mean_xal_reio_temp_matter,'mean_xal_temp':mean_xal_temp,
-                   'mean_xal_matter':mean_xal_matter ,'PS_xal_matter':PS_xal_matter,'PS_temp':PS_temp,'mean_Temp_term':mean_Temp_term}
+                   'mean_xal_matter':mean_xal_matter ,'PS_xal_matter':PS_xal_matter,'PS_temp':PS_temp,'mean_Temp_term':mean_Temp_term,'cross_var_temp_xal':cross_var_temp_xal,'var_xal':var_xal,'var_temp':var_temp}
             save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
 
