@@ -1441,14 +1441,19 @@ def investigate_xal(param):
             PS_xal_reio_Temp_matter_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)*(1-Grid_xHII)), box_dims=Lbox, kbins=kbins)[0]
 
 
-            PS_aT_a = cross_PS(delta_fct(Grid_xal)*delta_fct(Grid_Temp),delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
-            PS_aT_T = cross_PS(delta_fct(Grid_xal)*delta_fct(Grid_Temp),delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
-            PS_aa_a= cross_PS(delta_fct(Grid_xal)**2,delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
-            PS_aaa_a= cross_PS(delta_fct(Grid_xal)**3,delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
-            PS_aa_aa= cross_PS(delta_fct(Grid_xal)**2,delta_fct(Grid_xal)**2, box_dims=Lbox, kbins=kbins)[0]
+            PS_aa_a  = cross_PS(delta_fct(Grid_xal)**2,delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+            PS_aaa_a = cross_PS(delta_fct(Grid_xal)**3,delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+            PS_aa_aa = cross_PS(delta_fct(Grid_xal)**2,delta_fct(Grid_xal)**2, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_TT_T  = cross_PS(delta_fct(Grid_Temp) ** 2, delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
+            PS_TTT_T = cross_PS(delta_fct(Grid_Temp) ** 3, delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
+            PS_TT_TT = cross_PS(delta_fct(Grid_Temp) ** 2, delta_fct(Grid_Temp) ** 2, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_aT_a = cross_PS(delta_fct(Grid_xal) * delta_fct(Grid_Temp), delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+            PS_aT_T = cross_PS(delta_fct(Grid_xal) * delta_fct(Grid_Temp), delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
+
             PS_aa_T= cross_PS(delta_fct(Grid_xal)*delta_fct(Grid_xal),delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
             PS_TT_a= cross_PS(delta_fct(Grid_Temp)*delta_fct(Grid_Temp),delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
-            PS_TT_T= cross_PS(delta_fct(Grid_Temp)*delta_fct(Grid_Temp),delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
 
 
             mean_xal  = np.mean(Grid_xal)
@@ -1474,7 +1479,7 @@ def investigate_xal(param):
                 'PS_xal_Temp_matter_term': PS_xal_Temp_matter_term      ,'PS_xal_reio_Temp_matter_term'  : PS_xal_reio_Temp_matter_term ,'mean_xal'   : mean_xal,
                 'mean_xHII'  : mean_xHII ,'mean_Temp'  : mean_Temp ,'mean_xal_reio' : mean_xal_reio,'mean_xal_temp_matter'  : mean_xal_temp_matter ,'mean_xal_reio_temp_matter'  : mean_xal_reio_temp_matter,'mean_xal_temp':mean_xal_temp,
                    'mean_xal_matter':mean_xal_matter ,'PS_xal_matter':PS_xal_matter,'PS_temp':PS_temp,'mean_Temp_term':mean_Temp_term,'cross_var_temp_xal':cross_var_temp_xal,'var_xal':var_xal,'var_temp':var_temp,
-                    'PS_aT_a': PS_aT_a, 'PS_aT_T': PS_aT_T, 'PS_aa_a': PS_aa_a, 'PS_aa_T': PS_aa_T, 'PS_TT_a': PS_TT_a,'PS_aa_aa':PS_aa_aa,'PS_aaa_a':PS_aaa_a,
+                    'PS_aT_a': PS_aT_a, 'PS_aT_T': PS_aT_T, 'PS_aa_a': PS_aa_a, 'PS_aa_T': PS_aa_T, 'PS_TT_a': PS_TT_a, 'PS_aa_aa':PS_aa_aa,'PS_aaa_a':PS_aaa_a,'PS_TT_T':PS_TT_T,'PS_TT_TT':PS_TT_TT,'PS_TTT_T':PS_TTT_T,
                     'PS_TT_T': PS_TT_T}
             save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
