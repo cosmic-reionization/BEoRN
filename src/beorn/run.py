@@ -1478,7 +1478,7 @@ def investigate_xal(param):
             PS_error_3 = mean_xal**3/(1+mean_xal)**3*auto_PS(delta_fct(Grid_xal)**4/(1+Grid_xal), box_dims=Lbox, kbins=kbins)[0]
 
 
-            delta_U = delta_fct(Grid_xal)/(1+mean_xal)-delta_fct(Grid_xal)**2/(1+Grid_xal)+mean_xal/(1+mean_xal)
+            delta_U = delta_fct(Grid_xal)/(1+mean_xal)-delta_fct(Grid_xal)**2/(1+Grid_xal)*mean_xal/(1+mean_xal)
             PS_real_1 = auto_PS(delta_U, box_dims=Lbox, kbins=kbins)[0]
 
             Dict = {'z': z, 'k': kk, 'PS_xal': PS_xal, 'PS_xal_over_1_plus_xal': PS_xal_over_1_plus_xal,'PS_xal_term_x_temps_term':PS_xal_term_x_temps_term,
