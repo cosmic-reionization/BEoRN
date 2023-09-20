@@ -1478,13 +1478,16 @@ def investigate_xal(param):
             PS_error_3 = mean_xal**3/(1+mean_xal)**3*auto_PS(delta_fct(Grid_xal)**4/(1+Grid_xal), box_dims=Lbox, kbins=kbins)[0]
 
 
+            delta_U = delta_fct(Grid_xal)/(1+mean_xal)-delta_fct(Grid_xal)**2/(1+Grid_xal)+mean_xal/(1+mean_xal)
+            PS_real_1 = auto_PS(delta_U, box_dims=Lbox, kbins=kbins)[0]
+
             Dict = {'z': z, 'k': kk, 'PS_xal': PS_xal, 'PS_xal_over_1_plus_xal': PS_xal_over_1_plus_xal,'PS_xal_term_x_temps_term':PS_xal_term_x_temps_term,
                     'xal': mean_xal, '1_ov_1_pl_xal': mean_1_ov_1_plus_xal,'var_1_ov_1_plus_xal':var_1_ov_1_plus_xal,'PS_xal_term_x_reio_term'      : PS_xal_term_x_reio_term,
                 'PS_xal_Temp_matter_term': PS_xal_Temp_matter_term      ,'PS_xal_reio_Temp_matter_term'  : PS_xal_reio_Temp_matter_term ,'mean_xal'   : mean_xal,
                 'mean_xHII'  : mean_xHII ,'mean_Temp'  : mean_Temp ,'mean_xal_reio' : mean_xal_reio,'mean_xal_temp_matter'  : mean_xal_temp_matter ,'mean_xal_reio_temp_matter'  : mean_xal_reio_temp_matter,'mean_xal_temp':mean_xal_temp,
                    'mean_xal_matter':mean_xal_matter ,'PS_xal_matter':PS_xal_matter,'PS_temp':PS_temp,'mean_Temp_term':mean_Temp_term,'cross_var_temp_xal':cross_var_temp_xal,'var_xal':var_xal,'var_temp':var_temp,
                     'PS_aT_a': PS_aT_a, 'PS_aT_T': PS_aT_T, 'PS_aa_a': PS_aa_a, 'PS_aa_T': PS_aa_T, 'PS_TT_a': PS_TT_a, 'PS_aa_aa':PS_aa_aa,'PS_aaa_a':PS_aaa_a,'PS_TT_T':PS_TT_T,'PS_TT_TT':PS_TT_TT,'PS_TTT_T':PS_TTT_T,
-                    'PS_TT_T': PS_TT_T,'PS_error_1':PS_error_1,'PS_error_2':PS_error_2,'PS_error_3':PS_error_3}
+                    'PS_TT_T': PS_TT_T,'PS_error_1':PS_error_1,'PS_error_2':PS_error_2,'PS_error_3':PS_error_3,'PS_real_1':PS_real_1}
             save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
 
