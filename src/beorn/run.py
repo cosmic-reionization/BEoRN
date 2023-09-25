@@ -348,8 +348,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             if Rsmoothing > 0:
                 Grid_xal  = smooth_field(Grid_xal, Rsmoothing, LBox, nGrid)
                 Grid_Temp = smooth_field(Grid_Temp, Rsmoothing, LBox, nGrid)
-                Grid_xHII = smooth_field(Grid_xHII, Rsmoothing, LBox, nGrid)
-                delta_b   = smooth_field(delta_b, Rsmoothing, LBox, nGrid)
+                #Grid_xHII = smooth_field(Grid_xHII, Rsmoothing, LBox, nGrid)
+                #delta_b   = smooth_field(delta_b, Rsmoothing, LBox, nGrid)
 
             if dTb:
                 Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
@@ -679,8 +679,7 @@ def delta_fct(grid):
     return grid / np.mean(grid) - 1
 
 
-def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho, third_order=False,truncate = False):
-    import tools21cm as t2c
+def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho, third_order=False, truncate = False):
     nGrid = param.sim.Ncell
     Lbox = param.sim.Lbox  # Mpc/h
 
