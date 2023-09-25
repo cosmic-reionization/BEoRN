@@ -273,7 +273,10 @@ def smooth_field(field,Rsmoothing,Lbox, nGrid):
     rx, ry, rz = np.meshgrid(x, x, x, sparse=True)
     rgrid = np.sqrt(rx ** 2 + ry ** 2 + rz ** 2)
     kern = profile_kern(rgrid, Rsmoothing)
+    del rgrid
     smoothed_field = convolve_fft(field, kern, boundary='wrap', normalize_kernel=True, allow_huge=True)
+    del kern
+    del field
 
     return smoothed_field
 
