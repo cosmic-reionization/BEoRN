@@ -815,7 +815,7 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         PS_aab_T = cross_PS(delta_x_al ** 2 * delta_rho, delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_aa_Tb = cross_PS(delta_x_al ** 2, delta_T * delta_rho, box_dims=Lbox, kbins=kbins)[0]
 
-        PS_ba_Ta = cross_PS(delta_rho * delta_x_al, delta_T * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_ba_Tb = cross_PS(delta_rho * delta_x_al, delta_T * delta_rho, box_dims=Lbox, kbins=kbins)[0]
         PS_aTT_a = cross_PS(delta_x_al * delta_T ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
 
         PS_aa_TT = cross_PS(delta_x_al ** 2, delta_T ** 2, box_dims=Lbox, kbins=kbins)[0]
@@ -853,12 +853,12 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
                           'PS_ab_a':PS_ab_a, 'PS_aa_b': PS_aa_b, 'PS_ab_b': PS_ab_b, 'PS_ab_T': PS_ab_T,
                           'PS_aT_b': PS_aT_b, 'PS_bT_a': PS_bT_a, 'PS_bT_b': PS_bT_b, 'PS_Tb_T': PS_Tb_T,
                           'PS_TT_b': PS_TT_b
-                          
+
         , 'PS_aa_ba': PS_aa_ba, 'PS_aab_a': PS_aab_a, 'PS_ab_ab': PS_ab_ab, 'PS_aab_b': PS_aab_b
         , 'PS_aaT_a': PS_aaT_a, 'PS_aa_Ta': PS_aa_Ta
         , 'PS_baT_a': PS_baT_a, 'PS_ba_aT': PS_ba_aT
         , 'PS_aaT_b': PS_aaT_b, 'PS_aab_T': PS_aab_T, 'PS_aa_Tb': PS_aa_Tb
-        , 'PS_ba_Ta': PS_ba_Ta, 'PS_aTT_a': PS_aTT_a
+        , 'PS_ba_Ta': PS_ba_Tb, 'PS_aTT_a': PS_aTT_a
         , 'PS_aa_TT': PS_aa_TT, 'PS_aT_aT': PS_aT_aT, 'PS_aaT_T': PS_aaT_T
 
         , 'PS_aTT_b': PS_aTT_b, 'PS_bTT_a': PS_bTT_a, 'PS_TT_ab': PS_TT_ab
