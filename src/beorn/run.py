@@ -773,11 +773,26 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
 
         ## 3rd order in aT (aaT,aaa, TTT,TTa...)
         PS_aa_a = cross_PS(delta_x_al ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_aa_aa = cross_PS(delta_x_al ** 2, delta_x_al**2, box_dims=Lbox, kbins=kbins)[0]
         PS_aT_a = cross_PS(delta_x_al * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_aT_T = cross_PS(delta_x_al * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_aa_T = cross_PS(delta_x_al ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
         PS_TT_a = cross_PS(delta_T ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_TT_T = cross_PS(delta_T ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_TT_TT = cross_PS(delta_T ** 2, delta_T**2, box_dims=Lbox, kbins=kbins)[0]
+
+        ## 3rd order in aTb (aab,aTb, TTb,TbT...)
+        PS_ab_a = cross_PS(delta_x_al * delta_rho, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_aa_b = cross_PS(delta_x_al ** 2, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_ab_b = cross_PS(delta_x_al * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_ab_T = cross_PS(delta_x_al * delta_rho, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_aT_b = cross_PS(delta_x_al * delta_T, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_bT_a = cross_PS(delta_rho * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+
+        PS_bT_b = cross_PS(delta_T * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+        PS_Tb_T = cross_PS(delta_T * delta_rho, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_TT_b = cross_PS(delta_T ** 2, delta_rho, box_dims=Lbox, kbins=kbins)[0]
 
         Dict_3rd_order = {'PS_ra_a': PS_ra_a, 'PS_r_aa': PS_r_aa, 'PS_rb_b': PS_rb_b, 'PS_rT_T': PS_rT_T,
                           'PS_r_TT': PS_r_TT, 'PS_ab_r': PS_ab_r, 'PS_rb_a': PS_rb_a, 'PS_ra_b': PS_ra_b,
@@ -787,7 +802,10 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
                           'PS_raa_r': PS_raa_r, 'PS_rTT_r': PS_rTT_r, 'PS_rba_r': PS_rba_r, 'PS_rTa_r': PS_rTa_r,
                           'PS_rTb_r': PS_rTb_r, 'PS_rb_ra': PS_rb_ra, 'PS_rT_ra': PS_rT_ra, 'PS_rT_rb': PS_rT_rb,
                           'PS_aa_a': PS_aa_a, 'PS_aT_a': PS_aT_a, 'PS_aT_T': PS_aT_T, 'PS_aa_T': PS_aa_T,
-                          'PS_TT_a': PS_TT_a, 'PS_TT_T': PS_TT_T
+                          'PS_TT_a': PS_TT_a, 'PS_TT_T': PS_TT_T, 'PS_aa_aa':PS_aa_aa,'PS_TT_TT':PS_TT_TT,
+                          'PS_ab_a':PS_ab_a, 'PS_aa_b': PS_aa_b, 'PS_ab_b': PS_ab_b, 'PS_ab_T': PS_ab_T,
+                          'PS_aT_b': PS_aT_b, 'PS_bT_a': PS_bT_a, 'PS_bT_b': PS_bT_b, 'PS_Tb_T': PS_Tb_T,
+                          'PS_TT_b': PS_TT_b
                           }
         dict_cross_corr = Merge(Dict_3rd_order, dict_cross_corr)
 
