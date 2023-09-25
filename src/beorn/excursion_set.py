@@ -193,17 +193,26 @@ def excursion_set(filename, param):
 
 def exc_set_barrier(param, xHII_norm, zz):
     """
-    delta(sigma) : critial density above which a point belong to an ionised bubble with size sigma(R)
+    Computes the barrier for ionisation according to excursion set theory. At each redshift, for each scale M (sigma^2)
+    return a value of delta_m above with the region is ionised.
+    Includes mass-dependent fstar and fesc.
+    See Furlanetto 2004, Zentner review for excursion set, and Park 2018 for nion formula in fstar(M) case.
+
 
     Parameters
     ----------
     param: Beorn parameter dictionnary.
-    xHII_norm : ion history to which we normalize the barrier
+    xHII_norm : ionisation history to which we normalize the barrier at each redshift.
+    zz : array of redshifts
 
     Returns
     -------
-    delta
+    var_array : array of sigm**2 values.
+    delta_barrier_straight : 2d array of barrier values (zz,var)
+    d0 : array (zz). value of the barrier at sigm = 0
+    slope : array (zz) slope of the linear barrier
     """
+
     Mmin = param.source.M_min
     M0 = np.logspace(np.log10(Mmin), 15, 100, base=10)
     n_rec = param.exc_set.n_rec
@@ -226,9 +235,9 @@ def exc_set_barrier(param, xHII_norm, zz):
         # renormialise
         dndlnm_PS = Om * rhoc0 * f_Conditional(dcz[i], var, [0], [0]) * np.abs(dlnvardlnm) * var / M0
         n_ion_mean_PS = 1 / (Ob * rhoc0) * np.trapz((Ob / Om) * f_star_ * f_esc_ * dndlnm_PS, M0) / n_rec
-        print('xHII PS is : ', round(n_ion_mean_PS * Nion, 3))
+       # print('xHII PS is : ', round(n_ion_mean_PS * Nion, 3))
         factor = xHII_norm[i] / (n_ion_mean_PS * Nion)
-        print('normalisation factor is : ', round(factor, 3))
+      #  print('normalisation factor is : ', round(factor, 3))
 
         for j in range(N_barrier):
             f_cond = f_Conditional(dcz[i, None, None], var[:, None], delta_array[None, :], var_array[j, None, None])
@@ -264,7 +273,7 @@ def exc_set_barrier(param, xHII_norm, zz):
     del_bar_straight = lambda var: d0[:, None] + slope[:, None] * var
     delta_barrier_straight = del_bar_straight(var_array)
 
-    return M0, var_array, delta_barrier_straight, d0, slope
+    return var_array, delta_barrier_straight, d0, slope
 
 
 def profile_kern(r, size):
@@ -343,6 +352,31 @@ def Variance(param, mm):
     dVar_dM = np.gradient(Var, mm)
     return Var, dVar_dM
 
+def Linear_Variance_delta(param,mm):
+    """
+    Gives the z=0 variance of delta_matter according to linear theory.
+    In other words, returns sigma^2(M)
+    This multiplied by D(z)**2 should be approximately equal to np.mean(delta_grid**2),
+     with delta_grid a matter field at redshift z on box Lbox with Ncell pix per dim.
+
+    Parameters
+    ----------
+    param: Bunch
+            The parameter file created using the beorn.par().
+    Lbox,Ncell : Box dim Msol/h, nbr of pix per dim.
+
+    Returns
+    -------
+    variance sigma^2(M) at z=0.
+    """
+    #mm = rhoc0 * Lbox ** 3 / Ncell ** 3
+
+    ps = read_powerspectrum(param)
+    kk_ = ps['k']
+    PS_ = ps['P']
+    R_ = ((3 * mm / (4 * rhoc0 * param.cosmo.Om * np.pi)) ** (1. / 3))
+    Var = np.trapz(kk_ ** 2 * PS_ * W_tophat(kk_ * R_) ** 2 / (2 * np.pi ** 2), kk_)
+    return Var
 
 def f_Conditional(dc, S, dc0, S0):
     """
@@ -605,3 +639,32 @@ def Sem_Num(filename, param):
     end_time = datetime.datetime.now()
     print('Done with z=', z, ': xHII =', np.mean(ion_map), 'it took :', end_time - start_time)
     save_f(file='./grid_output/xHII_Sem_Num_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5], obj=ion_map)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#ef mean_xHI_delta_excursion_set
+
+
+
+
+
+
+
+
+
+
+
+
+

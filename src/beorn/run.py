@@ -7,8 +7,7 @@ import beorn as rad
 from scipy.interpolate import splrep, splev, interp1d
 import numpy as np
 import time
-import datetime
-from .constants import cm_per_Mpc, M_sun, m_H, rhoc0, Tcmb0
+from .constants import cm_per_Mpc, M_sun, m_H
 from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct, T_cmb
 import os
 from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
@@ -25,7 +24,7 @@ from .functions import *
 def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
              read_lyal=False,
              check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
-             variance=False, compute_corr_fct_=False
+             variance=False, compute_corr_fct_=False,Rsmoothing=0
              ):
     """
     Function to run the code. Several options are available.
@@ -63,7 +62,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
 
     paint_boxes(param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp, check_exists=check_exists,
                 read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance)
+                cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance,Rsmoothing=Rsmoothing)
 
     comm.Barrier()
 
@@ -126,7 +125,7 @@ def compute_profiles(param):
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
                               read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,
-                              cic=False, variance=False):
+                              cic=False, variance=False,Rsmoothing=0):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
 
@@ -343,6 +342,13 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                     print('--- NOT Salpha fluctuations in dTb ---')
                     Grid_xal = Grid_xal * S_alpha(z, np.mean(Grid_Temp), 1 - np.mean(Grid_xHII)) / 4 / np.pi
 
+
+            if Rsmoothing > 0:
+                Grid_xal  = smooth_field(Grid_xal, Rsmoothing, LBox, nGrid)
+                Grid_Temp = smooth_field(Grid_Temp, Rsmoothing, LBox, nGrid)
+                Grid_xHII = smooth_field(Grid_xHII, Rsmoothing, LBox, nGrid)
+                delta_b   = smooth_field(delta_b, Rsmoothing, LBox, nGrid)
+
             if dTb:
                 Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
                 if xcoll:
@@ -352,6 +358,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                     print('--- NOT including xcoll in dTb ---')
                     Grid_xtot = Grid_xal
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
+
+
 
     PS_dTb, k_bins = auto_PS(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
                              kbins=def_k_bins(param))
@@ -454,7 +462,7 @@ def def_k_bins(param):
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
                 check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
-                variance=False):
+                variance=False,Rsmoothing=0):
     """
     Parameters
     ----------
@@ -500,14 +508,14 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                     paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                               read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
                                               cross_corr=cross_corr, third_order=third_order, cic=cic,
-                                              variance=variance)
+                                              variance=variance,Rsmoothing=Rsmoothing)
                     print('----- Snapshot at z = ', z, ' is done -------')
                     print(' ')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                           read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                          cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance)
+                                          cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance,Rsmoothing=Rsmoothing)
                 print('----- Snapshot at z = ', z, ' is done -------')
                 print(' ')
 
@@ -1284,6 +1292,9 @@ def compute_var_field(param, field,k_bins):
     return variance, R_scale, k_values
 
 
+
+
+
 def compute_cross_var(param, field1, field2):
     from .excursion_set import profile_kern
     from astropy.convolution import convolve_fft
@@ -1462,7 +1473,7 @@ def investigate_xal(param):
             mean_Temp_term = np.mean((1-T_cmb(z)/Grid_Temp))
             mean_xal_reio = np.mean(Grid_xal/(Grid_xal+1)*(1-Grid_xHII))
             mean_xal_temp = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp))
-            mean_xal_matter = np.mean(Grid_xal/(Grid_xal+1)*(1+delta_b))
+            mean_xal_matter = np.mean(Grcompute_var_single_zid_xal/(Grid_xal+1)*(1+delta_b))
             mean_xal_temp_matter = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b))
             mean_xal_reio_temp_matter = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)*(1-Grid_xHII))
             mean_1_ov_1_plus_xal = np.mean(Grid_xal/(Grid_xal+1))

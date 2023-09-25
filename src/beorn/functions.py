@@ -244,3 +244,36 @@ def load_pkdgrav_density_field(file, LBox, nGrid):
     rho_m = mass / V_cell
     delta_b = (rho_m) / np.mean(rho_m) - 1
     return delta_b
+
+
+
+
+def Gaussian(d,mean,S):
+    return 1/np.sqrt(2*np.pi*S)*np.exp(-(d-mean)**2/2/S)
+
+
+def smooth_field(field,Rsmoothing,Lbox, nGrid):
+    """
+    Parameters
+    ----------
+    field : 3d meshgrid with nGrid pixel per dim, in box size Lbox (Mpc/h).
+    Lbox : float, box size in Mpc/h
+    nGrid : int, number of grid pixels per dim
+    Rsmoothing : float (Mpc/h), smoothing scale
+
+    Returns
+    ----------
+    smoothed_field over a tophat kernel with radius Rsmoothing
+    """
+
+    from .excursion_set import profile_kern
+    from astropy.convolution import convolve_fft
+
+    x = np.linspace(-Lbox / 2, Lbox / 2, nGrid)  # y, z will be the same.
+    rx, ry, rz = np.meshgrid(x, x, x, sparse=True)
+    rgrid = np.sqrt(rx ** 2 + ry ** 2 + rz ** 2)
+    kern = profile_kern(rgrid, Rsmoothing)
+    smoothed_field = convolve_fft(field, kern, boundary='wrap', normalize_kernel=True, allow_huge=True)
+
+    return smoothed_field
+
