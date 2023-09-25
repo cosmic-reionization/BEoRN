@@ -770,13 +770,25 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         PS_rT_ra = cross_PS(delta_XHII * delta_T, delta_XHII * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_rT_rb = cross_PS(delta_XHII * delta_T, delta_XHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
 
+
+        ## 3rd order in aT (aaT,aaa, TTT,TTa...)
+        PS_aa_a = cross_PS(delta_x_al ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_aT_a = cross_PS(delta_x_al * delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_aT_T = cross_PS(delta_x_al * delta_T, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_aa_T = cross_PS(delta_x_al ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
+        PS_TT_a = cross_PS(delta_T ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+        PS_TT_T = cross_PS(delta_T ** 2, delta_T, box_dims=Lbox, kbins=kbins)[0]
+
         Dict_3rd_order = {'PS_ra_a': PS_ra_a, 'PS_r_aa': PS_r_aa, 'PS_rb_b': PS_rb_b, 'PS_rT_T': PS_rT_T,
                           'PS_r_TT': PS_r_TT, 'PS_ab_r': PS_ab_r, 'PS_rb_a': PS_rb_a, 'PS_ra_b': PS_ra_b,
                           'PS_rT_b': PS_rT_b, 'PS_rb_T': PS_rb_T, 'PS_Tb_r': PS_Tb_r, 'PS_aT_r': PS_aT_r,
                           'PS_ar_T': PS_ar_T, 'PS_Tr_a': PS_Tr_a, 'PS_Tr_r': PS_Tr_r, 'PS_ar_r': PS_ar_r,
                           'PS_br_r': PS_br_r, 'PS_rT_rT': PS_rT_rT, 'PS_ra_ra': PS_ra_ra, 'PS_rb_rb': PS_rb_rb,
                           'PS_raa_r': PS_raa_r, 'PS_rTT_r': PS_rTT_r, 'PS_rba_r': PS_rba_r, 'PS_rTa_r': PS_rTa_r,
-                          'PS_rTb_r': PS_rTb_r, 'PS_rb_ra': PS_rb_ra, 'PS_rT_ra': PS_rT_ra, 'PS_rT_rb': PS_rT_rb}
+                          'PS_rTb_r': PS_rTb_r, 'PS_rb_ra': PS_rb_ra, 'PS_rT_ra': PS_rT_ra, 'PS_rT_rb': PS_rT_rb,
+                          'PS_aa_a': PS_aa_a, 'PS_aT_a': PS_aT_a, 'PS_aT_T': PS_aT_T, 'PS_aa_T': PS_aa_T,
+                          'PS_TT_a': PS_TT_a, 'PS_TT_T': PS_TT_T
+                          }
         dict_cross_corr = Merge(Dict_3rd_order, dict_cross_corr)
 
     return Merge(GS_PS_dict, dict_cross_corr)
