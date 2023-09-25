@@ -125,7 +125,7 @@ def compute_profiles(param):
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
                               read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,
-                              cic=False, variance=False,Rsmoothing=0):
+                              cic=False, variance=False,Rsmoothing=0,truncate=False):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
 
@@ -387,7 +387,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                   'x_coll': xcoll_mean}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
-                                                third_order=third_order)
+                                                third_order=third_order,truncate=truncate)
     save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
 
     if variance:
@@ -466,7 +466,7 @@ def def_k_bins(param):
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
                 check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
-                variance=False,Rsmoothing=0):
+                variance=False,Rsmoothing=0,truncate=False):
     """
     Parameters
     ----------
@@ -512,14 +512,14 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                     paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                               read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
                                               cross_corr=cross_corr, third_order=third_order, cic=cic,
-                                              variance=variance,Rsmoothing=Rsmoothing)
+                                              variance=variance,Rsmoothing=Rsmoothing,truncate=truncate)
                     print('----- Snapshot at z = ', z, ' is done -------')
                     print(' ')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                           read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                          cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance,Rsmoothing=Rsmoothing)
+                                          cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance,Rsmoothing=Rsmoothing,truncate=truncate)
                 print('----- Snapshot at z = ', z, ' is done -------')
                 print(' ')
 
@@ -679,7 +679,7 @@ def delta_fct(grid):
     return grid / np.mean(grid) - 1
 
 
-def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho, third_order=False):
+def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho, third_order=False,truncate = False):
     import tools21cm as t2c
     nGrid = param.sim.Ncell
     Lbox = param.sim.Lbox  # Mpc/h
@@ -696,6 +696,14 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         Grid_xHII = np.full((nGrid, nGrid, nGrid), 0)  ## to avoid div by zero
     if Grid_xal.size == 1:
         Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
+
+
+    if truncate :
+        xal = np.mean(Grid_xal)
+        Grid_xal[np.where(Grid_xal > (1 + xal) / xal)] = 1 + 2 * xal
+        Tk = np.mean(Grid_Temp)
+        Grid_Temp[np.where(Grid_Temp > 2*Tk)] = Tk ## if delta_T>1, then 1/T ~ 0, so 1-delta_T~0 for the expansion to work.
+
 
     delta_XHII = delta_fct(Grid_xHII)
     delta_x_al = delta_fct(Grid_xal)
