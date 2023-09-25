@@ -351,12 +351,14 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
             if dTb:
                 Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
+                xcoll_mean = np.mean(Grid_xcoll)
                 if xcoll:
                     print('--- Including xcoll in dTb ---')
                     Grid_xtot = Grid_xcoll + Grid_xal
                 else:
                     print('--- NOT including xcoll in dTb ---')
                     Grid_xtot = Grid_xal
+                del Grid_xcoll
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
 
 
@@ -380,7 +382,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
                   'PS_dTb': PS_dTb, 'k': k_bins,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
-                  'x_coll': np.mean(Grid_xcoll)}
+                  'x_coll': xcoll_mean}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
                                                 third_order=third_order)
@@ -390,7 +392,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         import copy
         param_copy = copy.deepcopy(
             param)  # we do this since in compute_var we change the kbins to go to smaller scales.
-        compute_var_single_z(param_copy, z, Grid_xal, Grid_xHII, Grid_Temp,k_bins)
+        compute_var_single_z(param_copy, z, Grid_xal, Grid_xHII, Grid_Temp, k_bins)
 
     if param.sim.store_grids:
         if temp:
