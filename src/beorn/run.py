@@ -699,9 +699,9 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
 
     if truncate :
         xal = np.mean(Grid_xal)
-        Grid_xal[np.where(Grid_xal > (1 + xal) / xal)] = 1 + 2 * xal
+        Grid_xal[np.where(Grid_xal > 1 + 2 * xal)] = 1
         Tk = np.mean(Grid_Temp)
-        Grid_Temp[np.where(Grid_Temp > 2*Tk)] = Tk ## if delta_T>1, then 1/T ~ 0, so 1-delta_T~0 for the expansion to work.
+        Grid_Temp[np.where(Grid_Temp > 2*Tk)] = 2 * Tk ## if delta_T>1, then 1/T ~ 0, so 1-delta_T~0 for the expansion to work.
 
 
     delta_XHII = delta_fct(Grid_xHII)
