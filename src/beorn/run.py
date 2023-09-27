@@ -124,7 +124,7 @@ def compute_profiles(param):
 
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
-                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,
+                              read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,fourth_order=False,
                               cic=False, variance=False,Rsmoothing=0,truncate=False):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
@@ -387,7 +387,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                   'x_coll': xcoll_mean}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
-                                                third_order=third_order,truncate=truncate)
+                                                third_order=third_order,fourth_order=fourth_order,truncate=truncate)
     save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
 
     if variance:
@@ -465,7 +465,7 @@ def def_k_bins(param):
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
-                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
+                check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, fourth_order=False,cic=False,
                 variance=False,Rsmoothing=0,truncate=False):
     """
     Parameters
@@ -511,7 +511,7 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                     print('----- Painting 3D map for z =', z, '-------')
                     paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                               read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                              cross_corr=cross_corr, third_order=third_order, cic=cic,
+                                              cross_corr=cross_corr, third_order=third_order,fourth_order=fourth_order, cic=cic,
                                               variance=variance,Rsmoothing=Rsmoothing,truncate=truncate)
                     print('----- Snapshot at z = ', z, ' is done -------')
                     print(' ')
@@ -519,7 +519,7 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
                                           read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                          cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance,Rsmoothing=Rsmoothing,truncate=truncate)
+                                          cross_corr=cross_corr, third_order=third_order, fourth_order=fourth_order,cic=cic, variance=variance,Rsmoothing=Rsmoothing,truncate=truncate)
                 print('----- Snapshot at z = ', z, ' is done -------')
                 print(' ')
 
@@ -679,7 +679,7 @@ def delta_fct(grid):
     return grid / np.mean(grid) - 1
 
 
-def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho, third_order=False, truncate = False):
+def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho, third_order=False, fourth_order=False, truncate = False):
     nGrid = param.sim.Ncell
     Lbox = param.sim.Lbox  # Mpc/h
 
@@ -770,7 +770,17 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         PS_rT_ra = cross_PS(delta_XHII * delta_T, delta_XHII * delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_rT_rb = cross_PS(delta_XHII * delta_T, delta_XHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
 
+        Dict_3rd_order = {'PS_ra_a': PS_ra_a, 'PS_r_aa': PS_r_aa, 'PS_rb_b': PS_rb_b, 'PS_rT_T': PS_rT_T,
+                          'PS_r_TT': PS_r_TT, 'PS_ab_r': PS_ab_r, 'PS_rb_a': PS_rb_a, 'PS_ra_b': PS_ra_b,
+                          'PS_rT_b': PS_rT_b, 'PS_rb_T': PS_rb_T, 'PS_Tb_r': PS_Tb_r, 'PS_aT_r': PS_aT_r,
+                          'PS_ar_T': PS_ar_T, 'PS_Tr_a': PS_Tr_a, 'PS_Tr_r': PS_Tr_r, 'PS_ar_r': PS_ar_r,
+                          'PS_br_r': PS_br_r, 'PS_rT_rT': PS_rT_rT, 'PS_ra_ra': PS_ra_ra, 'PS_rb_rb': PS_rb_rb,
+                          'PS_raa_r': PS_raa_r, 'PS_rTT_r': PS_rTT_r, 'PS_rba_r': PS_rba_r, 'PS_rTa_r': PS_rTa_r,
+                          'PS_rTb_r': PS_rTb_r, 'PS_rb_ra': PS_rb_ra, 'PS_rT_ra': PS_rT_ra, 'PS_rT_rb': PS_rT_rb}
+        dict_cross_corr = Merge(Dict_3rd_order, dict_cross_corr)
 
+
+    if fourth_order :
         ## 3rd order in aT (aaT,aaa, TTT,TTa...)
         PS_aa_a = cross_PS(delta_x_al ** 2, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
         PS_aa_aa = cross_PS(delta_x_al ** 2, delta_x_al**2, box_dims=Lbox, kbins=kbins)[0]
@@ -840,22 +850,11 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         PS_TT_bT = cross_PS(delta_T ** 2, delta_rho * delta_T, box_dims=Lbox, kbins=kbins)[0]
 
 
-
-
-        Dict_3rd_order = {'PS_ra_a': PS_ra_a, 'PS_r_aa': PS_r_aa, 'PS_rb_b': PS_rb_b, 'PS_rT_T': PS_rT_T,
-                          'PS_r_TT': PS_r_TT, 'PS_ab_r': PS_ab_r, 'PS_rb_a': PS_rb_a, 'PS_ra_b': PS_ra_b,
-                          'PS_rT_b': PS_rT_b, 'PS_rb_T': PS_rb_T, 'PS_Tb_r': PS_Tb_r, 'PS_aT_r': PS_aT_r,
-                          'PS_ar_T': PS_ar_T, 'PS_Tr_a': PS_Tr_a, 'PS_Tr_r': PS_Tr_r, 'PS_ar_r': PS_ar_r,
-                          'PS_br_r': PS_br_r, 'PS_rT_rT': PS_rT_rT, 'PS_ra_ra': PS_ra_ra, 'PS_rb_rb': PS_rb_rb,
-                          'PS_raa_r': PS_raa_r, 'PS_rTT_r': PS_rTT_r, 'PS_rba_r': PS_rba_r, 'PS_rTa_r': PS_rTa_r,
-                          'PS_rTb_r': PS_rTb_r, 'PS_rb_ra': PS_rb_ra, 'PS_rT_ra': PS_rT_ra, 'PS_rT_rb': PS_rT_rb,
-                          'PS_aa_a': PS_aa_a, 'PS_aT_a': PS_aT_a, 'PS_aT_T': PS_aT_T, 'PS_aa_T': PS_aa_T,
+        Dict_4th_order = {'PS_aa_a': PS_aa_a, 'PS_aT_a': PS_aT_a, 'PS_aT_T': PS_aT_T, 'PS_aa_T': PS_aa_T,
                           'PS_TT_a': PS_TT_a, 'PS_TT_T': PS_TT_T, 'PS_aa_aa':PS_aa_aa,'PS_TT_TT':PS_TT_TT,
                           'PS_ab_a':PS_ab_a, 'PS_aa_b': PS_aa_b, 'PS_ab_b': PS_ab_b, 'PS_ab_T': PS_ab_T,
                           'PS_aT_b': PS_aT_b, 'PS_bT_a': PS_bT_a, 'PS_bT_b': PS_bT_b, 'PS_Tb_T': PS_Tb_T,
-                          'PS_TT_b': PS_TT_b
-
-        , 'PS_aa_ba': PS_aa_ba, 'PS_aab_a': PS_aab_a, 'PS_ab_ab': PS_ab_ab, 'PS_aab_b': PS_aab_b
+                          'PS_TT_b': PS_TT_b , 'PS_aa_ba': PS_aa_ba, 'PS_aab_a': PS_aab_a, 'PS_ab_ab': PS_ab_ab, 'PS_aab_b': PS_aab_b
         , 'PS_aaT_a': PS_aaT_a, 'PS_aa_Ta': PS_aa_Ta
         , 'PS_baT_a': PS_baT_a, 'PS_ba_aT': PS_ba_aT
         , 'PS_aaT_b': PS_aaT_b, 'PS_aab_T': PS_aab_T, 'PS_aa_Tb': PS_aa_Tb
@@ -867,9 +866,9 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         , 'PS_Tb_Tb': PS_Tb_Tb
         , 'PS_aTT_T': PS_aTT_T, 'PS_TT_aT': PS_TT_aT
         , 'PS_bTT_T': PS_bTT_T, 'PS_TT_bT': PS_TT_bT
+                          }
 
-        }
-        dict_cross_corr = Merge(Dict_3rd_order, dict_cross_corr)
+        dict_cross_corr = Merge(Dict_4th_order, dict_cross_corr)
 
     return Merge(GS_PS_dict, dict_cross_corr)
 
