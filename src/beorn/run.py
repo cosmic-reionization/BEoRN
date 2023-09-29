@@ -1590,7 +1590,7 @@ def investigate_xal(param):
             mean_Temp_term = np.mean((1-T_cmb(z)/Grid_Temp))
             mean_xal_reio = np.mean(Grid_xal/(Grid_xal+1)*(1-Grid_xHII))
             mean_xal_temp = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp))
-            mean_xal_matter = np.mean(Grcompute_var_single_zid_xal/(Grid_xal+1)*(1+delta_b))
+            mean_xal_matter = np.mean(Grid_xal/(Grid_xal+1)*(1+delta_b))
             mean_xal_temp_matter = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b))
             mean_xal_reio_temp_matter = np.mean(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)*(1-Grid_xHII))
             mean_1_ov_1_plus_xal = np.mean(Grid_xal/(Grid_xal+1))
