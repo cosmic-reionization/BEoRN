@@ -708,7 +708,12 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         Grid_xal = mean_x_al * (R_alpha + 1)
 
         Tk = np.mean(Grid_Temp)
-        Grid_Temp[np.where(Grid_Temp > 2*Tk)] = 2 * Tk ## if delta_T>1, then 1/T ~ 0, so 1-delta_T~0 for the expansion to work.
+        delta_Tk = delta_fct(Grid_Temp)
+        R_Tk = delta_Tk/(1+delta_Tk)
+        indics = np.where(delta_Tk < 1e-1)
+        R_Tk[indics] = delta_Tk[indics]
+        Grid_Temp = Tk*(R_Tk+1)
+        #Grid_Temp[np.where(Grid_Temp > 2*Tk)] = 2 * Tk ## if delta_T>1, then 1/T ~ 0, so 1-delta_T~0 for the expansion to work.
 
 
     delta_XHII = delta_fct(Grid_xHII)
