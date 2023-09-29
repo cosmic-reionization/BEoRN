@@ -708,7 +708,7 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         R_alpha[indics] = delta_x_al[indics]
         Grid_xal = mean_x_al * (R_alpha + 1)
 
-        Grid_Temp -= T_adiab_fluctu(GS_PS_dict['z'], param, delta_b)
+        Grid_Temp -= T_adiab_fluctu(GS_PS_dict['z'], param, delta_rho)
         Tk = np.mean(Grid_Temp)
         delta_Tk = delta_fct(Grid_Temp)
         R_Tk = delta_Tk/(1+delta_Tk)
