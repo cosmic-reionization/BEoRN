@@ -39,7 +39,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
     """
 
     from mpi4py import MPI
-    comm = MPI.COMM_WORLD
+    comm = MPI.COMM_WORLDplot_Beorn_PS_of_z
     import mpi4py.MPI
     rank = mpi4py.MPI.COMM_WORLD.Get_rank()
     size = mpi4py.MPI.COMM_WORLD.Get_size()
@@ -698,8 +698,15 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
 
 
     if truncate :
-        xal = np.mean(Grid_xal)
-        Grid_xal[np.where(Grid_xal > 1 + 2 * xal)] = 1
+        #xal = np.mean(Grid_xal)
+        #Grid_xal[np.where(Grid_xal > 1 + 2 * xal)] = 1 + 2 * xal
+        delta_x_al = delta_fct(Grid_xal)
+        mean_x_al = np.mean(Grid_xal)
+        R_alpha = delta_x_al / (1 + delta_x_al * mean_x_al / (1 + mean_x_al))
+        indics = np.where(delta_x_al * mean_x_al / (1 + mean_x_al) < 1e-1)
+        R_alpha[indics] = delta_xal_True[indics]
+        Grid_xal = mean_x_al * (R_alpha + 1)
+        
         Tk = np.mean(Grid_Temp)
         Grid_Temp[np.where(Grid_Temp > 2*Tk)] = 2 * Tk ## if delta_T>1, then 1/T ~ 0, so 1-delta_T~0 for the expansion to work.
 
