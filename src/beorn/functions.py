@@ -56,6 +56,22 @@ def format_file_name(param, dir_name, z, qty):
     nGrid: str = str(param.sim.Ncell)
     return dir_name + qty + '_' + nGrid + '_' + out_name + '_z' + z_str
 
+def def_k_bins(param):
+    """
+    The k-bins used to measure the power spectrum.
+    If param.sim.kbin is given as an int, you need to specify kmin and kmax.
+    If given as a string, it will read in the boundary of the kbins.
+    """
+    if isinstance(param.sim.kbin, int):
+        kbins = np.logspace(np.log10(param.sim.kmin), np.log10(param.sim.kmax), param.sim.kbin, base=10)  # h/Mpc
+    elif isinstance(param.sim.kbin, str):
+        kbins = np.loadtxt(param.sim.kbin)
+    else:
+        print(
+            'param.sim.kbin should be either a path to a text files containing kbins edges values or it should be an int.')
+        exit()
+    return kbins
+
 
 def load_grid(param, z, type=None):
     """
