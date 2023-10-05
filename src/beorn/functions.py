@@ -73,6 +73,43 @@ def def_k_bins(param):
     return kbins
 
 
+
+
+def load_delta_b(param, zz):
+    """
+    Parameters
+    ----------
+    param:Bunch
+    zz : str. Output of fct z_string_format,
+
+    Returns
+    ----------
+    3D meshgrid of delta_b = rho/mean_rho-1
+    """
+
+    LBox = param.sim.Lbox
+    nGrid = param.sim.Ncell
+    dens_field = param.sim.dens_field
+
+    if param.sim.dens_field_type == 'pkdgrav':
+        if dens_field is not None:
+            print('reading pkdgrav density field....')
+            delta_b = load_pkdgrav_density_field(dens_field + zz, LBox, nGrid)
+        else:
+            print('no density field provided. Return 0 for delta_b.')
+            delta_b = np.array([0])  # rho/rhomean-1 (usual delta here..)
+
+    elif param.sim.dens_field_type == '21cmFAST':
+        delta_b = load_f(dens_field + zz + '.0')
+    elif param.sim.dens_field_type == 'array':
+        delta_b = np.loadtxt(dens_field + zz)
+    else:
+        print('param.sim.dens_field_type should be either 21cmFAST or pkdgrav.')
+    return delta_b
+
+
+
+
 def load_grid(param, z, type=None):
     """
     Parameters
