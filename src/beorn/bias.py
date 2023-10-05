@@ -136,6 +136,8 @@ def bar_density_2h(rgrid,param,z,Mass):
 #### SCRIPT TO MEASURE THE HALO BIAS :
 #### SCRIPT TO MEASURE THE HALO BIAS :
 
+from beorn.functions import *
+
 
 def compute_bias(param, tab_M=None):
     import os
