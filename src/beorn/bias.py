@@ -140,6 +140,7 @@ def bar_density_2h(rgrid,param,z,Mass):
 def compute_bias(param, tab_M=None):
     import os
     from mpi4py import MPI
+    import time
     comm = MPI.COMM_WORLD
     if not os.path.isdir('./Halo_bias'):
         os.mkdir('./Halo_bias')
