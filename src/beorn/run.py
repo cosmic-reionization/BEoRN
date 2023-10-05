@@ -39,7 +39,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
     """
 
     from mpi4py import MPI
-    comm = MPI.COMM_WORLDplot_Beorn_PS_of_z
+    comm = MPI.COMM_WORLD
     import mpi4py.MPI
     rank = mpi4py.MPI.COMM_WORLD.Get_rank()
     size = mpi4py.MPI.COMM_WORLD.Get_size()
@@ -233,8 +233,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
                         r_lyal = grid_model.r_lyal  # np.logspace(-5, 2, 1000, base=10)     ##    physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
                         # rho_alpha_ = grid_model.rho_alpha[ind_z, :, i]  # rho_alpha(r_lyal, Mh_, zgrid, param)[0]
-                        x_alpha_prof = 1.81e11 * (rho_alpha_) / (
-                                1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
+                        x_alpha_prof = 1.81e11 * (rho_alpha_) / (1 + zgrid)  # We add up S_alpha(zgrid, T_extrap, 1 - xHII_extrap) later, a the map level.
 
                         ### This is the position of halos in base "nGrid". We use this to speed up the code.
                         ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
