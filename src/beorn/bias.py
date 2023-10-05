@@ -137,8 +137,8 @@ def bar_density_2h(rgrid,param,z,Mass):
 #### SCRIPT TO MEASURE THE HALO BIAS :
 
 
-
 def compute_bias(param, tab_M=None):
+    import os
     from mpi4py import MPI
     comm = MPI.COMM_WORLD
     if not os.path.isdir('./Halo_bias'):
