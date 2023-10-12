@@ -170,6 +170,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     # bin_edges_log     0.  | 1. |  2. |  3. |  4. ....
     Indexing = log_binning(H_Masses, bin_edges_log(grid_model.Mh_history[ind_z, :]))
     Indexing = Indexing - 1
+    ### same result as if you do np.argmin(np.abs(np.log10(H_Masses[:,None]/grid_model.Mh_history[ind_z, :]),axis=1), but faster
 
     if any(Indexing < 0):
         print('Need lower Mmin ! ')
@@ -227,8 +228,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
                         R_bubble, rho_alpha_, Temp_profile = average_profile(param, grid_model, H_Masses[indices],
                                                                              ind_z, i)
-                        x_HII_profile[
-                            np.where(radial_grid < R_bubble / (1 + zgrid))] = 1  # grid_model.R_bubble[ind_z, i]
+                        x_HII_profile[np.where(radial_grid < R_bubble / (1 + zgrid))] = 1  # grid_model.R_bubble[ind_z, i]
                         # Temp_profile = grid_model.rho_heat[ind_z, :, i]
 
                         r_lyal = grid_model.r_lyal  # np.logspace(-5, 2, 1000, base=10)     ##    physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
@@ -352,15 +352,17 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 #delta_b   = smooth_field(delta_b, Rsmoothing, LBox, nGrid)
 
             if dTb:
-                Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
-                xcoll_mean = np.mean(Grid_xcoll)
+
                 if xcoll:
                     print('--- Including xcoll in dTb ---')
+                    Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
+                    xcoll_mean = np.mean(Grid_xcoll)
                     Grid_xtot = Grid_xcoll + Grid_xal
+                    del Grid_xcoll
                 else:
                     print('--- NOT including xcoll in dTb ---')
                     Grid_xtot = Grid_xal
-                del Grid_xcoll
+
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
 
 
@@ -447,21 +449,6 @@ def gather_GS_PS_files(param, remove=False):
     save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
 
 
-def def_k_bins(param):
-    """
-    The k-bins used to measure the power spectrum.
-    If param.sim.kbin is given as an int, you need to specify kmin and kmax.
-    If given as a string, it will read in the boundary of the kbins.
-    """
-    if isinstance(param.sim.kbin, int):
-        kbins = np.logspace(np.log10(param.sim.kmin), np.log10(param.sim.kmax), param.sim.kbin, base=10)  # h/Mpc
-    elif isinstance(param.sim.kbin, str):
-        kbins = np.loadtxt(param.sim.kbin)
-    else:
-        print(
-            'param.sim.kbin should be either a path to a text files containing kbins edges values or it should be an int.')
-        exit()
-    return kbins
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
@@ -671,12 +658,6 @@ def compute_GS(param, string='', RSD=False, ion='bubbles'):
     save_f(file='./physics/GS_' + string + str(nGrid) + model_name + '.pkl', obj=Dict)
 
 
-def delta_fct(grid):
-    """
-    grid : np.array, meshgrid.
-    returns : grid/mean(grid)-1
-    """
-    return grid / np.mean(grid) - 1
 
 
 def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho, third_order=False, fourth_order=False, truncate = False):
@@ -1038,40 +1019,6 @@ def compute_PS(param, Tspin=False, RSD=False, ion='bubbles', cross_corr=False):
 
     print('Computing the power spectra took : ', start_time - end_time)
     pickle.dump(file=open('./physics/PS_' + str(nGrid) + model_name + '.pkl', 'wb'), obj=Dict)
-
-
-def load_delta_b(param, zz):
-    """
-    Parameters
-    ----------
-    param:Bunch
-    zz : str. Output of fct z_string_format,
-
-    Returns
-    ----------
-    3D meshgrid of delta_b = rho/mean_rho-1
-    """
-
-    LBox = param.sim.Lbox
-    nGrid = param.sim.Ncell
-    dens_field = param.sim.dens_field
-
-    if param.sim.dens_field_type == 'pkdgrav':
-        if dens_field is not None:
-            print('reading pkdgrav density field....')
-            delta_b = load_pkdgrav_density_field(dens_field + zz, LBox, nGrid)
-        else:
-            print('no density field provided. Return 0 for delta_b.')
-            delta_b = np.array([0])  # rho/rhomean-1 (usual delta here..)
-
-    elif param.sim.dens_field_type == '21cmFAST':
-        delta_b = load_f(dens_field + zz + '.0')
-    elif param.sim.dens_field_type == 'array':
-        delta_b = np.loadtxt(dens_field + zz)
-    else:
-        print('param.sim.dens_field_type should be either 21cmFAST or pkdgrav.')
-    return delta_b
-
 
 def RSD_field(param, density_field, zz):
     """

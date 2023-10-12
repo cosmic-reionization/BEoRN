@@ -86,14 +86,13 @@ def rho_2h(bias_, cosmo_corr_ ,param, z):
     return (bias_ * cosmo_corr_ * D(1/(z+1)**2,param) * param.cosmo.profile + 1.0) * param.cosmo.Om * rhoc_of_z(param, 0) * param.cosmo.clumping
 
 
-def rhoNFW_fct(rbin,param):
+def rhoNFW_fct(param,rbin,z,Mvir,cvir):
     """
     NFW density profile. We do not use it in the code.
     """
-    Mvir = param.source.M_halo
-    cvir = param.source.C_halo
-    rvir = (3.0*Mvir/(4.0 * np.pi * 200*rhoc_of_z(param)))**(1.0/3.0)
-    rho0 = 200*rhoc_of_z(param)*cvir**3.0/(3.0*np.log(1.0+cvir)-3.0*cvir/(1.0+cvir))
+
+    rvir = (3.0*Mvir/(4.0 * np.pi * 200*rhoc_of_z(param,z)))**(1.0/3.0)
+    rho0 = 200*rhoc_of_z(param,z)*cvir**3.0/(3.0*np.log(1.0+cvir)-3.0*cvir/(1.0+cvir))
     x = cvir*rbin/rvir
     return rho0/(x * (1.0+x)**2.0)
 

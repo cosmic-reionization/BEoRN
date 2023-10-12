@@ -262,6 +262,15 @@ def auto_PS(arr1, box_dims, kbins):
 from datetime import timedelta
 
 
+def delta_fct(grid):
+    """
+    grid : np.array, meshgrid.
+    returns : grid/mean(grid)-1
+    """
+    return grid / np.mean(grid) - 1
+
+
+
 def print_time(delta_t):
     """
     Parameters

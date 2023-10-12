@@ -7,7 +7,7 @@ import numpy as np
 from math import pi
 from .cosmo import *
 import scipy
-
+from beorn.profiles_on_grid import log_binning,bin_edges_log
 
 class HMF:
     def __init__(self, param):
@@ -79,7 +79,7 @@ def crossing_f_ST(sigm,param):
     return A*np.sqrt(2*q*(delta_c**2/sigm**2)/np.pi)*(1+(sigm**2/(q*delta_c**2))**p)*(np.exp(-q*delta_c**2/(2*sigm**2)))
 
 
-def from_catalog_to_hmf(dictionnary, Lbox=None, Mmax=None, Mmin=None):
+def from_catalog_to_hmf(dictionnary, Lbox=None, Mmax=None, Mmin=None,bin_nbr=None):
     """""
     Lbox : Box size (Mpc/h)
     Read HMF dictionnary and output binned masses, halo mass fct (Mpc/h)^-3,  and Poisson error in each bins.
@@ -91,10 +91,16 @@ def from_catalog_to_hmf(dictionnary, Lbox=None, Mmax=None, Mmin=None):
     if Mmax is None and Mmin is None:
         Mmin, Mmax = np.min(Mh), np.max(Mh)
 
-    bin_nbr = np.log10(Mmax / Mmin) * 10  # 10 bin per order of mag of Mh
+    if bin_nbr is None:
+        bin_nbr = np.log10(Mmax / Mmin) * 10  # 10 bin per order of mag of Mh
+
     tab_M = np.logspace(np.log(Mmin - 1), np.log(Mmax + 1), int(bin_nbr), base=np.exp(1))
     dlnm = np.log(tab_M[1]) - np.log(tab_M[0])
-    indices = np.digitize(Mh, tab_M)
+
+    #indices = np.digitize(Mh, tab_M)
+    indices = log_binning(Mh, bin_edges_log(tab_M))
+    indices = indices - 1
+
     count = np.unique(indices, return_counts=True)
     hmf__ = np.zeros(len(tab_M))
     error = np.zeros(len(tab_M))
