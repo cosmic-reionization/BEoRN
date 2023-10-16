@@ -362,6 +362,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 else:
                     print('--- NOT including xcoll in dTb ---')
                     Grid_xtot = Grid_xal
+                    xcoll_mean = 0
 
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
 
