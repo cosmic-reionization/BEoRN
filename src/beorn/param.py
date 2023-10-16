@@ -31,6 +31,7 @@ def source_par():
         "alS_lyal": 1.001,               ## PL for lyal
 
         "M_min" : 1e5,                   # Minimum mass of star forming halo. Mdark in HM
+        "M_max" : 1e16,                   # Maximum mass of star forming halo
         'f_st': 0.05,
         'Mp': 1e11,
         'g1': 0.49,

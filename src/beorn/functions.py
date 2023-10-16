@@ -27,7 +27,7 @@ def load_halo(param, z_str):
     catalog_dir = param.sim.halo_catalogs
     catalog = catalog_dir + z_str
     halo_catalog = load_f(catalog)
-    indices = np.where(halo_catalog['M'] > param.source.M_min)
+    indices = np.intersect1d(np.where(halo_catalog['M'] > param.source.M_min),np.where(halo_catalog['M'] < param.source.M_max))
 
     # remove halos not forming stars
     halo_catalog['M'] = halo_catalog['M'][indices]
