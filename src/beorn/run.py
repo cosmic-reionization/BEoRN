@@ -351,15 +351,16 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             if dTb:
 
                 if xcoll:
-                    print('--- Including xcoll in dTb ---')
+                    print('--- Including xcoll fluctuations in dTb ---')
                     Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
                     xcoll_mean = np.mean(Grid_xcoll)
                     Grid_xtot = Grid_xcoll + Grid_xal
                     del Grid_xcoll
                 else:
-                    print('--- NOT including xcoll in dTb ---')
-                    Grid_xtot = Grid_xal
-                    xcoll_mean = 0
+                    print('--- NOT including xcoll fluctuations in dTb ---')
+                    xcoll_mean = x_coll(z=z, Tk=np.mean(Grid_Temp), xHI=(1 - np.mean(Grid_xHII)), rho_b=coef)
+                    Grid_xtot = Grid_xal + xcoll_mean
+
 
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
 
