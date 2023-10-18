@@ -170,6 +170,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                                                         nGrid_min=param.sim.nGrid_min_heat)
                             renorm = np.trapz(Temp_profile * 4 * np.pi * r_temp ** 2, r_temp) / (
                                     LBox ) ** 3 / np.mean(kernel_T)
+                            print('Renorm for Tk is :', renorm)
                             if np.any(kernel_T > 0):
                                 # Grid_Temp += put_profiles_group(Pos_Halos_Grid[indices],  kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(kernel_T) / 1e-7 * renorm
                                 Grid_Temp += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
