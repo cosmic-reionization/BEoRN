@@ -297,7 +297,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
 
 
 
-def paint_boxes(param, PS_HM, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
+def paint_boxes_HM(param, PS_HM, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
                 check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, fourth_order=False,cic=False,
                 variance=False,Rsmoothing=0,truncate=False):
     """
