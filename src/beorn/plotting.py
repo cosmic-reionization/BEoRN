@@ -8,7 +8,8 @@ import matplotlib
 import numpy as np
 from matplotlib import pyplot as plt
 from .constants import *
-
+from .functions import Beta
+from beorn.cosmo import dTb_fct
 
 def plot_Beorn(physics, qty='dTb', xlim=None, ylim=None, label='', color='C0', ls='-', lw=1, alpha=1):
     """""""""
@@ -61,7 +62,7 @@ def plot_PS_Beorn(z, PS, color, ax, Beta=1, label='', qty='xHII', with_dTb=False
     plt.ylabel(r'$\Delta^{2} = k^{3}P(k)/(2\pi^{2})$', fontsize=14)
 
 
-def plot_Beorn_PS_of_z(k, GS_Beorn, PS_Beorn, ls='-', lw=1, color='b', RSD=False, label='', qty='dTb', alpha=1, ax=plt):
+def plot_Beorn_PS_of_z(k, GS_Beorn, PS_Beorn, ls='-', lw=1, color='b', RSD=False, label='', qty='dTb', alpha=1, ax=plt,expansion=False):
     """""""""
     Plot a Beorn Power Spectrum as a function of z. 
     """""""""
@@ -77,11 +78,24 @@ def plot_Beorn_PS_of_z(k, GS_Beorn, PS_Beorn, ls='-', lw=1, color='b', RSD=False
                     label=label, color=color)
         print(PS_dTb_RT_RSD / PS_dTb_RT)
 
+    if expansion :
+        dTb_PS_HM_style = expansion_dTb_PS(PS_Beorn)
+        ax.semilogy(GS_Beorn['z'], kk ** 3 * dTb_RT ** 2 * dTb_PS_HM_style[:, ind_k] / 2 / np.pi ** 2, ls='-', lw=4, alpha=0.5,
+                    color=color,label='expansion')
 
-def plot_2d_map(grid, Ncell, Lbox, slice_nbr, qty='label', scale='lin'):
+
+def plot_2d_map(grid,  Lbox=None, slice_nbr=None, qty='label', scale='lin'):
     # Ncell : int, nbr of grid pixels
     # slice_nbr : int, slice to plot
     # Lbox : int, Box size in Mpc/h
+    Ncell = grid.shape[0]
+    print('Ncell is ',Ncell)
+    if Lbox is None :
+        Lbox = 100
+        print('No Lbox provided, assuming 100Mpc/h (only relevant for the label)')
+    if slice_nbr is None:
+        slice_nbr = int(Ncell/2)
+        print('No slice number provided, plotting the slice (:,Ncell/2,:)')
     if scale == 'lin':
         norm = None
     elif scale == 'log':
@@ -99,6 +113,329 @@ def plot_2d_map(grid, Ncell, Lbox, slice_nbr, qty='label', scale='lin'):
     cb.ax.tick_params(labelsize=14)
     ax.set_rasterized(True)
     ax.tick_params(labelsize=14)
+
+
+
+
+def expansion_terms_beorn(PS):
+    from beorn.functions import Beta
+
+    kk,zz = PS['k'],PS['z']
+    beta_r,beta_T,beta_a = Beta(zz,PS,qty='reio'), Beta(zz,PS,qty='Tk'), Beta(zz,PS,qty='lyal')
+
+    beta_a_2 = - PS['x_al'] * beta_a**2 # coef in front of delta_a^2 in Taylor expansion of dTb
+
+    for key, value in PS.items():  # change lists to numpy arrays
+        PS[key] = np.nan_to_num(PS[key])
+
+    PS_rr = PS['PS_xHII'] * beta_r[:, None] ** 2  ### sizes are size(kk)# reio
+    PS_TT = PS['PS_T'] * beta_T[:, None] ** 2 # temp
+    PS_bb = PS['PS_rho'] # Matter
+    PS_aa = PS['PS_xal'] * beta_a[:, None] ** 2 # lyal
+
+    PS_ab = beta_a[:, None] * PS['PS_rho_xal']
+    PS_Tb = beta_T[:, None] * PS['PS_rho_T']
+    PS_aT = beta_a[:, None] * beta_T[:, None] * PS['PS_T_lyal']
+    PS_rb = beta_r[:, None] * PS['PS_rho_xHII']
+    PS_ra = beta_r[:, None] * beta_a[:, None] * PS['PS_lyal_xHII']
+    PS_rT = beta_r[:, None] * beta_T[:, None] * PS['PS_T_xHII']
+    print('Returining: PS_bb ,PS_aa ,PS_TT ,PS_rr ,PS_ab , PS_Tb , PS_aT , PS_rb , PS_ra , PS_rT')
+
+    return PS_bb ,PS_aa ,PS_TT ,PS_rr ,PS_ab , PS_Tb , PS_aT , PS_rb , PS_ra , PS_rT
+
+
+
+def expansion_dTb_PS(PS,higher_order=False ,coef=1,coef_3th_order=0,coef_4th_order=0,remove_T_2nd_order = 1):
+    """
+    Parameters
+    ----------
+    PS : BEoRN output power spectra, with all cross correlations computed.
+    higher_order : Bool. Includes higher order PS term including xHII field. (r)
+    coef : 1 or 0, used to suppress the terms originating from axpansion to 2nd order of xal/(1+xal) and 1/T
+
+    remove_T_2nd_order : if equals to zero, removes all terms coming from second order T expansion in dTb formula :  -beta_T * delta_T**2
+
+    Returns
+    ----------
+    The dTb PS using HaloModel formula.
+    """
+
+    from beorn.functions import Beta
+
+    kk,zz = PS['k'],PS['z']
+    beta_r,beta_T,beta_a = Beta(zz,PS,qty='reio'), Beta(zz,PS,qty='Tk'), Beta(zz,PS,qty='lyal')
+
+    beta_a_2 = - PS['x_al'] * beta_a**2 # coef in front of delta_a^2 in Taylor expansion of dTb
+
+    for key, value in PS.items():  # change lists to numpy arrays
+        PS[key] = np.nan_to_num(PS[key])
+
+    PS_rr = PS['PS_xHII'] * beta_r[:, None] ** 2  ### sizes are size(kk)# reio
+    PS_TT = PS['PS_T'] * beta_T[:, None] ** 2 # temp
+    PS_bb = PS['PS_rho'] # Matter
+    PS_aa = PS['PS_xal'] * beta_a[:, None] ** 2 # lyal
+
+    PS_ab = beta_a[:, None] * PS['PS_rho_xal']
+    PS_Tb = beta_T[:, None] * PS['PS_rho_T']
+    PS_aT = beta_a[:, None] * beta_T[:, None] * PS['PS_T_lyal']
+    PS_rb = beta_r[:, None] * PS['PS_rho_xHII']
+    PS_ra = beta_r[:, None] * beta_a[:, None] * PS['PS_lyal_xHII']
+    PS_rT = beta_r[:, None] * beta_T[:, None] * PS['PS_T_xHII']
+
+    PS_dTb_HM_style = PS_bb + PS_aa + PS_TT + PS_rr + 2 * (PS_ab + PS_Tb + PS_aT + PS_rb + PS_ra + PS_rT)
+
+
+    if higher_order:
+        print('computing PS to 3rd order in delta_r')
+        PS_raa = PS['PS_ra_a'] * 2 * (beta_r * beta_a ** 2)[:, None] + coef* PS['PS_r_aa'] * 2 * (beta_r * beta_a_2)[:, None]
+        PS_rTT = PS['PS_rT_T'] * 2 * (beta_r * beta_T ** 2)[:, None] - remove_T_2nd_order * coef * PS['PS_r_TT'] * 2 * (beta_r * beta_T)[:, None]
+        PS_rbb = PS['PS_rb_b'] * (2 * beta_r)[:, None]
+
+        #PS_raa = PS['PS_raa'] * (2 * beta_r * beta_a ** 2 + coef * 2 * beta_r * beta_a_2)[:, None]
+        #PS_rTT = PS['PS_rTT'] * (2 * beta_r * beta_T ** 2 - coef * 2 * beta_r * beta_T)[:, None]
+
+        PS_abr = (PS['PS_ab_r']+PS['PS_rb_a']+PS['PS_ra_b']) * (2 * beta_a * beta_r)[:, None]  ## instead of factor 6.
+        PS_rTb = (PS['PS_rT_b']+PS['PS_rb_T']+PS['PS_Tb_r']) * (2 * beta_T * beta_r)[:, None]
+        PS_aTr = (PS['PS_aT_r']+PS['PS_ar_T']+PS['PS_Tr_a']) * (2 * beta_T * beta_r * beta_a)[:, None]
+
+        PS_rra = PS['PS_ar_r'] * (2 * beta_r ** 2 * beta_a)[:, None]
+        PS_rrb = PS['PS_br_r'] * (2 * beta_r ** 2)[:, None]
+        PS_rrT = PS['PS_Tr_r'] * (2 * beta_r ** 2 * beta_T)[:, None]
+
+        #PS_rTrT = PS['PS_rTrT'] * (beta_T * beta_r ** 2 * (beta_T - 2))[:, None]
+        #PS_rara = PS['PS_rara'] * (beta_a ** 2 * beta_r ** 2 * (1 - 2 * PS['x_al']))[:, None]
+        PS_rara = PS['PS_ra_ra'] * (beta_r **2 * beta_a ** 2)[:, None] + coef* PS['PS_raa_r'] * 2 * (beta_r ** 2 * beta_a_2)[:, None]
+        PS_rTrT = PS['PS_rT_rT'] * (beta_T **2 * beta_r ** 2)[:, None] - remove_T_2nd_order * coef* PS['PS_rTT_r'] * 2 * (beta_r ** 2 * beta_T)[:, None]
+        PS_rbrb = PS['PS_rb_rb'] * (beta_r ** 2)[:, None]
+
+        PS_rarb = (2*PS['PS_rba_r']+2*PS['PS_rb_ra']) * (beta_r ** 2 * beta_a)[:, None]
+        PS_rTra = (2*PS['PS_rTa_r']+2*PS['PS_rT_ra']) * (beta_r ** 2 * beta_T * beta_a)[:, None]
+        PS_rTrb = (2*PS['PS_rTb_r']+2*PS['PS_rT_rb']) * (beta_r ** 2 * beta_T)[:, None]
+
+        PS_dTb_HM_style += PS_rTT + PS_raa + PS_rbb + PS_rTb + PS_abr + PS_aTr + PS_rrT + PS_rra + PS_rrb + \
+                           PS_rTrT + PS_rara + PS_rbrb + PS_rarb + PS_rTrb + PS_rTra
+
+
+    if coef_3th_order>0:
+        ## 3rd order in a, T and b (aaT,aaa, TTT,TTa...)
+        PS_aa_a = PS['PS_aa_a'] * (2 * beta_a * beta_a_2)[:, None]
+        PS_aa_T = PS['PS_aa_T'] * (2 * beta_T * beta_a_2)[:, None]
+        PS_aT_a = PS['PS_aT_a'] * (2 * beta_T * beta_a**2)[:, None]
+        PS_aT_T = PS['PS_aT_T'] * (2 * beta_T**2 * beta_a)[:, None]
+        PS_TT_a = - remove_T_2nd_order * PS['PS_TT_a'] * (2 * beta_T * beta_a)[:, None]
+        PS_TT_T = - remove_T_2nd_order * PS['PS_TT_T'] * (2 * beta_T**2)[:, None]
+
+        PS_ab_a = PS['PS_ab_a'] * (2 * beta_a**2)[:, None]
+        PS_aa_b = PS['PS_aa_b'] * (2 * beta_a_2)[:, None]
+        PS_ab_b = PS['PS_ab_b'] * (2 * beta_a)[:, None]
+
+        PS_abT = (PS['PS_ab_T'] + PS['PS_aT_b'] + PS['PS_bT_a']) * (2 * beta_a * beta_T)[:, None]
+
+        PS_bT_b = PS['PS_bT_b'] * (2 * beta_T)[:, None]
+        PS_Tb_T = PS['PS_Tb_T'] * (2 * beta_T**2)[:, None]
+        PS_TT_b = - remove_T_2nd_order * PS['PS_TT_b'] * (2 * beta_T)[:, None]
+
+
+
+
+        ##### 4th order terms in a T and b
+        PS_aa_aa= PS['PS_aa_aa'] * (beta_a_2 **2)[:, None]
+        PS_TT_TT= remove_T_2nd_order * PS['PS_TT_TT'] * (beta_T **2)[:, None]
+
+        PS_aaba = (PS['PS_aa_ba'] + PS['PS_aab_a']) * (2 * beta_a * beta_a_2)[:, None]
+        PS_ab_ab = PS['PS_ab_ab'] * (beta_a ** 2)[:, None]
+        PS_aab_b = PS['PS_aab_b'] * (2 * beta_a_2)[:, None]
+        PS_aaTa = (PS['PS_aaT_a'] + PS['PS_aa_Ta']) * (2 * beta_T * beta_a * beta_a_2)[:, None]
+
+        PS_baTa = (PS['PS_baT_a'] + PS['PS_ba_aT']) * (2 * beta_T * beta_a ** 2)[:, None]
+        PS_aaTb = (PS['PS_aaT_b'] + PS['PS_aab_T'] + PS['PS_aa_Tb']) * (2 * beta_T * beta_a_2)[:, None]
+
+        PS_abTb = (PS['PS_ba_Tb'] + PS['PS_abT_b']) * (2 * beta_T * beta_a)[:, None]
+        PS_aTT_a = remove_T_2nd_order * PS['PS_aTT_a'] * (-2 * beta_T * beta_a ** 2)[:, None]
+        PS_aa_TT = remove_T_2nd_order * PS['PS_aa_TT'] * (-2 * beta_T * beta_a_2)[:, None]
+        PS_aT_aT = PS['PS_aT_aT'] * (beta_T ** 2 * beta_a ** 2)[:, None]
+
+        PS_aaT_T = PS['PS_aaT_T'] * (2 * beta_T ** 2 * beta_a_2)[:, None]
+        PS_aTTb = remove_T_2nd_order * (PS['PS_aTT_b'] + PS['PS_bTT_a'] + PS['PS_TT_ab']) * (-2 * beta_T * beta_a)[:, None]
+
+        PS_bTaT = (PS['PS_baT_T'] + PS['PS_bT_aT']) * (2 * beta_T ** 2 * beta_a)[:, None]
+
+        PS_bTT_b = remove_T_2nd_order * PS['PS_bTT_b'] * (-2 * beta_T)[:, None]
+
+        PS_Tb_Tb = PS['PS_Tb_Tb'] * (beta_T ** 2)[:, None]
+        PS_TTaT = remove_T_2nd_order * (PS['PS_aTT_T'] + PS['PS_TT_aT']) * (-2 * beta_T ** 2 * beta_a)[:, None]
+        PS_TTbT = remove_T_2nd_order * (PS['PS_bTT_T'] + PS['PS_TT_bT']) * (-2 * beta_T ** 2)[:, None]
+
+
+
+        PS_dTb_HM_style += coef_3th_order * (PS_aa_a + PS_aT_a + PS_aT_T + PS_aa_T + PS_TT_a + PS_TT_T + \
+                           PS_ab_a + PS_aa_b + PS_ab_b + PS_abT + PS_bT_b + PS_Tb_T + PS_TT_b) + \
+                           coef_4th_order * (PS_aa_aa + PS_TT_TT+PS_aaba +PS_ab_ab+PS_aab_b+PS_aaTa +PS_baTa +\
+                           PS_aaTb +PS_abTb +PS_aTT_a+PS_aa_TT+PS_aT_aT+PS_aaT_T+PS_aTTb \
+                           +PS_bTaT +PS_bTT_b+PS_Tb_Tb+PS_TTaT +PS_TTbT)
+
+
+
+    return PS_dTb_HM_style
+
+
+
+def expansion_dTb_globalsignal(param,PS,corr_fct):
+    """
+    Parameters
+    ----------
+    PS : BEoRN output power spectra, with all cross correlations computed.
+    corr_fct : The real space correlation function for the unsmoothed field. Output of compute_corr_fct in run.py.
+
+    Returns
+    ----------
+    The mean dTb including cross correlation, to second order
+    """
+    from beorn.functions import Beta
+    from beorn.cosmo import dTb_fct
+    kk,zz = PS['k'],PS['z']
+    beta_r,beta_T,beta_a = Beta(zz,PS,qty='reio'),Beta(zz,PS,qty='Tk'),Beta(zz,PS,qty='lyal')
+
+    for key, value in PS.items():  # change lists to numpy arrays
+        PS[key] = np.nan_to_num(PS[key])
+    for key, value in corr_fct.items():  # change lists to numpy arrays
+        corr_fct[key] = np.nan_to_num(corr_fct[key])
+
+    Xi_TT = corr_fct['Xi_TT']
+    Xi_aa = corr_fct['Xi_aa']
+    Xi_Tb = corr_fct['Xi_Tb']
+    Xi_rT = corr_fct['Xi_rT']
+    Xi_ar = corr_fct['Xi_ar']
+    Xi_aT = corr_fct['Xi_aT']
+    Xi_rb = corr_fct['Xi_rb']
+    Xi_ab = corr_fct['Xi_ab']
+
+    Xi_rba = corr_fct['Xi_rba']
+    Xi_rbT = corr_fct['Xi_rbT']
+    Xi_raT = corr_fct['Xi_raT']
+    Xi_raa = corr_fct['Xi_raa']
+    Xi_rTT = corr_fct['Xi_rTT']
+
+    Xi_aTb  = corr_fct['Xi_aTb']
+    Xi_aTrb = corr_fct['Xi_aTrb']
+    Xi_aab  = corr_fct['Xi_aab']
+    Xi_aarb = corr_fct['Xi_aarb']
+    Xi_TTb  = corr_fct['Xi_TTb']
+    Xi_TTrb = corr_fct['Xi_TTrb']
+
+    x_al = PS['x_al']
+
+    zero_order_correction = (1 + beta_r * Xi_rb)
+    print('0. Zero Order correction just includes 1+ <delta_r*delta_b>')
+
+    first_order_correction = 1 + beta_r * beta_T * Xi_rT + beta_T * Xi_Tb + beta_r * Xi_rb  + beta_a * beta_T * Xi_aT +\
+                         beta_a * beta_r * Xi_ar  + beta_a * Xi_ab + beta_r * beta_T * Xi_rbT + beta_r * beta_T * beta_a * Xi_raT + beta_r * beta_a * Xi_rba
+    print('1. Computing correction to GS including first order expansion of lyal and Tk, with all nonlin terms in xHII.')
+
+    print('2. Second order includes 2nd order expansion of lyal and Tk, with all nonlin terms in xHII. Only keeping terms to 2nd order in lyal and Tk')
+
+    sec_order_correction = first_order_correction - beta_a ** 2 * x_al * beta_r * Xi_raa - beta_a ** 2 * x_al * Xi_aa - beta_T * beta_r * Xi_rTT  - beta_T * Xi_TT
+
+    dTb_approx = dTb_fct(PS['z'], PS['Tk'], PS['x_coll'] + PS['x_al'], 0, PS['x_HII'] , param)
+
+    #if third_order_w_reio:  ## add up terms to 3rd order that include xHII
+   #     sec_order_correction += beta_r * beta_a * Xi_rba + beta_r * beta_T * Xi_rbT + beta_r * beta_a * beta_T * Xi_raT \
+   #                             - beta_a ** 2 * x_al * beta_r * Xi_raa - beta_T * beta_r * Xi_rTT
+   # if third_order :## add up ALL 3rd order terms
+   #     sec_order_correction += beta_a * beta_T * Xi_aTb + beta_a * beta_T * beta_r * Xi_aTrb - beta_a ** 2 * x_al * Xi_aab - beta_a ** 2 * x_al * beta_r *  Xi_aarb\
+   #                             - beta_T * Xi_TTb - beta_T * beta_r * Xi_TTrb
+    print('returning 4 arrays : uncorrected GS, zero, first, and second order corrections to dTb GS.')
+    return dTb_approx, dTb_approx * zero_order_correction, dTb_approx * first_order_correction, dTb_approx * sec_order_correction
+
+
+def plot_var_z(k, var,PS, ax=plt, ls='-', legend=True):
+    """""""""
+    Plot a Beorn variances (sigma(k,z)) as a function of z, for lyal xHII, and Tk fields
+    """""""""
+    ind_k = np.argmin(np.abs(var['k'] - k))
+    print('k is', var['k'][ind_k], 'Mpc/h')
+    var_lyal, var_xHII, var_Temp = var['var_lyal'][:, ind_k], var['var_xHII'][:, ind_k], var['var_Temp'][:, ind_k]
+
+    if legend:
+        label_1 = r'$\sigma$ ly-al'
+        label_2 = r'$\sigma$ Tk'
+        label_3 = r'$\sigma$ xHII'
+       # label_4 = r'$\sigma$ T+lyal'
+
+    else:
+        label_1, label_2, label_3 = '', '', ''
+    ax.semilogy(var['z'], np.sqrt(var_lyal)*PS['x_al']/(1+PS['x_al']), label=label_1, color='C0', ls=ls)
+    ax.semilogy(var['z'], np.sqrt(var_Temp), label=label_2, color='C1', ls=ls)
+   # ax.semilogy(var['z'], np.sqrt(var_Temp) + np.sqrt(var_lyal), label=label_4, color='C5', ls=ls)
+    ax.semilogy(var['z'], np.sqrt(var_xHII), label=label_3, color='C2', ls=ls)
+    ax.semilogy([], [], label='k={} h/Mpc'.format(round(var['k'][ind_k], 3)), color='gray', ls=ls)
+    ax.legend()
+
+
+
+
+
+def plot_Compare_expansion_with_true_PS(param,k, PS_Beorn, color='b', qty='dTb',variances=None,dTb_approx=True,coef=1,PS_Beorn_2=None,coef_3th_order=0,coef_4th_order=0,remove_T_2nd_order=1):
+    """""""""
+    Plot a Beorn Power Spectrum as a function of z. 
+    """""""""
+    import matplotlib.gridspec as gridspec
+    matplotlib.rc('xtick', labelsize=15)
+    matplotlib.rc('ytick', labelsize=15)
+    fig = plt.figure(constrained_layout=True)
+    fig.set_figwidth(10)
+    fig.set_figheight(6)
+    gs = gridspec.GridSpec(3, 2, figure=fig)
+    ax1 = fig.add_subplot(gs[:-1,0])
+    ax2 = fig.add_subplot(gs[-1,0])
+    ax3 = fig.add_subplot(gs[:-1,1])
+
+    ind_k = np.argmin(np.abs(PS_Beorn['k'] - k))
+    print('k RT is', PS_Beorn['k'][ind_k], 'Mpc/h')
+    kk, PS_dTb_RT = PS_Beorn['k'][ind_k], PS_Beorn['PS_' + qty][:, ind_k]
+    dTb_RT = PS_Beorn['dTb']
+    ax1.semilogy(PS_Beorn['z'], kk ** 3 * dTb_RT ** 2 * PS_dTb_RT / 2 / np.pi ** 2, ls='-', lw='4', alpha=0.5,
+                label='True PS, k='+str(round(kk,3)), color=color)
+
+
+    dTb_PS_HM_style = expansion_dTb_PS(PS_Beorn,higher_order=False,coef=coef,coef_3th_order=coef_3th_order,coef_4th_order=coef_4th_order,remove_T_2nd_order=remove_T_2nd_order)
+    dTb_PS_HM_style_sec_order = expansion_dTb_PS(PS_Beorn,higher_order=True,coef=coef,coef_3th_order=coef_3th_order,coef_4th_order=coef_4th_order,remove_T_2nd_order=remove_T_2nd_order)
+
+    if dTb_approx:
+        dTb_approx = dTb_fct(PS_Beorn['z'], PS_Beorn['Tk'], PS_Beorn['x_coll'] + PS_Beorn['x_al'], 0, PS_Beorn['x_HII'], param)
+    else :
+        dTb_approx = dTb_RT
+    ax1.semilogy(PS_Beorn['z'], kk ** 3 * dTb_approx ** 2 * dTb_PS_HM_style[:, ind_k] / 2 / np.pi ** 2, ls='--', lw=2, alpha=1,
+                    color='gray',label='First order')
+    ax1.semilogy(PS_Beorn['z'], kk ** 3 * dTb_approx ** 2 * dTb_PS_HM_style_sec_order[:, ind_k] / 2 / np.pi ** 2, ls='-', lw=2,
+                 alpha=1,
+                 color='gray', label='Second order')
+
+
+    ax2.plot(PS_Beorn['z'], PS_dTb_RT/dTb_PS_HM_style[:, ind_k]* dTb_RT ** 2 /dTb_approx**2 , ls='--', lw=2, alpha=1,
+                    color=color)
+    ax2.plot(PS_Beorn['z'], PS_dTb_RT / dTb_PS_HM_style_sec_order[:, ind_k] * dTb_RT ** 2 / dTb_approx ** 2, ls='-', lw=2,
+             alpha=1,
+             color=color)
+
+    if PS_Beorn_2 is not None:
+        kk, PS_dTb_RT = PS_Beorn_2['k'][ind_k], PS_Beorn_2['PS_' + qty][:, ind_k]
+        dTb_RT = PS_Beorn_2['dTb']
+        ax1.semilogy(PS_Beorn_2['z'], kk ** 3 * dTb_RT ** 2 * PS_dTb_RT / 2 / np.pi ** 2, ls='--', lw='2', alpha=0.5,
+                     label='True PS, k=' + str(round(kk, 3)), color=color)
+
+
+    ax1.legend()
+
+
+    ax2.set_ylim(0.5,1.5)
+    ax1.set_ylim(1e-2,6e2)
+    ax1.set_xlim(5,20)
+    ax2.set_xlim(5,20)
+    ax2.hlines(y=1,xmin=5,xmax=20)
+
+    if variances is not None:
+        plot_var_z(k, variances,PS_Beorn, ax=ax3, ls='-', legend=True)
 
 
 def Tgas_from_rho_heat(HM_PS):
@@ -235,7 +572,7 @@ def plot_1D_profiles(param, profile, ind_M, z_liste):
 
 ########### FUNCTIONS TO DO COMPARISON PLOTS WITH ------>HALO MODEL<--------
 
-def Plotting_GS(physics, x__approx, GS, PS, save_loc=None):
+def Plotting_GS(physics, sfrd_beorn, GS, PS, save_loc=None,param=None):
     """""""""""
     physics : GS history dictionnary data from radtrans
     x__approx : approximation dictionnary (when we compute the global quantities from halo catalogs + profiles, without using a grid.)
@@ -243,11 +580,13 @@ def Plotting_GS(physics, x__approx, GS, PS, save_loc=None):
     """""""""""
     ################################################ loading
     from matplotlib import pyplot as plt
-    RT_dTb_GS = physics['dTb_GS']
+
+    RT_dTb_GS = dTb_fct(physics['z'], physics['Tk'], physics['x_coll'] + physics['x_al'], 0, physics['x_HII'], param)
+
     RT_dTb_GS_Tkneutr = physics['dTb_GS_Tkneutral']
     RT_dTb = physics['dTb']  # physics['dTb']
     RT_zz = physics['z']
-    x_tot = physics['xal_coda_style'] + physics['x_coll']
+    #x_tot = physics['xal_coda_style'] + physics['x_coll']
     Tcmb = (1 + RT_zz) * Tcmb0
 
     HM_zz, HM_dTb = GS['z'], GS['dTb']
@@ -271,8 +610,9 @@ def Plotting_GS(physics, x__approx, GS, PS, save_loc=None):
     axis2.semilogy(HM_zz, GS['Tgas'], 'k', label='Tgas')
     axis2.semilogy(HM_zz, GS['Tcmb'], 'orange', label='Tcmb')
     axis2.semilogy(HM_zz, GS['Tspin'], 'r', label='Tspin')
-    axis2.semilogy(RT_zz, physics['Tadiab'], 'cyan', ls='--', label='Tadiab')
-    axis2.semilogy(RT_zz, physics['T_spin'], 'r', ls='--')
+    Tbg = Tcmb0 * (1 + 135) * (1 + RT_zz) ** 2 / (1 + 135) ** 2
+    axis2.semilogy(RT_zz, Tbg, 'cyan', ls='--', label='Tadiab')
+    #axis2.semilogy(RT_zz, physics['T_spin'], 'r', ls='--')
     axis2.semilogy(RT_zz, physics['Tk'], 'k', ls=':')
     # axis2.semilogy(RT_zz,physics['Tk_neutral_regions'],'k',ls='-.')
 
@@ -295,7 +635,7 @@ def Plotting_GS(physics, x__approx, GS, PS, save_loc=None):
     # axis3.semilogy(x__approx['z'],x__approx['Gamma_heat'],'r',ls='--')
 
     axis3.semilogy(HM_zz, GS['sfrd_lyal'], 'b', ls='-', label='sfrd [Msol h^2/yr/Mpc]')
-    # axis3.semilogy(x__approx['z'], x__approx['sfrd'], 'b', ls='--')
+    axis3.semilogy(sfrd_beorn[0], sfrd_beorn[1], 'b', ls='--')
     axis3.set_xlim(5, 24)
     axis3.set_ylim(1e-6, 1e2)
     axis3.set_ylabel('')
@@ -356,7 +696,11 @@ def Plotting_GS(physics, x__approx, GS, PS, save_loc=None):
     #    plt.savefig(save_loc)
 
 
-def Plotting_PS(k_array, z, physics, PS_Dict, GS, PS, save_loc=None):
+
+
+
+
+def Plotting_PS(k_array, z, physics, PS_Dict, GS, PS, save_loc=None,param=None,plot_expansion_beorn=False):
     """""""""""
     k_array,z : values for the power spectra plot
     physics,PS_Dict : GS history and PS dictionnary data from radtrans
@@ -366,20 +710,20 @@ def Plotting_PS(k_array, z, physics, PS_Dict, GS, PS, save_loc=None):
     from matplotlib import pyplot as plt
     RT_zz = physics['z']  #
     Tcmb = (1 + RT_zz) * Tcmb0
-    RT_dTb_GS = physics['dTb_GS']  # *(1-Tcmb/physics['Tk'])/(1-Tcmb/physics['Tk_neutral'])
+    RT_dTb_GS = dTb_fct(physics['z'], physics['Tk'], physics['x_coll'] + physics['x_al'], 0, physics['x_HII'], param) #physics['dTb_GS']  # *(1-Tcmb/physics['Tk'])/(1-Tcmb/physics['Tk_neutral'])
     x_tot = physics['x_al'] + physics['x_coll']
     RT_dTb = physics[
         'dTb']  # * x_tot/(1 + x_tot) * (physics['x_al']+physics['x_coll']+1) / (physics['x_al']+physics['x_coll'])
 
-    beta_a = physics['beta_a']  # physics['xal_coda_style'] / x_tot / (1 + x_tot)  # physics['beta_a'] #
+    beta_a = Beta(RT_zz,physics,qty='lyal') # physics['xal_coda_style'] / x_tot / (1 + x_tot)  # physics['beta_a'] #
     beta_a_HM = GS['x_al'] / (GS['x_al'] + GS['x_coll']) / (1 + GS['x_al'] + GS['x_coll'])
 
     Tbg = Tcmb0 * (1 + 135) * (1 + RT_zz) ** 2 / (1 + 135) ** 2
     fr = 1  # (physics['Tk']-Tbg)/physics['Tk'] ### Halomodel primordial/heating decomp
-    beta_T = Tcmb / (physics['Tk'] - Tcmb)  # physics['beta_T'] * fr  #
+    beta_T = Beta(RT_zz,physics,qty='Tk')  # physics['beta_T'] * fr  #
 
     beta_T_HM = (1 + GS['z']) * Tcmb0 / (GS['Tgas'] - (1 + GS['z']) * Tcmb0)
-    beta_r = physics['beta_r']  # -physics['x_HII']/(1-physics['x_HII'])
+    beta_r = Beta(RT_zz,physics,qty='reio') # -physics['x_HII']/(1-physics['x_HII'])
     beta_r_HM = -(1 - GS['x_HI']) / (GS['x_HI'])
     RT_iz = np.argmin(np.abs(RT_zz - z))
 
@@ -471,7 +815,8 @@ def Plotting_PS(k_array, z, physics, PS_Dict, GS, PS, save_loc=None):
     for k0 in k_array:
         color = next(ax._get_lines.prop_cycler)['color']
         ind_k_RT = np.argmin(np.abs(PS_RT['k'] - k0))
-        axis4.semilogy(RT_zz, PS_RT['k'][ind_k_RT] ** 3 * RT_dTb_GS ** 2 * PS_dTb_HMstyle[:, ind_k_RT] / 2 / np.pi ** 2,
+        if plot_expansion_beorn:
+            axis4.semilogy(RT_zz, PS_RT['k'][ind_k_RT] ** 3 * RT_dTb_GS ** 2 * PS_dTb_HMstyle[:, ind_k_RT] / 2 / np.pi ** 2,
                        color=color, alpha=0.5, ls='--', lw=4)
         axis4.semilogy(RT_zz, PS_RT['k'][ind_k_RT] ** 3 * RT_dTb ** 2 * PS_dTb[:, ind_k_RT] / 2 / np.pi ** 2,
                        color=color, ls='-.')
@@ -605,6 +950,110 @@ def Plotting_PS(k_array, z, physics, PS_Dict, GS, PS, save_loc=None):
     if save_loc is not None:
         plt.savefig(save_loc)
 
+
+
+
+def Plotting_PS_GS(k_array, z, physics, PS_Dict, GS, PS, save_loc=None,param=None,plot_expansion_beorn=False):
+    """""""""""
+    k_array,z : values for the power spectra plot
+    physics,PS_Dict : GS history and PS dictionnary data from radtrans
+    GS, PS : from halo model
+    """""""""""
+    ################################################ loading
+    from matplotlib import pyplot as plt
+    RT_zz = physics['z']  #
+    Tcmb = (1 + RT_zz) * Tcmb0
+    RT_dTb_GS = dTb_fct(physics['z'], physics['Tk'], physics['x_coll'] + physics['x_al'], 0, physics['x_HII'], param) #physics['dTb_GS']  # *(1-Tcmb/physics['Tk'])/(1-Tcmb/physics['Tk_neutral'])
+    x_tot = physics['x_al'] + physics['x_coll']
+    RT_dTb = physics[
+        'dTb']  # * x_tot/(1 + x_tot) * (physics['x_al']+physics['x_coll']+1) / (physics['x_al']+physics['x_coll'])
+
+    beta_a = Beta(RT_zz,physics,qty='lyal') # physics['xal_coda_style'] / x_tot / (1 + x_tot)  # physics['beta_a'] #
+    beta_T = Beta(RT_zz,physics,qty='Tk')  # physics['beta_T'] * fr  #
+
+    beta_r = Beta(RT_zz,physics,qty='reio') # -physics['x_HII']/(1-physics['x_HII'])
+    RT_iz = np.argmin(np.abs(RT_zz - z))
+
+    HM_zz, HM_dTb = GS['z'], GS['dTb']
+    HM_iz = np.argmin(np.abs(PS['z'] - RT_zz[RT_iz]))
+
+    fig = plt.figure(figsize=(15, 5))
+
+    ################################################ dTb
+    axis1 = fig.add_subplot(131)
+    axis1.plot(HM_zz, HM_dTb, label='HM')
+    axis1.plot(RT_zz, RT_dTb_GS, label='BEORN dTb_GS f(mean)', ls='--')
+    axis1.plot(RT_zz, RT_dTb, label='BEORN mean(dTb) ', ls='--')
+    # axis1.plot(RT_zz , RT_dTb,label='radtrans',ls='-.')
+    axis1.set_xlim(6, 21)
+    axis1.set_ylabel('dTb')
+    axis1.legend()
+
+    ################################################ xHII
+    axis2 = fig.add_subplot(132)
+    axis2.plot(HM_zz, 1 - GS['x_HI'])
+    axis2.plot(RT_zz, physics['x_HII'], ls='--')
+    axis2.set_xlim(6, 20)
+    axis2.set_ylabel('xHII')
+    axis2.set_xlabel('z')
+
+    ################################################ PS(k)
+    print('z is', z, '. Radtrans z is :', RT_zz[RT_iz])
+
+    PS_RT = PS_Dict
+    kk = PS_RT['k']
+    PS_xHI = PS_RT['PS_xHII'] * beta_r[:, None] ** 2  ### sizes are size(kk)
+    PS_T = PS_RT['PS_T'] * beta_T[:, None] ** 2
+    PS_dTb = PS_RT['PS_dTb']
+    PS_rho = PS_RT['PS_rho']
+    PS_xal = PS_RT['PS_xal'] * beta_a[:, None] ** 2
+
+    PS_bb = PS_rho  # gas (matter)
+    PS_aa = PS_xal  #
+    PS_TT = PS_T  #
+    PS_rr = PS_xHI  # reio
+
+    PS_ab = beta_a[:, None] * PS_RT['PS_rho_xal']
+    PS_Tb = beta_T[:, None] * PS_RT['PS_rho_T']
+    PS_aT = beta_a[:, None] * beta_T[:, None] * PS_RT['PS_T_lyal']
+    PS_rb = beta_r[:, None] * PS_RT['PS_rho_xHII']
+    PS_ra = beta_r[:, None] * beta_a[:, None] * PS_RT['PS_lyal_xHII']
+    PS_rT = beta_r[:, None] * beta_T[:, None] * PS_RT['PS_T_xHII']
+
+    PS_dTb_HMstyle = PS_bb + PS_aa + PS_TT + PS_rr + 2 * (PS_ab + PS_Tb + PS_aT + PS_rb + PS_ra + PS_rT)
+
+    ################################################ PS(z)
+    axis4 = fig.add_subplot(133)
+    ax = plt.gca()
+    for k0 in k_array:
+        color = next(ax._get_lines.prop_cycler)['color']
+        ind_k_RT = np.argmin(np.abs(PS_RT['k'] - k0))
+        if plot_expansion_beorn:
+            axis4.semilogy(RT_zz, PS_RT['k'][ind_k_RT] ** 3 * RT_dTb_GS ** 2 * PS_dTb_HMstyle[:, ind_k_RT] / 2 / np.pi ** 2,
+                       color=color, alpha=0.5, ls='-.', lw=4)
+        axis4.semilogy(RT_zz, PS_RT['k'][ind_k_RT] ** 3 * RT_dTb ** 2 * PS_dTb[:, ind_k_RT] / 2 / np.pi ** 2,
+                       color=color, ls='--')
+
+        ind_k = np.argmin(np.abs(PS['k'] - PS_RT['k'][ind_k_RT]))
+        axis4.semilogy(PS['z'], PS['k'][ind_k] ** 3 * HM_dTb ** 2 * PS['P_mu0'][:, ind_k] / 2 / np.pi ** 2, color=color,
+                       label='k={} h/Mpc'.format(k0))
+        # axis4.semilogy(PS['z'],PS['k'][ind_k]**3 * HM_dTb**2 * PS['P_angav'][:,ind_k]/2/np.pi**2,ls=':',lw=4,alpha=0.7,color=color,label='k={}'.format(k0))
+        # print(PS['P_angav'][:, ind_k] / PS['P_mu0'][:, ind_k])
+        print('k RT is ', round(PS_RT['k'][ind_k_RT], 4), 'k HM is,', PS['k'][ind_k])
+
+    # axis4.semilogy(PS['z'],PS['k'][ind_k]**3 * HM_dTb**2* (PS['P_aa'][:,ind_k]+2*(PS['P_ba'][:,ind_k]+PS['P_Ta'][:,ind_k]+PS['P_ra'][:,ind_k]))/2/np.pi**2,color=color,label='k={}'.format(k0))
+    # axis4.semilogy(RT_zz, k0**3 * RT_dTb_GS**2 * (PS_aa[:,ind_k_RT]+2*(PS_aT[:,ind_k_RT]+PS_ab[:,ind_k_RT]+PS_ra[:,ind_k_RT]))/2/np.pi**2,color=color,alpha=0.5,ls='--',lw=4)
+    axis4.semilogy([], [], color='gray', label='HM', alpha=0.5, ls='-')
+    axis4.semilogy([], [], color='gray', label='PS(dTb) BEORN', ls='--')
+
+    axis4.set_ylim(1e-1, 1e3)
+    axis4.set_xlim(6, 20)
+
+    axis4.legend(title='$ k^{3}P(k)/(2\pi^{2})$')  # dTb^{2}
+    axis4.set_xlabel('z', fontsize=14)
+
+    if save_loc is not None:
+        plt.savefig(save_loc)
 
 def Plotting_PS_TT(k_array, physics, PS_RT, GS, PS, save_loc=None):
     """""""""""

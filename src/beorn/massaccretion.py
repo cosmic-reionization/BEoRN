@@ -104,3 +104,5 @@ def dMh_dt_EXP(param,Mh,z):
     return param.source.alpha_MAR * Mh * (z + 1) * Hubble(z, param)
 
 
+def Mhalo_EXP(Mh_z6,zz):
+    return Mh_z6*np.exp(-0.79*(zz-6))

@@ -210,24 +210,22 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             print('universe is fully inoinzed. Return [1] for the xHII, T and [0] for dTb.')
         else:
             if not read_temp or not read_lyal or not read_ion:
-                Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
-                Pos_Halos_Grid = np.array([Pos_Halos / LBox * nGrid]).astype(int)[0]
-                Pos_Halos_Grid[np.where(
-                    Pos_Halos_Grid == nGrid)] = nGrid - 1  # we don't want Pos_Halos_Grid==nGrid. This only happens if Pos_Bubbles=LBox
+
+                Pos_Halos_Grid = pixel_position(H_X, H_Y, H_Z,LBox,nGrid)  # we don't want Pos_Halos_Grid==nGrid. This only happens if Pos_Bubbles=LBox
+
                 Grid_xHII_i = np.zeros((nGrid, nGrid, nGrid))
                 Grid_Temp = np.zeros((nGrid, nGrid, nGrid))
                 Grid_xal = np.zeros((nGrid, nGrid, nGrid))
+
                 for i in range(len(M_Bin)):
-                    indices = np.where(Indexing == i)[
-                        0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
+                    indices = np.where(Indexing == i)[0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
                     Mh_ = grid_model.Mh_history[ind_z, i]
 
                     if len(indices) > 0 and Mh_ > param.source.M_min:
                         radial_grid = grid_model.r_grid_cell / (1 + zgrid)  # pMpc/h
                         x_HII_profile = np.zeros((len(radial_grid)))
 
-                        R_bubble, rho_alpha_, Temp_profile = average_profile(param, grid_model, H_Masses[indices],
-                                                                             ind_z, i)
+                        R_bubble, rho_alpha_, Temp_profile = average_profile(param, grid_model, H_Masses[indices],ind_z, i)
                         x_HII_profile[np.where(radial_grid < R_bubble / (1 + zgrid))] = 1  # grid_model.R_bubble[ind_z, i]
                         # Temp_profile = grid_model.rho_heat[ind_z, :, i]
 
@@ -239,8 +237,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                         ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
                         # base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,1] + nGrid ** 2 * Pos_Halos_Grid[ indices][:,2]
                         # unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
-                        unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices], H_Y[indices],
-                                                                                     H_Z[indices], cic=cic)
+                        unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices], H_Y[indices], H_Z[indices], cic=cic)
 
                         ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
                         YY_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2) // nGrid

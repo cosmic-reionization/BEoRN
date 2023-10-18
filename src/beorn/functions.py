@@ -309,6 +309,22 @@ def load_pkdgrav_density_field(file, LBox, nGrid):
 
 
 
+def pixel_position(X,Y,Z,LBox,nGrid):
+    """
+    Parameters
+    ----------
+    X,Y,Z : floats, positions in cMpc/h
+    LBox : Float, box size in Mpc/h
+    nGrid : Float, number of grid pixels
+
+    Returns
+    ----------
+    Coordinates expressed in grid pixel unit (between 0 and nGrid-1)
+    """
+    Pos_Halos = np.vstack((X,Y,Z)).T  # Halo positions.
+    Pos_Halos_Grid = np.array([Pos_Halos / LBox * nGrid]).astype(int)[0]%nGrid
+    return Pos_Halos_Grid
+
 
 def Gaussian(d,mean,S):
     return 1/np.sqrt(2*np.pi*S)*np.exp(-(d-mean)**2/2/S)
