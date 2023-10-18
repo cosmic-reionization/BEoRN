@@ -184,14 +184,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
 
                 print('.... Done painting profiles. ')
 
-                print('Dealing with the overlap of ionised bubbles.... ')
                 # Grid_Storage = np.copy(Grid_xHII_i)
-
-                t_start_spreading = time.time()
-
-
-                print('.... Done. It took:', print_time(time.time() - t_start_spreading),
-                      'to redistribute excess photons from the overlapping regions.')
 
                 if np.all(Grid_xHII == 0):
                     Grid_xHII = np.array([0])
@@ -200,7 +193,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                     Grid_xHII = np.array([1])
 
 
-                #Grid_Temp += T_adiab_fluctu(z, param, delta_b)
+                Grid_Temp += T_adiab_fluctu(z, param, delta_b)
 
             if read_temp:
                 Grid_Temp = load_grid(param, z=z, type='Tk')
