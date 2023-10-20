@@ -178,6 +178,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                                                                 kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(
                                     kernel_T) / 1e-7 * renorm
                             del kernel_T
+                           print('MEAN GRID TEMP IS :',np.mean(Grid_Temp))
 
                         end_time = time.time()
                         print(len(indices), 'halos in mass bin ', i,
@@ -195,7 +196,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
 
 
                 Grid_Temp += T_adiab_fluctu(z, param, delta_b)
-
+                print('MEAN GRID TEMP IS AFTER ADIAB FLUCTU ADDED IS :', np.mean(Grid_Temp))
             if read_temp:
                 Grid_Temp = load_grid(param, z=z, type='Tk')
             if read_ion:
