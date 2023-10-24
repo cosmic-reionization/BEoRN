@@ -206,12 +206,12 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir=''):
     H_Masses, H_X, H_Y, H_Z, z_catalog = halo_catalog['M'], halo_catalog['X'], halo_catalog['Y'], halo_catalog['Z'], \
                                          halo_catalog['z']
 
+
     if round(z_catalog / z, 2) != 1:
         print('ERROR. Redshifts do not match between halo catalog name and data in catalog.')
         exit()
 
-    delta_rho = load_delta_b(param, z_str)
-    print('at z = ', z, 'shape of delta_rho is ', delta_rho.shape)
+
     min_M = np.min(H_Masses)
     max_M = np.max(H_Masses)
     print('Min and Max : {:.2e}, {:.2e}'.format(min_M, max_M))
@@ -235,6 +235,14 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir=''):
     PS_h_h_arr = np.zeros((Nm, Nk))
     Shot_Noise = np.zeros((Nm))
     Bias = np.zeros((Nm))
+
+    if len(halo_catalog['M']) > 0:
+        delta_rho = load_delta_b(param, z_str)
+        print('at z = ', z, 'shape of delta_rho is ', delta_rho.shape)
+
+    else :
+        delta_rho = np.zeros((nGrid,nGrid,nGrid))
+        
     Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
     Pos_Halos_Grid = np.array([Pos_Halos / Lbox * nGrid]).astype(int)[0]
     Pos_Halos_Grid[np.where(Pos_Halos_Grid == nGrid)] = nGrid - 1
