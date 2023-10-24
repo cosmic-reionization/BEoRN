@@ -166,7 +166,7 @@ def compute_bias(param, tab_M=None,dir=''):
     for ii, z in enumerate(z_arr):
         z = np.round(z, 2)
         if rank == ii % size:
-            measure_halo_bias(param, z, nGrid, tab_M=tab_M, kbins=kbins)
+            measure_halo_bias(param, z, nGrid, tab_M=tab_M, kbins=kbins,dir=dir)
 
     comm.Barrier()
 
@@ -197,7 +197,7 @@ def compute_bias(param, tab_M=None,dir=''):
 
 
 
-def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name=''):
+def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir=''):
 
     Lbox = param.sim.Lbox
     z_str = z_string_format(z)
