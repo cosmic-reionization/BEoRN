@@ -121,15 +121,37 @@ def cumulated_number_halos(param, H_X, H_Y, H_Z, cic=False):
         pixel_coordinates_output, cic_coeff_output = CIC_coefficients(param, H_X, H_Y, H_Z)
         base_nGrid_cic_position = pixel_coordinates_output[0] + nGrid * pixel_coordinates_output[1] + nGrid ** 2 * \
                                   pixel_coordinates_output[2]
+
         unique_positions = np.unique(base_nGrid_cic_position)
-        cumulated_coeff = np.zeros(len(unique_positions))
-        ## cumulated cic coeff for each pixel in "unique_values"
-        for i in range(len(unique_positions)):
-            indexes = np.where(base_nGrid_cic_position == unique_positions[i])
-            cumulated_coeff[i] = np.sum(cic_coeff_output[indexes])
-            # each "unique_positions" (pixel coordinate expressed in base_n_grid) has
-            # a cumulated cic coeff of "cumulated_coeff"
+        unique_cic_coeff = np.unique(cic_coeff_output)
+        cumulated_coeff  = np.zeros(len(unique_positions))
+
+        print('len of unique_cic_coeff is',len(unique_cic_coeff))
+        for i in range(len(unique_cic_coeff)):
+
+            ## all the indices that have the same cic coeff
+            indexes = np.where(cic_coeff_output == unique_cic_coeff[i])
+
+            ### all the unique positions of the halos that have the same cic coeff, and how many there are per position
+            unique_pos_with_same_cic_coeff, nbr_of_halos = np.unique(base_nGrid_cic_position[indexes], return_counts=True)
+
+            mask = np.isin(unique_positions, unique_pos_with_same_cic_coeff)
+            cumulated_coeff[mask] += nbr_of_halos * unique_cic_coeff[i]
+
         unique_base_nGrid_poz, nbr_of_halos = unique_positions, cumulated_coeff
+
+############ this is the slower version
+#        unique_positions = np.unique(base_nGrid_cic_position)
+#        cumulated_coeff = np.zeros(len(unique_positions))
+#        ## cumulated cic coeff for each pixel in "unique_values"
+#        for i in range(len(unique_positions)):
+#            indexes = np.where(base_nGrid_cic_position == unique_positions[i])
+#            cumulated_coeff[i] = np.sum(cic_coeff_output[indexes])
+#            # each "unique_positions" (pixel coordinate expressed in base_n_grid) has
+#            # a cumulated cic coeff of "cumulated_coeff"
+#        unique_base_nGrid_poz, nbr_of_halos = unique_positions, cumulated_coeff
+########### this is the end of the slow version
+
 
     return unique_base_nGrid_poz, nbr_of_halos
 

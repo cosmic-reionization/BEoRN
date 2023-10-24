@@ -237,6 +237,9 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
 
 
+            else :
+                Grid_dTb = np.array([0])
+                xcoll_mean = 0
 
     PS_dTb, k_bins = auto_PS(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
                              kbins=def_k_bins(param))

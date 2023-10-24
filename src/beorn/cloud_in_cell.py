@@ -34,6 +34,10 @@ def CIC_coefficients(param, H_X, H_Y, H_Z):
     nGrid = param.sim.Ncell  # number of grid cells
     pix = LBox / nGrid  # pixel real size
 
+    ### shift the positions of the halos to the closest point among the 27 edges, vertices and center of the voxel.
+    ### this is to make the cic procedure faster : in forces to have limited unique number of cic coeff.
+    H_X,H_Y,H_Z = np.round(H_X * nGrid * 2 / LBox) / (2 * nGrid) * LBox,np.round(H_Y * nGrid * 2 / LBox) / (2 * nGrid) * LBox, np.round(H_Z * nGrid * 2 / LBox) / (2 * nGrid) * LBox
+
     # positions in pixel units
     X_pix = np.array([H_X / LBox * nGrid]).astype(int)[0]
     Y_pix = np.array([H_Y / LBox * nGrid]).astype(int)[0]

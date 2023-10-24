@@ -105,10 +105,47 @@ def load_delta_b(param, zz):
         delta_b = np.loadtxt(dens_field + zz)
     else:
         print('param.sim.dens_field_type should be either 21cmFAST or pkdgrav.')
+
+    if nGrid != delta_b.shape[0]:
+        delta_b = reshape_grid(delta_b,nGrid)
+
     return delta_b
 
 
 
+def reshape_grid(grid, N):
+    """
+    Parameters
+    ----------
+    grid : (a,a,a) a 3D meshgrid.
+    new_shape : int. the nbr of pixel per grid for the reshaped array
+
+    Returns
+    ----------
+    3D meshgrid of shape (N,N,N)
+    """
+    N_ini = grid.shape[0]
+
+    if (N_ini/N) % 1 != 0 and (N/N_ini) % 1 != 0 :
+        print('Your param.sim.Ncell should be a mutiple of a divider of your input density field shape.')
+        exit()
+
+    else :
+        new_shape = (N, N, N)
+        if N < N_ini:
+            print('Downsampling the density field to a shape ({},{},{})'.format(N, N, N))
+            # Downsample by taking the mean of block_size x block_size x block_size blocks
+            block_size = int(N_ini / N)
+            # Reshape grid into blocks and take the mean
+            arr2 = grid.reshape(new_shape[0], block_size, new_shape[1], block_size, new_shape[2], block_size).mean(axis=(1, 3, 5))
+
+        else:
+            print('Oversampling the density field to a shape ({},{},{})'.format(N, N, N))
+            # Create arr2 by indexing and expanding grid
+            arr2 = grid[np.arange(new_shape[0])[:, None, None] // 2, np.arange(new_shape[1])[None, :, None] // 2, np.arange(
+            new_shape[2])[None, None, :] // 2]
+
+    return  arr2
 
 def load_grid(param, z, type=None):
     """
