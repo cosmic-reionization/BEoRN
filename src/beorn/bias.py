@@ -4,6 +4,7 @@ import numpy as np
 from scipy.interpolate import splrep,splev,interp1d
 from .constants import *
 from .cosmo import D, rhoc_of_z
+import os
 
 delta_c = 1.686
 
@@ -177,7 +178,7 @@ def compute_bias(param, tab_M=None,dir=''):
         for ii, z in enumerate(z_arr):
             z_str = z_string_format(z)
             file = dir+'./Halo_bias/halo_bias_B'+str(Lbox) + '_' + str(nGrid) + 'grid_z' + z_str + '.pkl'
-            if exists(file):
+            if os.path.exists(file):
                 bias__ = load_f(file)
                 for key, value in bias__.items():
                     dd[key].append(value)
