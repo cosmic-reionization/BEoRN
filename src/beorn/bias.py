@@ -226,7 +226,7 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zm
     Lbox = param.sim.Lbox
     z_str = z_string_format(z)
     Vcell = (Lbox / nGrid) ** 3
-    
+
     if z<zmax:
 
         halo_catalog = load_halo(param, z_str)
@@ -296,7 +296,8 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zm
             kk = PS_m_m[1]
 
     else:
-        PS_m_m,kk = t2c.power_spectrum.power_spectrum_1d(np.zeros((nGrid,nGrid,nGrid)), box_dims=Lbox, kbins=kbin)
+        PS_m_m = t2c.power_spectrum.power_spectrum_1d(np.zeros((nGrid,nGrid,nGrid)), box_dims=Lbox, kbins=kbin)
+        kk = PS_m_m[1]
 
     Dict = {}
     Bias = Bias.clip(min=0)
