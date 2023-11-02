@@ -223,11 +223,12 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zm
     PS_h_h_arr = np.zeros((Nm, Nk))
     Shot_Noise = np.zeros((Nm))
     Bias = np.zeros((Nm))
-
+    Lbox = param.sim.Lbox
+    z_str = z_string_format(z)
+    Vcell = (Lbox / nGrid) ** 3
+    
     if z<zmax:
-        Lbox = param.sim.Lbox
-        z_str = z_string_format(z)
-        Vcell = (Lbox / nGrid) ** 3
+
         halo_catalog = load_halo(param, z_str)
         H_Masses, H_X, H_Y, H_Z, z_catalog = halo_catalog['M'], halo_catalog['X'], halo_catalog['Y'], halo_catalog['Z'], \
                                              halo_catalog['z']
