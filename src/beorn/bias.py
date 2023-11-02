@@ -139,7 +139,8 @@ def bar_density_2h(rgrid,param,z,Mass):
 from beorn.functions import *
 
 
-def compute_bias(param, tab_M=None,dir=''):
+def compute_bias(param, tab_M=None,dir='',zmax = 100):
+    # zmax : will not compute bias for z> zmax.
     import os
     from mpi4py import MPI
     import time
@@ -167,7 +168,7 @@ def compute_bias(param, tab_M=None,dir=''):
     for ii, z in enumerate(z_arr):
         z = np.round(z, 2)
         if rank == ii % size:
-            measure_halo_bias(param, z, nGrid, tab_M=tab_M, kbins=kbins,dir=dir)
+            measure_halo_bias(param, z, nGrid, tab_M=tab_M, kbins=kbins,dir=dir,zmax=zmax)
 
     comm.Barrier()
 
@@ -198,19 +199,8 @@ def compute_bias(param, tab_M=None,dir=''):
 
 
 
-def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir=''):
+def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zmax=100):
 
-    Lbox = param.sim.Lbox
-    z_str = z_string_format(z)
-    Vcell = (Lbox / nGrid) ** 3
-    halo_catalog = load_halo(param, z_str)
-    H_Masses, H_X, H_Y, H_Z, z_catalog = halo_catalog['M'], halo_catalog['X'], halo_catalog['Y'], halo_catalog['Z'], \
-                                         halo_catalog['z']
-
-
-    if round(z_catalog / z, 2) != 1:
-        print('ERROR. Redshifts do not match between halo catalog name and data in catalog.')
-        exit()
 
     if tab_M is None:
         min_M = np.min(H_Masses)
@@ -234,64 +224,80 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir=''):
     Shot_Noise = np.zeros((Nm))
     Bias = np.zeros((Nm))
 
-    if len(H_Masses) > 0:
-        delta_rho = load_delta_b(param, z_str)
-        print('at z = ', z, 'shape of delta_rho is ', delta_rho.shape)
+    if z<zmax:
+        Lbox = param.sim.Lbox
+        z_str = z_string_format(z)
+        Vcell = (Lbox / nGrid) ** 3
+        halo_catalog = load_halo(param, z_str)
+        H_Masses, H_X, H_Y, H_Z, z_catalog = halo_catalog['M'], halo_catalog['X'], halo_catalog['Y'], halo_catalog['Z'], \
+                                             halo_catalog['z']
 
-        Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
-        Pos_Halos_Grid = np.array([Pos_Halos / Lbox * nGrid]).astype(int)[0]
-        Pos_Halos_Grid[np.where(Pos_Halos_Grid == nGrid)] = nGrid - 1
-
-        Indexing = np.argmin(np.abs(np.log10(H_Masses[:, None] / M_bin)), axis=1)
-
-        PS_m_m = t2c.power_spectrum.power_spectrum_1d(delta_rho, box_dims=Lbox, kbins=kbin)
-        kk = PS_m_m[1]
-        for im in range(len(M_bin)):
-            if im == len(M_bin):
-                PS_h_m_arr[im, :] = np.zeros((Nk))
-                PS_h_h_arr[im, :] = np.zeros((Nk))
-
-            indices = np.where(Indexing == im)[0]
-            if len(indices) > 0:
-                print('mass bin', im, 'over', Nm, 'has', len(indices), 'halos')
-                base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:, 1] + nGrid ** 2 * \
-                                      Pos_Halos_Grid[indices][:, 2]
-                unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
-
-                ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
-                YY_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2) // nGrid
-                XX_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2 - YY_indice * nGrid)
-
-                Grid_halo_field = np.zeros((nGrid, nGrid, nGrid))
-                Grid_halo_field[XX_indice, YY_indice, ZZ_indice] += 1 / Vcell * nbr_of_halos
-                delta_h = Grid_halo_field / np.mean(Grid_halo_field) - 1
-                PS_h_m = t2c.power_spectrum.cross_power_spectrum_1d(delta_h, delta_rho, box_dims=Lbox, kbins=kbin)
-
-                # PS_h_h   = t2c.power_spectrum.power_spectrum_1d(delta_h,box_dims = Lbox,kbins=kbin)
-
-                PS_h_m_arr[im, :] = PS_h_m[0]
-
-                # PS_h_h_arr[im,:] = PS_h_h[0]
-                Shot_Noise[im] = 1 / (len(indices) / Lbox ** 3)
-
-                bias__ = PS_h_m[0] / PS_m_m[0]
-                ind_to_average = np.intersect1d(np.where(kk < 0.3), np.where(~np.isnan(bias__)))
-                Bias[im] = np.mean(bias__[ind_to_average])
-                print('bias is', kk)
-
-            else:
-                Bias[im] = 0
-            ## below 0.5 we found that the bias is well converged between 128^3 and 256^3 grids, so we take the average to define scale independent bias
-            ## also, we are intersted in large scale bias in a first step.
+        if round(z_catalog / z, 2) != 1:
+            print('ERROR. Redshifts do not match between halo catalog name and data in catalog.')
+            exit()
 
 
-    else :
-        delta_rho = np.zeros((nGrid,nGrid,nGrid))
-        PS_m_m = t2c.power_spectrum.power_spectrum_1d(delta_rho, box_dims=Lbox, kbins=kbin)
-        kk = PS_m_m[1]
+
+        if len(H_Masses) > 0:
+            delta_rho = load_delta_b(param, z_str)
+            print('at z = ', z, 'shape of delta_rho is ', delta_rho.shape)
+
+            Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
+            Pos_Halos_Grid = np.array([Pos_Halos / Lbox * nGrid]).astype(int)[0]
+            Pos_Halos_Grid[np.where(Pos_Halos_Grid == nGrid)] = nGrid - 1
+
+            Indexing = np.argmin(np.abs(np.log10(H_Masses[:, None] / M_bin)), axis=1)
+
+            PS_m_m = t2c.power_spectrum.power_spectrum_1d(delta_rho, box_dims=Lbox, kbins=kbin)
+            kk = PS_m_m[1]
+            for im in range(len(M_bin)):
+                if im == len(M_bin):
+                    PS_h_m_arr[im, :] = np.zeros((Nk))
+                    PS_h_h_arr[im, :] = np.zeros((Nk))
+
+                indices = np.where(Indexing == im)[0]
+                if len(indices) > 0:
+                    print('mass bin', im, 'over', Nm, 'has', len(indices), 'halos')
+                    base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:, 1] + nGrid ** 2 * \
+                                          Pos_Halos_Grid[indices][:, 2]
+                    unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
+
+                    ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
+                    YY_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2) // nGrid
+                    XX_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2 - YY_indice * nGrid)
+
+                    Grid_halo_field = np.zeros((nGrid, nGrid, nGrid))
+                    Grid_halo_field[XX_indice, YY_indice, ZZ_indice] += 1 / Vcell * nbr_of_halos
+                    delta_h = Grid_halo_field / np.mean(Grid_halo_field) - 1
+                    PS_h_m = t2c.power_spectrum.cross_power_spectrum_1d(delta_h, delta_rho, box_dims=Lbox, kbins=kbin)
+
+                    # PS_h_h   = t2c.power_spectrum.power_spectrum_1d(delta_h,box_dims = Lbox,kbins=kbin)
+
+                    PS_h_m_arr[im, :] = PS_h_m[0]
+
+                    # PS_h_h_arr[im,:] = PS_h_h[0]
+                    Shot_Noise[im] = 1 / (len(indices) / Lbox ** 3)
+
+                    bias__ = PS_h_m[0] / PS_m_m[0]
+                    ind_to_average = np.intersect1d(np.where(kk < 0.3), np.where(~np.isnan(bias__)))
+                    Bias[im] = np.mean(bias__[ind_to_average])
+                    print('bias is', kk)
+
+                else:
+                    Bias[im] = 0
+                ## below 0.5 we found that the bias is well converged between 128^3 and 256^3 grids, so we take the average to define scale independent bias
+                ## also, we are intersted in large scale bias in a first step.
+
+
+        else :
+            delta_rho = np.zeros((nGrid,nGrid,nGrid))
+            PS_m_m = t2c.power_spectrum.power_spectrum_1d(delta_rho, box_dims=Lbox, kbins=kbin)
+            kk = PS_m_m[1]
+
+    else:
+        PS_m_m,kk = t2c.power_spectrum.power_spectrum_1d(np.zeros((nGrid,nGrid,nGrid)), box_dims=Lbox, kbins=kbin)
 
     Dict = {}
-
     Bias = Bias.clip(min=0)
     Dict['Mh'] = M_bin
     Dict['z'] = round(z, 2)
