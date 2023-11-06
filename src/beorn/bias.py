@@ -389,7 +389,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                 unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices_im], H_Y[indices_im],
                                                                              H_Z[indices_im], cic=False)
                 Dict_halo_unique_poz[str(im)] = np.array((unique_base_nGrid_poz, nbr_of_halos))
-                print('mass bin', im, 'has', len(indices_im)), 'halos')
+                print('mass bin', im, 'has', len(indices_im), 'halos')
 
 
             for im in range(len(M_bin)):
