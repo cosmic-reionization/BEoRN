@@ -6,7 +6,8 @@ from .constants import *
 from .cosmo import D, rhoc_of_z
 import os
 from .functions import *
-
+from .profiles_on_grid import log_binning,bin_edges_log, cumulated_number_halos
+import time
 delta_c = 1.686
 
 def delt_c(z,param):
@@ -143,9 +144,9 @@ from beorn.functions import *
 def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False):
     # zmax : will not compute bias for z> zmax.
     import os
-    from mpi4py import MPI
+
     import time
-    comm = MPI.COMM_WORLD
+
     if not os.path.isdir(dir+'./Halo_bias'):
         os.mkdir(dir+'./Halo_bias')
 
@@ -153,6 +154,8 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False):
     print('Computing halo bias.')
 
     if param.sim.cores > 1:
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
         import mpi4py.MPI
         rank = mpi4py.MPI.COMM_WORLD.Get_rank()
         size = mpi4py.MPI.COMM_WORLD.Get_size()
@@ -177,7 +180,9 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False):
 
             else :
                 print('Cross parameter in compute bias should either be true or false.')
-    comm.Barrier()
+
+    if param.sim.cores > 1:
+        comm.Barrier()
 
     if not cross:
         name = 'halo_bias_B'
@@ -215,7 +220,7 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False):
 def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zmax=100):
 
 
-    tab_M, kbin, Nm, Nk = def_tab_M_and_kbin(tab_M,kbins)
+    M_bin, kbin, Nm, Nk = def_tab_M_and_kbin(tab_M,kbins)
 
     PS_h_m_arr = np.zeros((Nm, Nk))
     PS_h_h_arr = np.zeros((Nm, Nk))
@@ -239,8 +244,8 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zm
             delta_rho = load_delta_b(param, z_str)
             print('at z = ', z, 'shape of delta_rho is ', delta_rho.shape)
 
-            Pos_Halos_Grid = pixel_position(H_X, H_Y, H_Z, LBox, nGrid)
-            Indexing = log_binning(H_Masses, bin_edges_log(M_Bin))
+            Pos_Halos_Grid = pixel_position(H_X, H_Y, H_Z, Lbox, nGrid)
+            Indexing = log_binning(H_Masses, bin_edges_log(M_bin))
             Indexing = Indexing - 1
 
             PS_m_m = auto_PS(delta_rho, box_dims=Lbox, kbins=kbin)
@@ -253,7 +258,8 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zm
                 indices = np.where(Indexing == im)[0]
                 if len(indices) > 0:
                     print('mass bin', im, 'over', Nm, 'has', len(indices), 'halos')
-                    unique_base_nGrid_poz, nbr_of_halos = Dict_halo_unique_poz[str(im)]
+                    unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices], H_Y[indices],
+                                                                             H_Z[indices], cic=False)
                     t1 = time.time()
                     delta_h = delta_halo(unique_base_nGrid_poz, nbr_of_halos, Lbox, nGrid)
 
@@ -270,7 +276,7 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zm
                     bias__ = PS_h_m[0] / PS_m_m[0]
                     ind_to_average = np.intersect1d(np.where(kk < 0.3), np.where(~np.isnan(bias__)))
                     Bias[im] = np.mean(bias__[ind_to_average])
-                    print('bias is', kk)
+                    print('bias is', Bias[im])
 
                 else:
                     Bias[im] = 0
@@ -354,7 +360,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
 
     ### same as above, we just measure b(M1,M2)
 
-    tab_M, kbin, Nm, Nk = def_tab_M_and_kbin(tab_M,kbins)
+    M_bin, kbin, Nm, Nk = def_tab_M_and_kbin(tab_M,kbins)
     PS_h_m_arr = np.zeros((Nm,Nm, Nk))
     PS_h_h_arr = np.zeros((Nm,Nm, Nk))
     Shot_Noise = np.zeros((Nm))
@@ -380,7 +386,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
             kk = PS_m_m[1]
             print('at z = ', z, 'shape of delta_rho is ', delta_rho.shape)
 
-            Indexing = log_binning(H_Masses, bin_edges_log(M_Bin))
+            Indexing = log_binning(H_Masses, bin_edges_log(M_bin))
             Indexing = Indexing - 1
 
             Dict_halo_unique_poz = {}
