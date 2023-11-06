@@ -172,7 +172,7 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False):
             if not cross:
                 measure_halo_bias(param, z, nGrid, tab_M=tab_M, kbins=kbins,dir=dir,zmax=zmax)
 
-            elif cross = True:
+            elif cross :
                 measure_halo_bias_with_cross(param, z, nGrid, tab_M=tab_M, kbins=kbins, dir=dir, zmax=zmax)
 
             else :
