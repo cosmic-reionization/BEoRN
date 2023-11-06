@@ -215,7 +215,7 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False):
 def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zmax=100):
 
 
-    tab_M, kbin, Nm, Nk = def_tab_M_&_kbin(tab_M,kbins)
+    tab_M, kbin, Nm, Nk = def_tab_M_and_kbin(tab_M,kbins)
 
     PS_h_m_arr = np.zeros((Nm, Nk))
     PS_h_h_arr = np.zeros((Nm, Nk))
@@ -303,7 +303,7 @@ def measure_halo_bias(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zm
 
 
 
-def def_tab_M_&_kbin(tab_M,kbins):
+def def_tab_M_and_kbin(tab_M,kbins):
     if tab_M is None:
         min_M = np.min(H_Masses)
         max_M = np.max(H_Masses)
@@ -354,7 +354,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
 
     ### same as above, we just measure b(M1,M2)
 
-    tab_M, kbin, Nm, Nk = def_tab_M_&_kbin(tab_M,kbins)
+    tab_M, kbin, Nm, Nk = def_tab_M_and_kbin(tab_M,kbins)
     PS_h_m_arr = np.zeros((Nm,Nm, Nk))
     PS_h_h_arr = np.zeros((Nm,Nm, Nk))
     Shot_Noise = np.zeros((Nm))
