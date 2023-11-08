@@ -446,6 +446,9 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                     for jm in range(im, len(M_bin)):
                         Bias[jm, im] = Bias[im, jm]
 
+    else:
+        PS_m_m = t2c.power_spectrum.power_spectrum_1d(np.zeros((nGrid,nGrid,nGrid)), box_dims=Lbox, kbins=kbin)
+        kk = PS_m_m[1]
 
     Dict = {}
     Bias = Bias.clip(min=0)
