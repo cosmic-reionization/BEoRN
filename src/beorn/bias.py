@@ -401,6 +401,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
 
             for im in range(len(M_bin)):
                 indices_im = np.where(Indexing == im)[0]
+                print('mass bin', im, 'has', len(indices_im), 'halos')
                 for jm in range(im, len(M_bin)):
                     if len(Dict_halo_unique_poz[str(im)][1]) > 0 and len(Dict_halo_unique_poz[str(jm)][1]) > 0:
 
@@ -440,8 +441,10 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                         PS_h_h_arr[im, jm, :] = np.zeros((Nk))
 
                 if len(indices_im) > 0:
+
                     Shot_Noise[im] = 1 / (len(indices_im) / Lbox ** 3)
                     PS_h_h_arr[im, im, :] -= Shot_Noise[im]
+                    print('mass bin', im, 'has show noise',Shot_Noise[im] )
 
 
                 for im in range(len(M_bin)):
