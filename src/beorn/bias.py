@@ -370,7 +370,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
 
     PS_m_m = t2c.power_spectrum.power_spectrum_1d(np.zeros((nGrid, nGrid, nGrid)), box_dims=Lbox, kbins=kbin)
     kk = PS_m_m[1]
-    
+
     if z<zmax:
 
         halo_catalog = load_halo(param, z_str)
@@ -400,6 +400,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
 
 
             for im in range(len(M_bin)):
+                indices_im = np.where(Indexing == im)[0]
                 for jm in range(im, len(M_bin)):
                     if len(Dict_halo_unique_poz[str(im)][1]) > 0 and len(Dict_halo_unique_poz[str(jm)][1]) > 0:
 
@@ -418,7 +419,6 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                         PS_h_h = cross_PS(delta_h_i, delta_h_j, box_dims=Lbox, kbins=kbin)
 
                         t5 = time.time()
-                        print('TIME:', t5 - t4, t3 - t1)
 
                         PS_h_h_arr[im, jm, :] = PS_h_h[0]
                         bias__ = np.sqrt(PS_h_h[0] / PS_m_m[0])
@@ -443,8 +443,9 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                     Shot_Noise[im] = 1 / (len(indices_im) / Lbox ** 3)
                     PS_h_h_arr[im, im, :] -= Shot_Noise[im]
 
+
                 for im in range(len(M_bin)):
-                    for jm in range(im, len(M_bin)):
+                    for jm in range(im, len(M_bin)):f
                         Bias[jm, im] = Bias[im, jm]
 
 
