@@ -445,9 +445,8 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
 
 
                 for im in range(len(M_bin)):
-                    for jm in range(im, len(M_bin)):f
+                    for jm in range(im, len(M_bin)):
                         Bias[jm, im] = Bias[im, jm]
-
 
 
     Dict = {}
