@@ -361,7 +361,8 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
     M_bin, kbin, Nm, Nk = def_tab_M_and_kbin(tab_M,kbins)
     PS_h_m_arr = np.zeros((Nm,Nm, Nk))
     PS_h_h_arr = np.zeros((Nm,Nm, Nk))
-    Shot_Noise = np.zeros((Nm))
+    Nbr_Halos = np.zeros((Nm))
+    Nbr_Pixels = np.zeros((Nm))
     Bias = np.zeros((Nm,Nm))
 
     Lbox = param.sim.Lbox
@@ -397,7 +398,8 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                                                                              H_Z[indices_im], cic=False)
                 Dict_halo_unique_poz[str(im)] = np.array((unique_base_nGrid_poz, nbr_of_halos))
                 print('mass bin', im, 'has', len(indices_im), 'halos')
-
+                Nbr_Halos[im] = len(indices_im)  # total number of halos in this mass bin
+                Nbr_Pixels[im] = len(unique_base_nGrid_poz)  # total number of occupied pixel in this mass bin
 
             for im in range(len(M_bin)):
                 indices_im = np.where(Indexing == im)[0]
@@ -440,11 +442,12 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                         # PS_h_m_arr[im,jm,:] = np.zeros((Nk))
                         PS_h_h_arr[im, jm, :] = np.zeros((Nk))
 
-                if len(indices_im) > 0:
+               # if len(indices_im) > 0:
 
-                    Shot_Noise[im] = 1 / (len(indices_im) / Lbox ** 3)
-                    PS_h_h_arr[im, im, :] -= Shot_Noise[im]
-                    print('mass bin', im, 'has show noise',Shot_Noise[im] )
+                  #  Nbr_Halos[im] = len(indices_im)# / Lbox ** 3)
+                  #  Nbr_Pixels[im] = len(indices_im)  #
+                    #PS_h_h_arr[im, im, :] -= Shot_Noise[im]
+                   # print('mass bin', im, 'has shot noise',Shot_Noise[im] )
 
 
                 for im in range(len(M_bin)):
@@ -460,7 +463,8 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
     Dict['PS_h_m'] = PS_h_m_arr
     Dict['PS_m_m'] = PS_m_m[0]
     Dict['PS_h_h'] = PS_h_h_arr
-    Dict['Shot_Noise'] = Shot_Noise
+    Dict['Nbr_Halos'] = Nbr_Halos
+    Dict['Nbr_Pixels'] = Nbr_Pixels
     Dict['Bias'] = Bias
 
     save_f(file=dir+'./Halo_bias/halo_bias_with_cross_B' + str(Lbox) + '_' + str(nGrid) + 'grid_z' + z_str + '.pkl',obj=Dict)
