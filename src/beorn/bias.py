@@ -448,11 +448,14 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                         if fit :
                             indices_ = bias__ > 0 # just fit values that are positive and not nans.
                             if len(bias__[indices_]) > 0:
+                                try :
+                                    print('yes',im,jm)
+                                    param_fit, covariance = fit_bias(Bias[im, jm], kk[indices_], bias__[indices_])
+                                    fitted_bias = bias_fit(Bias[im, jm],kk,param_fit[0],param_fit[1])
 
-                                print('yes',im,jm)
-                                param_fit, covariance = fit_bias(Bias[im, jm], kk[indices_], bias__[indices_])
-                                fitted_bias = bias_fit(Bias[im, jm],kk,param_fit[0],param_fit[1])
-
+                                except RuntimeError as re:
+                                    print(f"Caught a RuntimeError: {re}")
+                                    
                                 if not np.all(np.isnan(fitted_bias)):
                                     Non_lin_Bias[im, jm] = fitted_bias
 
