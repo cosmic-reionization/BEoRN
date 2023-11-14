@@ -364,6 +364,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
     Nbr_Halos = np.zeros((Nm))
     Nbr_Pixels = np.zeros((Nm))
     Bias = np.zeros((Nm,Nm))
+    Non_lin_Bias = np.zeros((Nm,Nm,Nk))
 
     Lbox = param.sim.Lbox
     z_str = z_string_format(z)
@@ -430,6 +431,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                         ### we take 0.15 here because we found that sqrt(Phh/Pmm-shot noise) is not so well converged to Phm/Pmm
                         Bias[im, jm] = np.mean(bias__[ind_to_average])
 
+
                         if im == jm:
                             PS_h_m = t2c.power_spectrum.cross_power_spectrum_1d(delta_h_i, delta_rho,
                                                                                 box_dims=Lbox, kbins=kbin)
@@ -437,13 +439,15 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
 
                             ind_to_average = np.intersect1d(np.where(kk < 0.3), np.where(~np.isnan(bias__)))
                             Bias[im, im] = np.mean(bias__[ind_to_average])
+                            PS_h_m_arr[im, jm, :] = PS_h_m[0]
+                            
+                        Non_lin_Bias[im, jm] = bias__
 
                     else:
                         # PS_h_m_arr[im,jm,:] = np.zeros((Nk))
                         PS_h_h_arr[im, jm, :] = np.zeros((Nk))
 
                # if len(indices_im) > 0:
-
                   #  Nbr_Halos[im] = len(indices_im)# / Lbox ** 3)
                   #  Nbr_Pixels[im] = len(indices_im)  #
                     #PS_h_h_arr[im, im, :] -= Shot_Noise[im]
@@ -453,6 +457,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                 for im in range(len(M_bin)):
                     for jm in range(im, len(M_bin)):
                         Bias[jm, im] = Bias[im, jm]
+                        Non_lin_Bias[im, jm] = Non_lin_Bias[jm, im]
 
 
     Dict = {}
@@ -466,6 +471,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
     Dict['Nbr_Halos'] = Nbr_Halos
     Dict['Nbr_Pixels'] = Nbr_Pixels
     Dict['Bias'] = Bias
+    Dict['Non_lin_Bias'] = Non_lin_Bias
 
     save_f(file=dir+'./Halo_bias/halo_bias_with_cross_B' + str(Lbox) + '_' + str(nGrid) + 'grid_z' + z_str + '.pkl',obj=Dict)
 
