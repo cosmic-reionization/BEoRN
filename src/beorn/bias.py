@@ -407,7 +407,6 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
 
             for im in range(len(M_bin)):
                 indices_im = np.where(Indexing == im)[0]
-                print('mass bin', im, 'has', len(indices_im), 'halos')
                 for jm in range(im, len(M_bin)):
                     if len(Dict_halo_unique_poz[str(im)][1]) > 0 and len(Dict_halo_unique_poz[str(jm)][1]) > 0:
 
@@ -449,9 +448,14 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                         if fit :
                             indices_ = bias__ > 0 # just fit values that are positive and not nans.
                             if len(bias__[indices_]) > 0:
-                                param_fit = fit_bias(Bias[im, jm], kk[indices_], bias__[indices_])
+
+                                print('yes',im,jm)
+                                param_fit, covariance = fit_bias(Bias[im, jm], kk[indices_], bias__[indices_])
                                 fitted_bias = bias_fit(Bias[im, jm],kk,param_fit[0],param_fit[1])
-                                Non_lin_Bias[im, jm] = fitted_bias
+
+                                if not np.all(np.isnan(fitted_bias)):
+                                    Non_lin_Bias[im, jm] = fitted_bias
+
                     else:
                         # PS_h_m_arr[im,jm,:] = np.zeros((Nk))
                         PS_h_h_arr[im, jm, :] = np.zeros((Nk))
@@ -500,4 +504,4 @@ def fit_bias(large_scale_bias,kk_,b_of_k):
         return bias_fit(large_scale_bias,k,a,b)
     params, covariance = curve_fit(fct_fit, kk_, b_of_k)
 
-    return params
+    return params, covariance
