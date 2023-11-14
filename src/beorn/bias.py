@@ -8,6 +8,8 @@ import os
 from .functions import *
 from .profiles_on_grid import log_binning,bin_edges_log, cumulated_number_halos
 import time
+from scipy.optimize import curve_fit
+
 delta_c = 1.686
 
 def delt_c(z,param):
@@ -141,7 +143,7 @@ def bar_density_2h(rgrid,param,z,Mass):
 from beorn.functions import *
 
 
-def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False):
+def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False,fit=False):
     # zmax : will not compute bias for z> zmax.
     import os
 
@@ -173,10 +175,10 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False):
         z = np.round(z, 2)
         if rank == ii % size:
             if not cross:
-                measure_halo_bias(param, z, nGrid, tab_M=tab_M, kbins=kbins,dir=dir,zmax=zmax)
+                measure_halo_bias(param, z, nGrid, tab_M=tab_M, kbins=kbins,dir=dir,zmax=zmax,fit=fit)
 
             elif cross :
-                measure_halo_bias_with_cross(param, z, nGrid, tab_M=tab_M, kbins=kbins, dir=dir, zmax=zmax)
+                measure_halo_bias_with_cross(param, z, nGrid, tab_M=tab_M, kbins=kbins, dir=dir, zmax=zmax,fit=fit)
 
             else :
                 print('Cross parameter in compute bias should either be true or false.')
@@ -354,7 +356,7 @@ def delta_halo(unique_base_nGrid_poz,nbr_of_halos,Lbox,nGrid):
 
 
 
-def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zmax=100):
+def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='',dir='',zmax=100,fit=False):
 
     ### same as above, we just measure b(M1,M2)
 
@@ -365,6 +367,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
     Nbr_Pixels = np.zeros((Nm))
     Bias = np.zeros((Nm,Nm))
     Non_lin_Bias = np.zeros((Nm,Nm,Nk))
+
 
     Lbox = param.sim.Lbox
     z_str = z_string_format(z)
@@ -440,9 +443,15 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                             ind_to_average = np.intersect1d(np.where(kk < 0.3), np.where(~np.isnan(bias__)))
                             Bias[im, im] = np.mean(bias__[ind_to_average])
                             PS_h_m_arr[im, jm, :] = PS_h_m[0]
-                            
+
                         Non_lin_Bias[im, jm] = bias__
 
+                        if fit :
+                            indices_ = bias__ > 0 # just fit values that are positive and not nans.
+                            if len(bias__[indices_]) > 0:
+                                param_fit = fit_bias(Bias[im, jm], kk[indices_], bias__[indices_])
+                                fitted_bias = bias_fit(Bias[im, jm],kk,param_fit[0],param_fit[1])
+                                Non_lin_Bias[im, jm] = fitted_bias
                     else:
                         # PS_h_m_arr[im,jm,:] = np.zeros((Nk))
                         PS_h_h_arr[im, jm, :] = np.zeros((Nk))
@@ -457,7 +466,7 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                 for im in range(len(M_bin)):
                     for jm in range(im, len(M_bin)):
                         Bias[jm, im] = Bias[im, jm]
-                        Non_lin_Bias[im, jm] = Non_lin_Bias[jm, im]
+                        Non_lin_Bias[jm, im] = Non_lin_Bias[im, jm]
 
 
     Dict = {}
@@ -477,3 +486,18 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
 
 
 
+
+def bias_fit(large_scale_bias,k,a,b):
+    # function to fit the bias(k)
+    return large_scale_bias+ a*(k)**b
+
+
+def fit_bias(large_scale_bias,kk_,b_of_k):
+    # run this function to find the best fit bias
+    # kk_,b_of_k should not contain nan
+    # large_scale_bias : mean value of b_of_k at large scales
+    def fct_fit(k,a,b):
+        return bias_fit(large_scale_bias,k,a,b)
+    params, covariance = curve_fit(fct_fit, kk_, b_of_k)
+
+    return params
