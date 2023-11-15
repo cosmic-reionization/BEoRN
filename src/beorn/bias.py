@@ -143,7 +143,7 @@ def bar_density_2h(rgrid,param,z,Mass):
 from beorn.functions import *
 
 
-def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False,fit=False):
+def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False,fit=False,remove=True):
     # zmax : will not compute bias for z> zmax.
     import os
 
@@ -191,7 +191,8 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False,fit=False):
     elif cross:
         name = 'halo_bias_with_cross_B'
 
-    if rank == 0:
+
+    if remove and rank == 0:
         from collections import defaultdict
         dd = defaultdict(list)
 
