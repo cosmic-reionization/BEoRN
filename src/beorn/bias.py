@@ -186,37 +186,47 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False,fit=False,remov
     if param.sim.cores > 1:
         comm.Barrier()
 
+
+    if remove and rank == 0:
+        gather_bias(param,cross)
+
+    end_time = time.time()
+    print('Finished computing halo bias. It took in total: ', end_time - start_time)
+    print('  ')
+
+
+
+def gather_bias(param,cross):
     if not cross:
         name = 'halo_bias_B'
     elif cross:
         name = 'halo_bias_with_cross_B'
 
+    z_arr = def_redshifts(param)
+    Ncell = param.sim.Ncell
+    nGrid = Ncell
+    Lbox = param.sim.Lbox
+    from collections import defaultdict
+    dd = defaultdict(list)
 
-    if remove and rank == 0:
-        from collections import defaultdict
-        dd = defaultdict(list)
+    for ii, z in enumerate(z_arr):
+        z_str = z_string_format(z)
+        file = dir + './Halo_bias/' + name + str(Lbox) + '_' + str(nGrid) + 'grid_z' + z_str + '.pkl'
 
-        for ii, z in enumerate(z_arr):
-            z_str = z_string_format(z)
-            file = dir+'./Halo_bias/'+name+str(Lbox) + '_' + str(nGrid) + 'grid_z' + z_str + '.pkl'
+        if os.path.exists(file):
+            bias__ = load_f(file)
+            for key, value in bias__.items():
+                dd[key].append(value)
+            os.remove(file)
 
-            if os.path.exists(file):
-                bias__ = load_f(file)
-                for key, value in bias__.items():
-                    dd[key].append(value)
-                os.remove(file)
+    for key, value in dd.items():  # change lists to numpy arrays
+        dd[key] = np.array(value)
 
-        for key, value in dd.items():  # change lists to numpy arrays
-            dd[key] = np.array(value)
+    dd['k'] = bias__['k']
 
-        dd['k'] = bias__['k']
-
-        save_f(file=dir+'./Halo_bias/'+name+str(Lbox) + '_' + str(nGrid) +'.pkl', obj=dd)
+    save_f(file=dir + './Halo_bias/' + name + str(Lbox) + '_' + str(nGrid) + '.pkl', obj=dd)
 
 
-        end_time = time.time()
-        print('Finished computing halo bias. It took in total: ', end_time - start_time)
-        print('  ')
 
 
 
