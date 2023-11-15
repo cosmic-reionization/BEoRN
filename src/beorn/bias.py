@@ -188,7 +188,7 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False,fit=False,remov
 
 
     if remove and rank == 0:
-        gather_bias(param,cross)
+        gather_bias(param,cross=cross,dir=dir)
 
     end_time = time.time()
     print('Finished computing halo bias. It took in total: ', end_time - start_time)
@@ -196,7 +196,7 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False,fit=False,remov
 
 
 
-def gather_bias(param,cross):
+def gather_bias(param,cross,dir):
     if not cross:
         name = 'halo_bias_B'
     elif cross:
