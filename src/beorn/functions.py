@@ -6,6 +6,8 @@ import pickle
 import numpy as np
 from .constants import rhoc0, Tcmb0
 import tools21cm as t2c
+import os
+
 
 def load_f(file):
     import pickle
@@ -94,7 +96,7 @@ def load_delta_b(param, zz):
     if param.sim.dens_field_type == 'pkdgrav':
         if dens_field is not None:
             print('reading pkdgrav density field....')
-            delta_b = load_pkdgrav_density_field(dens_field + zz, LBox, nGrid)
+            delta_b = load_pkdgrav_density_field(dens_field + zz, LBox)
         else:
             print('no density field provided. Return 0 for delta_b.')
             delta_b = np.array([0])  # rho/rhomean-1 (usual delta here..)
@@ -321,7 +323,7 @@ def print_time(delta_t):
     return "{:0>8}".format(str(timedelta(seconds=round(delta_t))))
 
 
-def load_pkdgrav_density_field(file, LBox, nGrid):
+def load_pkdgrav_density_field(file, LBox):
     """
     Parameters
     ----------
@@ -335,6 +337,7 @@ def load_pkdgrav_density_field(file, LBox, nGrid):
     3-D mesh grid. Size (nGrid,nGrid,nGrid)
     """
     dens = np.fromfile(file, dtype=np.float32)
+    nGrid = round(dens.shape[0]**(1/3))
     pkd = dens.reshape(nGrid, nGrid, nGrid)
     pkd = pkd.T  ### take the transpose to match X_ion map coordinates
     V_total = LBox ** 3
@@ -394,4 +397,24 @@ def smooth_field(field,Rsmoothing,Lbox, nGrid):
     del field
 
     return smoothed_field
+
+
+def print_halo_distribution(M_bin,nbr_halos):
+    """
+    Parameters
+    ----------
+    M_bin : halo mass bin
+    nbr_halos : array of size (M_bin) containing for each value M_bin[i],
+                the number of halos with mass M_bin[i] (closer to).
+
+    Returns
+    ----------
+    Prints the halo distribution.
+    """
+    indices = np.where(nbr_halos>0)
+    min_bin, max_bin = np.min(indices), np.max(indices)
+    Mh_min, Mh_max = M_bin[min_bin], M_bin[max_bin]
+
+    print(f'Halos are distributed between mass bin {min_bin} and {max_bin} ({Mh_min:.2e}, {Mh_max:.2e}). Here is the histogram:',nbr_halos[indices])
+
 
