@@ -401,9 +401,11 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                 unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices_im], H_Y[indices_im],
                                                                              H_Z[indices_im], cic=False)
                 Dict_halo_unique_poz[str(im)] = np.array((unique_base_nGrid_poz, nbr_of_halos))
-                print('mass bin', im, 'has', len(indices_im), 'halos')
+
                 Nbr_Halos[im] = len(indices_im)  # total number of halos in this mass bin
                 Nbr_Pixels[im] = len(unique_base_nGrid_poz)  # total number of occupied pixel in this mass bin
+
+            print_halo_distribution(M_bin,Nbr_Halos)
 
             for im in range(len(M_bin)):
                 indices_im = np.where(Indexing == im)[0]
@@ -449,15 +451,18 @@ def measure_halo_bias_with_cross(param, z, nGrid, tab_M=None, kbins=None, name='
                             indices_ = bias__ > 0 # just fit values that are positive and not nans.
                             if len(bias__[indices_]) > 0:
                                 try :
-                                    print('yes',im,jm)
                                     param_fit, covariance = fit_bias(Bias[im, jm], kk[indices_], bias__[indices_])
                                     fitted_bias = bias_fit(Bias[im, jm],kk,param_fit[0],param_fit[1])
 
                                 except RuntimeError as re:
                                     print(f"Caught a RuntimeError: {re}")
-                                    
-                                if not np.all(np.isnan(fitted_bias)):
-                                    Non_lin_Bias[im, jm] = fitted_bias
+
+                                except Exception as e:
+                                    print(f"Caught a different exception: {e}")
+
+                                finally:
+                                    if not np.all(np.isnan(fitted_bias)):
+                                        Non_lin_Bias[im, jm] = fitted_bias
 
                     else:
                         # PS_h_m_arr[im,jm,:] = np.zeros((Nk))
