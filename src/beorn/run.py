@@ -1323,7 +1323,7 @@ def compute_var_field(param, field,k_bins):
     from .excursion_set import profile_kern
     from astropy.convolution import convolve_fft
 
-    #Lbox = param.sim.Lbox  # Mpc/h
+    Lbox = param.sim.Lbox  # Mpc/h
     #kmin = 2 * np.pi / Lbox
     #kmax = 2 * np.pi / Lbox * param.sim.Ncell
     #kbin = int(2 * np.log10(kmax / kmin))
