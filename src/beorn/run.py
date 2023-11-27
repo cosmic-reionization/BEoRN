@@ -364,7 +364,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
 
-
+            else :
+                Grid_dTb = np.array([0])
 
     PS_dTb, k_bins = auto_PS(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
                              kbins=def_k_bins(param))
@@ -1322,13 +1323,13 @@ def compute_var_field(param, field,k_bins):
     from .excursion_set import profile_kern
     from astropy.convolution import convolve_fft
 
-    Lbox = param.sim.Lbox  # Mpc/h
-    kmin = 2 * np.pi / Lbox
-    kmax = 2 * np.pi / Lbox * param.sim.Ncell
-    kbin = int(2 * np.log10(kmax / kmin))
-    param.sim.kmin = kmin
-    param.sim.kmax = kmax
-    param.sim.kbin = kbin
+    #Lbox = param.sim.Lbox  # Mpc/h
+    #kmin = 2 * np.pi / Lbox
+    #kmax = 2 * np.pi / Lbox * param.sim.Ncell
+    #kbin = int(2 * np.log10(kmax / kmin))
+    #param.sim.kmin = kmin
+    #param.sim.kmax = kmax
+    #param.sim.kbin = kbin
 
     k_values = def_k_bins(param)
     k_values = np.sort(np.unique(np.concatenate((k_values,k_bins))))
