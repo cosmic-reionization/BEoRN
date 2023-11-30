@@ -38,11 +38,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
     following their evolution from cosmic dawn to the end of reionization. It stores the profile in a directory "./profiles"
     """
 
-    from mpi4py import MPI
-    comm = MPI.COMM_WORLD
-    import mpi4py.MPI
-    rank = mpi4py.MPI.COMM_WORLD.Get_rank()
-    size = mpi4py.MPI.COMM_WORLD.Get_size()
+    comm, rank, size = initialise_mpi4py(param)
 
     if rank == 0:
         print(' ------------ BEORN STARTS ------------ ')
@@ -477,13 +473,7 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
 
     print('Painting profiles on a grid with', nGrid, 'pixels per dim. Box size is', LBox, 'cMpc/h.')
 
-    if param.sim.cores > 1:
-        import mpi4py.MPI
-        rank = mpi4py.MPI.COMM_WORLD.Get_rank()
-        size = mpi4py.MPI.COMM_WORLD.Get_size()
-    else:
-        rank = 0
-        size = 1
+    comm, rank, size = initialise_mpi4py(param)
 
     z_arr = def_redshifts(param)
     for ii, z in enumerate(z_arr):
@@ -524,13 +514,7 @@ def grid_dTb(param, ion='bubbles', RSD=False):
     Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
     factor = dTb_factor(param)  # factor used in dTb calculation
 
-    if param.sim.cores > 1:
-        import mpi4py.MPI
-        rank = mpi4py.MPI.COMM_WORLD.Get_rank()
-        size = mpi4py.MPI.COMM_WORLD.Get_size()
-    else:
-        rank = 0
-        size = 1
+    comm, rank, size = initialise_mpi4py(param)
 
     z_arr = def_redshifts(param)
     for ii, z in enumerate(z_arr):
@@ -1232,13 +1216,7 @@ def compute_variance(param,k_bins):
     start_time = time.time()
     print('Compute variance of the individual fields.')
 
-    if param.sim.cores > 1:
-        import mpi4py.MPI
-        rank = mpi4py.MPI.COMM_WORLD.Get_rank()
-        size = mpi4py.MPI.COMM_WORLD.Get_size()
-    else:
-        rank = 0
-        size = 1
+    comm, rank, size = initialise_mpi4py(param)
 
     z_arr = def_redshifts(param)
     for ii, z in enumerate(z_arr):
@@ -1460,23 +1438,15 @@ def compute_corr_fct(param):
 
 
 
+def investigate_xal(param,HO = False):
 
-def investigate_xal(param):
-    from mpi4py import MPI
-    comm = MPI.COMM_WORLD
     if not os.path.isdir('./physics'):
         os.mkdir('./physics')
 
     start_time = time.time()
-    print('Computnig PS of xal/(1+xal).')
+    print('Computing PS of xal/(1+xal).')
 
-    if param.sim.cores > 1:
-        import mpi4py.MPI
-        rank = mpi4py.MPI.COMM_WORLD.Get_rank()
-        size = mpi4py.MPI.COMM_WORLD.Get_size()
-    else:
-        rank = 0
-        size = 1
+    comm, rank, size = initialise_mpi4py(param)
 
     kbins = def_k_bins(param)
     z_arr = def_redshifts(param)
@@ -1507,27 +1477,32 @@ def investigate_xal(param):
 
             PS_xal,kk               = auto_PS(delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)
             PS_xal_term_x_temps_term= auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)), box_dims=Lbox, kbins=kbins)[0]
+            PS_xal_term_x_matter    = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1+delta_b)), box_dims=Lbox, kbins=kbins)[0]
             PS_xal_matter           = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1+delta_b)), box_dims=Lbox, kbins=kbins)[0]
             PS_temp                 = auto_PS(delta_fct((1-T_cmb(z)/Grid_Temp)), box_dims=Lbox, kbins=kbins)[0]
+            PS_temp_x_matter        = auto_PS(delta_fct((1-T_cmb(z)/Grid_Temp)*(1+delta_b)), box_dims=Lbox, kbins=kbins)[0]
             PS_xal_over_1_plus_xal  = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)), box_dims=Lbox, kbins=kbins)[0]
             PS_xal_term_x_reio_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-Grid_xHII)), box_dims=Lbox, kbins=kbins)[0]
             PS_xal_Temp_matter_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)), box_dims=Lbox, kbins=kbins)[0]
             PS_xal_reio_Temp_matter_term = auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)*(1+delta_b)*(1-Grid_xHII)), box_dims=Lbox, kbins=kbins)[0]
 
 
-            PS_aa_a  = cross_PS(delta_fct(Grid_xal)**2,delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
-            PS_aaa_a = cross_PS(delta_fct(Grid_xal)**3,delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
-            PS_aa_aa = cross_PS(delta_fct(Grid_xal)**2,delta_fct(Grid_xal)**2, box_dims=Lbox, kbins=kbins)[0]
+            if HO:
+                PS_aa_a  = cross_PS(delta_fct(Grid_xal)**2,delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+                PS_aaa_a = cross_PS(delta_fct(Grid_xal)**3,delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+                PS_aa_aa = cross_PS(delta_fct(Grid_xal)**2,delta_fct(Grid_xal)**2, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_TT_T  = cross_PS(delta_fct(Grid_Temp) ** 2, delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
-            PS_TTT_T = cross_PS(delta_fct(Grid_Temp) ** 3, delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
-            PS_TT_TT = cross_PS(delta_fct(Grid_Temp) ** 2, delta_fct(Grid_Temp) ** 2, box_dims=Lbox, kbins=kbins)[0]
+                PS_TT_T  = cross_PS(delta_fct(Grid_Temp) ** 2, delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
+                PS_TTT_T = cross_PS(delta_fct(Grid_Temp) ** 3, delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
+                PS_TT_TT = cross_PS(delta_fct(Grid_Temp) ** 2, delta_fct(Grid_Temp) ** 2, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_aT_a = cross_PS(delta_fct(Grid_xal) * delta_fct(Grid_Temp), delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
-            PS_aT_T = cross_PS(delta_fct(Grid_xal) * delta_fct(Grid_Temp), delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
+                PS_aT_a = cross_PS(delta_fct(Grid_xal) * delta_fct(Grid_Temp), delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+                PS_aT_T = cross_PS(delta_fct(Grid_xal) * delta_fct(Grid_Temp), delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
 
-            PS_aa_T= cross_PS(delta_fct(Grid_xal)*delta_fct(Grid_xal),delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
-            PS_TT_a= cross_PS(delta_fct(Grid_Temp)*delta_fct(Grid_Temp),delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+                PS_aa_T= cross_PS(delta_fct(Grid_xal)*delta_fct(Grid_xal),delta_fct(Grid_Temp), box_dims=Lbox, kbins=kbins)[0]
+                PS_TT_a= cross_PS(delta_fct(Grid_Temp)*delta_fct(Grid_Temp),delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+
+
 
 
             mean_xal  = np.mean(Grid_xal)
@@ -1547,21 +1522,26 @@ def investigate_xal(param):
 
             print('----- Investigating xal at z = ', z, ' is computed -------')
 
-            PS_error_1 = mean_xal/(1+mean_xal) * auto_PS(delta_fct(Grid_xal)**2/(1+Grid_xal), box_dims=Lbox, kbins=kbins)[0]
-            PS_error_2 = mean_xal**2/(1+mean_xal)**2*auto_PS(delta_fct(Grid_xal)**3/(1+Grid_xal), box_dims=Lbox, kbins=kbins)[0]
-            PS_error_3 = mean_xal**3/(1+mean_xal)**3*auto_PS(delta_fct(Grid_xal)**4/(1+Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+            if HO:
+                PS_error_1 = mean_xal/(1+mean_xal) * auto_PS(delta_fct(Grid_xal)**2/(1+Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+                PS_error_2 = mean_xal**2/(1+mean_xal)**2*auto_PS(delta_fct(Grid_xal)**3/(1+Grid_xal), box_dims=Lbox, kbins=kbins)[0]
+                PS_error_3 = mean_xal**3/(1+mean_xal)**3*auto_PS(delta_fct(Grid_xal)**4/(1+Grid_xal), box_dims=Lbox, kbins=kbins)[0]
 
 
-            delta_U = delta_fct(Grid_xal)/(1+mean_xal)-delta_fct(Grid_xal)**2/(1+Grid_xal)*mean_xal/(1+mean_xal)
-            PS_real_1 = auto_PS(delta_U, box_dims=Lbox, kbins=kbins)[0]
+                delta_U = delta_fct(Grid_xal)/(1+mean_xal)-delta_fct(Grid_xal)**2/(1+Grid_xal)*mean_xal/(1+mean_xal)
+                PS_real_1 = auto_PS(delta_U, box_dims=Lbox, kbins=kbins)[0]
 
             Dict = {'z': z, 'k': kk, 'PS_xal': PS_xal, 'PS_xal_over_1_plus_xal': PS_xal_over_1_plus_xal,'PS_xal_term_x_temps_term':PS_xal_term_x_temps_term,
                     'xal': mean_xal, '1_ov_1_pl_xal': mean_1_ov_1_plus_xal,'var_1_ov_1_plus_xal':var_1_ov_1_plus_xal,'PS_xal_term_x_reio_term'      : PS_xal_term_x_reio_term,
                 'PS_xal_Temp_matter_term': PS_xal_Temp_matter_term      ,'PS_xal_reio_Temp_matter_term'  : PS_xal_reio_Temp_matter_term ,'mean_xal'   : mean_xal,
                 'mean_xHII'  : mean_xHII ,'mean_Temp'  : mean_Temp ,'mean_xal_reio' : mean_xal_reio,'mean_xal_temp_matter'  : mean_xal_temp_matter ,'mean_xal_reio_temp_matter'  : mean_xal_reio_temp_matter,'mean_xal_temp':mean_xal_temp,
-                   'mean_xal_matter':mean_xal_matter ,'PS_xal_matter':PS_xal_matter,'PS_temp':PS_temp,'mean_Temp_term':mean_Temp_term,'cross_var_temp_xal':cross_var_temp_xal,'var_xal':var_xal,'var_temp':var_temp,
-                    'PS_aT_a': PS_aT_a, 'PS_aT_T': PS_aT_T, 'PS_aa_a': PS_aa_a, 'PS_aa_T': PS_aa_T, 'PS_TT_a': PS_TT_a, 'PS_aa_aa':PS_aa_aa,'PS_aaa_a':PS_aaa_a,'PS_TT_T':PS_TT_T,'PS_TT_TT':PS_TT_TT,'PS_TTT_T':PS_TTT_T,
+                   'mean_xal_matter':mean_xal_matter ,'PS_xal_matter':PS_xal_matter,'PS_temp':PS_temp,'mean_Temp_term':mean_Temp_term,'cross_var_temp_xal':cross_var_temp_xal,'var_xal':var_xal,'var_temp':var_temp,'PS_xal_term_x_matter':PS_xal_term_x_matter,
+                   'PS_temp_x_matter':PS_temp_x_matter }
+
+            if HO :
+                Dict_HO = {'PS_aT_a': PS_aT_a, 'PS_aT_T': PS_aT_T, 'PS_aa_a': PS_aa_a, 'PS_aa_T': PS_aa_T, 'PS_TT_a': PS_TT_a, 'PS_aa_aa':PS_aa_aa,'PS_aaa_a':PS_aaa_a,'PS_TT_T':PS_TT_T,'PS_TT_TT':PS_TT_TT,'PS_TTT_T':PS_TTT_T,
                     'PS_TT_T': PS_TT_T,'PS_error_1':PS_error_1,'PS_error_2':PS_error_2,'PS_error_3':PS_error_3,'PS_real_1':PS_real_1}
+                Dict = Merge(Dict_HO, Dict)
             save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
 
@@ -1596,3 +1576,32 @@ def investigate_xal(param):
         end_time = time.time()
         print('Finished investigating xal. It took in total: ', end_time - start_time)
         print('  ')
+
+
+
+
+
+
+
+
+
+
+
+def fit_taylor_expansion_correction(param):
+
+    comm, rank, size = initialise_mpi4py(param)
+    kbins = def_k_bins(param)
+    z_arr = def_redshifts(param)
+
+    Ncell = param.sim.Ncell
+    nGrid = Ncell
+    Lbox = param.sim.Lbox
+
+    for ii, z in enumerate(z_arr):
+        z = np.round(z, 2)
+        z_str = z_string_format(z)
+        if rank == ii % size:
+            print('Core nbr', rank, 'is taking care of z = ', z)
+            print('----- Investigating xal for z =', z, '-------')
+            Grid_Temp = load_grid(param, z=z, type='Tk')
+            Grid_xal = load_grid(param, z=z, type='lyal')
