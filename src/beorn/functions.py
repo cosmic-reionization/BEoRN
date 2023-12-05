@@ -7,7 +7,7 @@ import numpy as np
 from .constants import rhoc0, Tcmb0
 import tools21cm as t2c
 import os
-
+from os.path import exists
 
 def load_f(file):
     import pickle
