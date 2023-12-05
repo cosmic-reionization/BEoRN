@@ -1589,7 +1589,7 @@ def investigate_xal(param,HO = False):
 
 
 
-def investigate_expansion(param,HO = False):
+def investigate_expansion(param):
 
     if not os.path.isdir('./physics'):
         os.mkdir('./physics')
