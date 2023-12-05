@@ -444,3 +444,65 @@ def initialise_mpi4py(param):
         size = 1
 
     return comm, rank, size
+
+
+
+
+
+def format_grid_for_PS_measurement(Grid_Temp,Grid_xHII,Grid_xal,nGrid) :
+    """
+    Parameters
+    ----------
+    Grid_Temp,Grid_xHII,Grid_xal : the grids as we store them.
+    nGrid : param.code.Ncell. Nbr of grid pixel per dim.
+
+    Returns
+    ----------
+    If a grid is just a number (e.g. xHII = np.array([1]) when the whole universe is ionised), returns an array of one.
+    This is to measure power and crosses spectra..
+    """
+
+    if Grid_Temp.size == 1:  ## to avoid error when measuring power spectrum
+        Grid_Temp = np.full((nGrid, nGrid, nGrid), 1)
+    if Grid_xHII.size == 1:
+        if Grid_xHII == np.array([0]):
+            Grid_xHII = np.full((nGrid, nGrid, nGrid), 0)  ## to avoid div by zero
+        elif Grid_xHII == np.array([0]):
+            Grid_xHII = np.full((nGrid, nGrid, nGrid), 1)  ## to avoid div by zero
+    if Grid_xal.size == 1:
+        Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
+    return Grid_Temp,Grid_xHII,Grid_xal
+
+
+
+def gather_files(param, path, z_arr, Ncell):
+    """
+    Parameters
+    ----------
+    path : str
+    z_arr : list of redshift to loop over
+
+    Returns
+    ----------
+    Nothing. Loops over files named <<path + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl'>>,
+    and gather their data into a single dictionnary.
+    """
+
+    from collections import defaultdict
+    dd = defaultdict(list)
+
+    for ii, z in enumerate(z_arr):
+        z_str = z_string_format(z)
+        file  = path + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
+        if exists(file):
+            data_z = load_f(file)
+            for key, value in data_z.items():
+                dd[key].append(value)
+            os.remove(file)
+
+    for key, value in dd.items():  # change lists to numpy arrays
+        dd[key] = np.array(value)
+
+    dd['k'] = data_z['k']
+
+    save_f(file= path + str(Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)

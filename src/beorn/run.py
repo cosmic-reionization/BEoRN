@@ -1474,15 +1474,7 @@ def investigate_xal(param,HO = False):
             Grid_xal = load_grid(param, z=z, type='lyal')
             delta_b = load_delta_b(param, z_str)
 
-            if Grid_Temp.size == 1:  ## to avoid error when measuring power spectrum
-                Grid_Temp = np.full((nGrid, nGrid, nGrid), 1)
-            if Grid_xHII.size == 1:
-                if Grid_xHII == np.array([0]):
-                    Grid_xHII = np.full((nGrid, nGrid, nGrid), 0)  ## to avoid div by zero
-                elif Grid_xHII == np.array([0]):
-                    Grid_xHII = np.full((nGrid, nGrid, nGrid), 1)  ## to avoid div by zero
-            if Grid_xal.size == 1:
-                Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
+            Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
 
             PS_xal,kk               = auto_PS(delta_fct(Grid_xal), box_dims=Lbox, kbins=kbins)
             PS_xal_term_x_temps_term= auto_PS(delta_fct(Grid_xal/(Grid_xal+1)*(1-T_cmb(z)/Grid_Temp)), box_dims=Lbox, kbins=kbins)[0]
@@ -1596,15 +1588,21 @@ def investigate_xal(param,HO = False):
 
 
 
-def fit_taylor_expansion_correction(param):
+
+def investigate_expansion(param,HO = False):
+
+    if not os.path.isdir('./physics'):
+        os.mkdir('./physics')
+
+    start_time = time.time()
+    print('Computing PS of xal/(1+xal).')
 
     comm, rank, size = initialise_mpi4py(param)
+
     kbins = def_k_bins(param)
     z_arr = def_redshifts(param)
-
-    Ncell = param.sim.Ncell
+    Ncell, Lbox = param.sim.Ncell, param.sim.Lbox
     nGrid = Ncell
-    Lbox = param.sim.Lbox
 
     for ii, z in enumerate(z_arr):
         z = np.round(z, 2)
@@ -1613,4 +1611,40 @@ def fit_taylor_expansion_correction(param):
             print('Core nbr', rank, 'is taking care of z = ', z)
             print('----- Investigating xal for z =', z, '-------')
             Grid_Temp = load_grid(param, z=z, type='Tk')
-            Grid_xal = load_grid(param, z=z, type='lyal')
+            Grid_xHII = load_grid(param, z=z, type='bubbles')
+            Grid_xal  = load_grid(param, z=z, type='lyal')
+            delta_b   = load_delta_b(param, z_str)
+
+            Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
+
+            U = Grid_xal/(1+Grid_xal)
+            V = 1-T_cmb(z)/Grid_Temp
+
+            PS_UU,kk               = auto_PS(delta_fct(U), box_dims=Lbox, kbins=kbins)
+            PS_VV,kk               = auto_PS(delta_fct(V), box_dims=Lbox, kbins=kbins)
+            PS_bb,kk               = auto_PS(delta_b, box_dims=Lbox, kbins=kbins)
+
+            PS_UV = cross_PS(delta_fct(U),delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_Ub = cross_PS(delta_fct(U), delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_bV = cross_PS(delta_b, delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+
+            Dict = {'z': z, 'k': kk,'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV, 'PS_Ub': PS_Ub,'PS_bV':PS_bV}
+
+            save_f(file='./physics/data_expansion_U_V_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
+                   obj=Dict)
+
+    comm.Barrier()
+
+    if rank == 0:
+        gather_files(param, path = './physics/data_expansion_U_V_', z_arr = z_arr, Ncell = Ncell)
+
+        end_time = time.time()
+        print('Finished calculating U, V, delta_b auto and cross power spectra. It took in total: ', end_time - start_time)
+        print('  ')
+
+
+
+
+
+
+
