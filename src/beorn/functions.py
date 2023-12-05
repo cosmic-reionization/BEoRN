@@ -108,7 +108,7 @@ def load_delta_b(param, zz):
     else:
         print('param.sim.dens_field_type should be either 21cmFAST or pkdgrav.')
 
-    if nGrid != delta_b.shape[0]:
+    if nGrid != delta_b.shape[0] and dens_field is not None:
         delta_b = reshape_grid(delta_b,nGrid)
 
     return delta_b
@@ -412,9 +412,35 @@ def print_halo_distribution(M_bin,nbr_halos):
     Prints the halo distribution.
     """
     indices = np.where(nbr_halos>0)
+
     min_bin, max_bin = np.min(indices), np.max(indices)
     Mh_min, Mh_max = M_bin[min_bin], M_bin[max_bin]
 
     print(f'Halos are distributed between mass bin {min_bin} and {max_bin} ({Mh_min:.2e}, {Mh_max:.2e}). Here is the histogram:',nbr_halos[indices])
 
 
+
+
+def initialise_mpi4py(param):
+    """
+    Parameters
+    ----------
+    Will read in param the number of cores to use.
+
+    Returns
+    ----------
+    Initialise the mpi4py parallelisation. Returns the rank, size, and com.
+    """
+
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+
+    if param.sim.cores > 1:
+        import mpi4py.MPI
+        rank = mpi4py.MPI.COMM_WORLD.Get_rank()
+        size = mpi4py.MPI.COMM_WORLD.Get_size()
+    else:
+        rank = 0
+        size = 1
+
+    return comm, rank, size
