@@ -1284,15 +1284,17 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,k_bins):
     if (Grid_xal == np.array([0])).all():
         Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
 
-    variance_lyal, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xal),k_bins)
-    variance_xHII, R_scale, k_values = compute_var_field(param, delta_fct(Grid_xHII),k_bins)
-    variance_Temp, R_scale, k_values = compute_var_field(param, delta_fct(Grid_Temp),k_bins)
+    variance_lyal, R_scale, k_values, skewness_lyal, kurtosis_lyal = compute_var_field(param, delta_fct(Grid_xal),k_bins)
+    variance_xHII, R_scale, k_values, skewness_xHII, kurtosis_xHII = compute_var_field(param, delta_fct(Grid_xHII),k_bins)
+    variance_Temp, R_scale, k_values, skewness_Temp, kurtosis_Temp = compute_var_field(param, delta_fct(Grid_Temp),k_bins)
 
     print('nbr of scales is', len(k_values))
 
     save_f(file='./variances/var_z' + str(nGrid) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
            obj={'z': z, 'var_lyal': np.array(variance_lyal), 'var_xHII': np.array(variance_xHII)
-               , 'var_Temp': np.array(variance_Temp), 'k': k_values, 'R': R_scale})
+               , 'var_Temp': np.array(variance_Temp),'skewness_lyal': np.array(skewness_lyal), 'skewness_xHII': np.array(skewness_xHII)
+               , 'skewness_Temp': np.array(skewness_Temp), 'kurtosis_lyal': np.array(kurtosis_lyal), 'kurtosis_xHII': np.array(kurtosis_xHII)
+               , 'kurtosis_Temp': np.array(kurtosis_Temp), 'k': k_values, 'R': R_scale})
 
     print('.... Done computing variance. It took :', print_time(time.time() - tstart))
 
@@ -1321,16 +1323,23 @@ def compute_var_field(param, field,k_bins):
     rgrid = np.sqrt(rx ** 2 + ry ** 2 + rz ** 2)
 
     variance = []
+    skewness = []
+    kurtosis = []
     for Rsmoothing in R_scale:
         if Rsmoothing > pixel_size:
             print('R is ', round(Rsmoothing, 2))
             kern = profile_kern(rgrid, Rsmoothing)
             smoothed_field = convolve_fft(field, kern, boundary='wrap', normalize_kernel=True, allow_huge=True)  #
-            variance.append(np.var(smoothed_field))
+            var_ = np.var(smoothed_field)
+            variance.append(var_)
+            skewness.append(np.mean((smoothed_field / np.sqrt(var_)) ** 3))
+            kurtosis.append(np.mean((smoothed_field / np.sqrt(var_)) ** 4))
         else:
             variance.append(0)
-    print('return : variance, R_scale, k_values')
-    return variance, R_scale, k_values
+            skewness.append(0)
+            kurtosis.append(0)
+    print('return : variance, R_scale, k_values, skewness, kurtosis')
+    return variance, R_scale, k_values, skewness, kurtosis
 
 
 
