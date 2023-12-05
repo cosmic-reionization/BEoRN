@@ -1614,6 +1614,7 @@ def investigate_expansion(param):
             Grid_xHII = load_grid(param, z=z, type='bubbles')
             Grid_xal  = load_grid(param, z=z, type='lyal')
             delta_b   = load_delta_b(param, z_str)
+            Grid_dTb  = load_grid(param, z=z, type='dTb')
 
             Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
 
@@ -1628,7 +1629,10 @@ def investigate_expansion(param):
             PS_Ub = cross_PS(delta_fct(U), delta_b, box_dims=Lbox, kbins=kbins)[0]
             PS_bV = cross_PS(delta_b, delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
 
-            Dict = {'z': z, 'k': kk,'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV, 'PS_Ub': PS_Ub,'PS_bV':PS_bV}
+
+            PS_dTb = auto_PS(delta_fct(Grid_dTb), box_dims=Lbox, kbins=kbins)[0]
+
+            Dict = {'z': z, 'k': kk,'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV, 'PS_Ub': PS_Ub,'PS_bV':PS_bV,'PS_dTb':PS_dTb}
 
             save_f(file='./physics/data_expansion_U_V_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
