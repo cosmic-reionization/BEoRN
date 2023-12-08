@@ -1209,7 +1209,7 @@ def dTb_RSD(param, zz, delta_b, grid_dTb):
     return dT_rsd
 
 
-def compute_variance(param,k_bins):
+def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
     if not os.path.isdir('./variances'):
         os.mkdir('./variances')
 
@@ -1224,15 +1224,36 @@ def compute_variance(param,k_bins):
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
             print('----- Computing variance for z =', z, '-------')
-            Grid_Temp = load_grid(param, z=z, type='Tk')
-            Grid_xHII = load_grid(param, z=z, type='bubbles')
-            Grid_xal = load_grid(param, z=z, type='lyal')
-            compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,k_bins)
+            if temp :
+                Grid_Temp = load_grid(param, z=z, type='Tk')
+            else : Grid_Temp = None
+
+            if ion:
+                Grid_xHII = load_grid(param, z=z, type='bubbles')
+            else : Grid_xHII = None
+
+            if lyal :
+                Grid_xal  = load_grid(param, z=z, type='lyal')
+            else : Grid_xal = None
+
+            if rho_b:
+                delta_b   = load_delta_b(param, z_string_format(z))
+            else : delta_b = None
+
+
+            compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins)
             print('----- Variance at z = ', z, ' is computed -------')
 
-    end_time = time.time()
-    print('Finished computing variances. It took in total: ', end_time - start_time)
-    print('  ')
+    comm.Barrier()
+
+    if rank == 0:
+        gather_files(param, path='./variances/var_', z_arr=z_arr, Ncell=param.sim.Ncell)
+
+        end_time = time.time()
+        print('Finished computing variances. It took in total: ',
+              end_time - start_time)
+        print('  ')
+
 
 
 def gather_variances(param):
@@ -1270,19 +1291,14 @@ def gather_variances(param):
     save_f(file='./variances/var_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
 
 
-def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,k_bins):
+def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,rho_b,k_bins):
     # k_bins : extra kbins to measure the variance at same k values as PS
     z_str = z_string_format(z)
     print('Computing variance for xal, xHII and Temp at z = ' + z_str + '....')
     tstart = time.time()
     nGrid = param.sim.Ncell
 
-    if (Grid_xHII == np.array([0])).all():
-        Grid_xHII = np.full((nGrid, nGrid, nGrid), 0)
-    if (Grid_xHII == np.array([1])).all():
-        Grid_xHII = np.full((nGrid, nGrid, nGrid), 1)
-    if (Grid_xal == np.array([0])).all():
-        Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
+    Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
 
     variance_lyal, R_scale, k_values, skewness_lyal, kurtosis_lyal = compute_var_field(param, delta_fct(Grid_xal),k_bins)
     variance_xHII, R_scale, k_values, skewness_xHII, kurtosis_xHII = compute_var_field(param, delta_fct(Grid_xHII),k_bins)
