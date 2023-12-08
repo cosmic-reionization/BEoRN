@@ -13,12 +13,12 @@ sphinx>=2.3
 
 
 
-pip install scikit-image
-pip install matplotlib 
-pip install scipy 
-pip install tqdm 
-pip install mpi4py
-Pip install tools21cm
-pip install cmasher (to plot lightcones)
+# pip install scikit-image
+# pip install matplotlib 
+# pip install scipy 
+# pip install tqdm 
+# pip install mpi4py
+# Pip install tools21cm
+# pip install cmasher (to plot lightcones)
 
-For mpi4py, in a virtual env : conda install -c conda-forge mpi4py
+# For mpi4py, in a virtual env : conda install -c conda-forge mpi4py
