@@ -1291,7 +1291,7 @@ def gather_variances(param):
     save_f(file='./variances/var_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
 
 
-def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,rho_b,k_bins):
+def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins):
     # k_bins : extra kbins to measure the variance at same k values as PS
     z_str = z_string_format(z)
     print('Computing variance for xal, xHII and Temp at z = ' + z_str + '....')
@@ -1303,6 +1303,7 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,rho_b,k_bins):
     variance_lyal, R_scale, k_values, skewness_lyal, kurtosis_lyal = compute_var_field(param, delta_fct(Grid_xal),k_bins)
     variance_xHII, R_scale, k_values, skewness_xHII, kurtosis_xHII = compute_var_field(param, delta_fct(Grid_xHII),k_bins)
     variance_Temp, R_scale, k_values, skewness_Temp, kurtosis_Temp = compute_var_field(param, delta_fct(Grid_Temp),k_bins)
+    variance_rho,  R_scale, k_values, skewness_rho,  kurtosis_rho  = compute_var_field(param, delta_b,k_bins)
 
     print('nbr of scales is', len(k_values))
 
@@ -1310,7 +1311,8 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,rho_b,k_bins):
            obj={'z': z, 'var_lyal': np.array(variance_lyal), 'var_xHII': np.array(variance_xHII)
                , 'var_Temp': np.array(variance_Temp),'skewness_lyal': np.array(skewness_lyal), 'skewness_xHII': np.array(skewness_xHII)
                , 'skewness_Temp': np.array(skewness_Temp), 'kurtosis_lyal': np.array(kurtosis_lyal), 'kurtosis_xHII': np.array(kurtosis_xHII)
-               , 'kurtosis_Temp': np.array(kurtosis_Temp), 'k': k_values, 'R': R_scale})
+               , 'kurtosis_Temp': np.array(kurtosis_Temp), 'k': k_values, 'R': R_scale,
+                'variance_rho':variance_rho, 'skewness_rho':skewness_rho, 'kurtosis_rho':kurtosis_rho })
 
     print('.... Done computing variance. It took :', print_time(time.time() - tstart))
 
