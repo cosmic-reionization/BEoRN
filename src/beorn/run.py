@@ -1673,6 +1673,7 @@ def investigate_expansion(param):
 
             save_f(file='./physics/data_expansion_U_V_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
+            print('----- Done for z =', z, '-------')
 
     comm.Barrier()
 
