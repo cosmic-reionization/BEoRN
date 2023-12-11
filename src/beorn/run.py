@@ -1676,8 +1676,8 @@ def investigate_expansion(param):
                     'PS_U_UV': PS_U_UV, 'PS_U_Ub': PS_U_Ub, 'PS_U_bV': PS_U_bV,
                     'PS_V_UV': PS_V_UV, 'PS_V_Ub': PS_V_Ub, 'PS_V_bV': PS_V_bV,
                     'PS_b_UV': PS_b_UV, 'PS_b_Ub': PS_b_Ub, 'PS_b_bV': PS_b_bV,
-                    'PS_UV_UV':PS_UV_UV,'PS_bV_bV':PS_Ub_Ub,'PS_bV_bV':PS_Ub_Ub
-                    'PS_UV_Ub':PS_UV_Ub, 'PS_Ub_bV':PS_Ub_bV,'PS_UV_bV':PS_UV_bV
+                    'PS_UV_UV':PS_UV_UV,'PS_bV_bV':PS_Ub_Ub,'PS_bV_bV':PS_Ub_Ub,
+                    'PS_UV_Ub':PS_UV_Ub, 'PS_Ub_bV':PS_Ub_bV,'PS_UV_bV':PS_UV_bV,
                     }
 
             save_f(file='./physics/data_expansion_U_V_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
