@@ -1247,7 +1247,7 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
     comm.Barrier()
 
     if rank == 0:
-        gather_files(param, path='./variances/var_', z_arr=z_arr, Ncell=param.sim.Ncell)
+        gather_files(param, path='./variances/var_z', z_arr=z_arr, Ncell=param.sim.Ncell)
 
         end_time = time.time()
         print('Finished computing variances. It took in total: ',
@@ -1304,6 +1304,8 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins
     variance_xHII, R_scale, k_values, skewness_xHII, kurtosis_xHII = compute_var_field(param, delta_fct(Grid_xHII),k_bins)
     variance_Temp, R_scale, k_values, skewness_Temp, kurtosis_Temp = compute_var_field(param, delta_fct(Grid_Temp),k_bins)
     variance_rho,  R_scale, k_values, skewness_rho,  kurtosis_rho  = compute_var_field(param, delta_b,k_bins)
+    variance_U,  R_scale, k_values, skewness_rho,  kurtosis_rho  = compute_var_field(param, delta_fct(Grid_xal/(1+Grid_xal)),k_bins)
+    variance_V,  R_scale, k_values, skewness_rho,  kurtosis_rho  = compute_var_field(param, delta_fct(1-T_cmb(z)/Grid_Temp),k_bins)
 
     print('nbr of scales is', len(k_values))
 
@@ -1312,7 +1314,7 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins
                , 'var_Temp': np.array(variance_Temp),'skewness_lyal': np.array(skewness_lyal), 'skewness_xHII': np.array(skewness_xHII)
                , 'skewness_Temp': np.array(skewness_Temp), 'kurtosis_lyal': np.array(kurtosis_lyal), 'kurtosis_xHII': np.array(kurtosis_xHII)
                , 'kurtosis_Temp': np.array(kurtosis_Temp), 'k': k_values, 'R': R_scale,
-                'variance_rho':variance_rho, 'skewness_rho':skewness_rho, 'kurtosis_rho':kurtosis_rho })
+                'variance_rho':variance_rho, 'skewness_rho':skewness_rho, 'kurtosis_rho':kurtosis_rho,'variance_U':variance_U,'variance_V':variance_V })
 
     print('.... Done computing variance. It took :', print_time(time.time() - tstart))
 
