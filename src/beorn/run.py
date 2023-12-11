@@ -1657,9 +1657,9 @@ def investigate_expansion(param):
             PS_V_Ub = cross_PS(delta_fct(V), delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
             PS_V_bV = cross_PS(delta_fct(V), delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
 
-            PS_b_UV = cross_PS(delta_fct(b), delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_b_Ub = cross_PS(delta_fct(b), delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
-            PS_b_bV = cross_PS(delta_fct(b), delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_b_UV = cross_PS(delta_b, delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_b_Ub = cross_PS(delta_b, delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_b_bV = cross_PS(delta_b, delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
 
 
             PS_dTb = auto_PS(delta_fct(Grid_dTb), box_dims=Lbox, kbins=kbins)[0]
