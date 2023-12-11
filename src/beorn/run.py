@@ -1649,10 +1649,27 @@ def investigate_expansion(param):
             PS_Ub = cross_PS(delta_fct(U), delta_b, box_dims=Lbox, kbins=kbins)[0]
             PS_bV = cross_PS(delta_b, delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
 
+            PS_U_UV = cross_PS(delta_fct(U), delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_U_Ub = cross_PS(delta_fct(U), delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_U_bV = cross_PS(delta_fct(U), delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+
+            PS_V_UV = cross_PS(delta_fct(V), delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_V_Ub = cross_PS(delta_fct(V), delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_V_bV = cross_PS(delta_fct(V), delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+
+            PS_b_UV = cross_PS(delta_fct(b), delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_b_Ub = cross_PS(delta_fct(b), delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_b_bV = cross_PS(delta_fct(b), delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+
 
             PS_dTb = auto_PS(delta_fct(Grid_dTb), box_dims=Lbox, kbins=kbins)[0]
 
-            Dict = {'z': z, 'k': kk,'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV, 'PS_Ub': PS_Ub,'PS_bV':PS_bV,'PS_dTb':PS_dTb}
+            Dict = {'z': z, 'k': kk,'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV,
+                    'PS_Ub': PS_Ub,'PS_bV':PS_bV,'PS_dTb':PS_dTb,
+                    'PS_U_UV': PS_U_UV, 'PS_U_Ub': PS_U_Ub, 'PS_U_bV': PS_U_bV,
+                    'PS_V_UV': PS_V_UV, 'PS_V_Ub': PS_V_Ub, 'PS_V_bV': PS_V_bV,
+                    'PS_b_UV': PS_b_UV, 'PS_b_Ub': PS_b_Ub, 'PS_b_bV': PS_b_bV
+                    }
 
             save_f(file='./physics/data_expansion_U_V_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
