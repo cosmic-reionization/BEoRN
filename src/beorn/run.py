@@ -1661,7 +1661,15 @@ def investigate_expansion(param):
             PS_UV_bUV = cross_PS(delta_U * delta_V, delta_b * delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
             PS_bUV_bUV = auto_PS(delta_b * delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
 
+
+
             #### with reionisation
+            PS_rr = auto_PS(delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_rU = cross_PS(delta_xHII,delta_U, box_dims=Lbox, kbins=kbins)[0]
+            PS_rV = cross_PS(delta_xHII,delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb = cross_PS(delta_xHII,delta_b, box_dims=Lbox, kbins=kbins)[0]
+
+
             PS_rU_U = cross_PS(delta_xHII * delta_U, delta_U, box_dims=Lbox, kbins=kbins)[0]
             PS_r_UU = cross_PS(delta_xHII, delta_U ** 2, box_dims=Lbox, kbins=kbins)[0]
 
@@ -1720,6 +1728,7 @@ def investigate_expansion(param):
                     'PS_b_bUV':PS_b_bUV, 'PS_U_bUV':PS_U_bUV, 'PS_V_bUV':PS_V_bUV,
                     'PS_bU_bUV':PS_bU_bUV,'PS_bV_bUV':PS_bV_bUV,'PS_UV_bUV':PS_UV_bUV,
                     'PS_bUV_bUV':PS_bUV_bUV ,
+                        'PS_rr':PS_rr,'PS_rU':PS_rU,'PS_rV':PS_rV,'PS_rb':PS_rb,
                               'PS_rU_U': PS_rU_U, 'PS_r_UU': PS_r_UU, 'PS_rb_b': PS_rb_b, 'PS_rV_V': PS_rV_V,
                               'PS_r_VV': PS_r_VV, 'PS_Ub_r': PS_Ub_r, 'PS_rb_U': PS_rb_U, 'PS_rU_b': PS_rU_b,
                               'PS_rV_b': PS_rV_b, 'PS_rb_V': PS_rb_V, 'PS_Vb_r': PS_Vb_r, 'PS_UV_r': PS_UV_r,
