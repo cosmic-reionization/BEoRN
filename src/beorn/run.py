@@ -1625,7 +1625,7 @@ def investigate_expansion(param):
             PS_VV,kk               = auto_PS(delta_fct(V), box_dims=Lbox, kbins=kbins)
             PS_bb,kk               = auto_PS(delta_b, box_dims=Lbox, kbins=kbins)
 
-            delta_U, delta_V =delta_fct(U), delta_fct(V)
+            delta_U, delta_V, delta_xHII =delta_fct(U), delta_fct(V), delta_fct(Grid_xHII)
 
             #### without reio field
             PS_UV = cross_PS(delta_U, delta_V, box_dims=Lbox, kbins=kbins)[0]
