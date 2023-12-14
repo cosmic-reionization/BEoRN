@@ -360,11 +360,17 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
 
+
             else :
                 Grid_dTb = np.array([0])
 
     PS_dTb, k_bins = auto_PS(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
                              kbins=def_k_bins(param))
+
+
+    Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]), param=param)
+    PS_dTb_no_reio, k_bins = auto_PS(Grid_dTb_no_reio / np.mean(Grid_dTb_no_reio) - 1, box_dims=LBox,
+                                     kbins=def_k_bins(param))
 
     if not RSD:
         dTb_RSD_mean = 0
@@ -382,7 +388,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
                   'PS_dTb': PS_dTb, 'k': k_bins,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
-                  'x_coll': xcoll_mean}
+                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_rieo)}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
                                                 third_order=third_order,fourth_order=fourth_order,truncate=truncate)
@@ -1260,7 +1266,7 @@ def gather_variances(param):
     """
     gather all variances files at different z into a single file
 
-    Parameters
+    Parametersdata_UV_default
     ----------
     param : dictionnary
 
@@ -1358,6 +1364,7 @@ def compute_var_field(param, field,k_bins):
             variance.append(0)
             skewness.append(0)
             kurtosis.append(0)
+
     print('return : variance, R_scale, k_values, skewness, kurtosis')
     return variance, R_scale, k_values, skewness, kurtosis
 
