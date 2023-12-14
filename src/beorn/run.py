@@ -1665,18 +1665,18 @@ def investigate_expansion(param):
             PS_rU_U = cross_PS(delta_xHII * delta_U, delta_U, box_dims=Lbox, kbins=kbins)[0]
             PS_r_UU = cross_PS(delta_xHII, delta_U ** 2, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_rb_b = cross_PS(delta_xHII * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb_b = cross_PS(delta_xHII * delta_b, delta_b, box_dims=Lbox, kbins=kbins)[0]
 
             PS_rV_V = cross_PS(delta_xHII * delta_V, delta_V, box_dims=Lbox, kbins=kbins)[0]
             PS_r_VV = cross_PS(delta_xHII, delta_V ** 2, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_Ub_r = cross_PS(delta_rho * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
-            PS_rb_U = cross_PS(delta_xHII * delta_rho, delta_U, box_dims=Lbox, kbins=kbins)[0]
-            PS_rU_b = cross_PS(delta_xHII * delta_U, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+            PS_Ub_r = cross_PS(delta_b * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb_U = cross_PS(delta_xHII * delta_b, delta_U, box_dims=Lbox, kbins=kbins)[0]
+            PS_rU_b = cross_PS(delta_xHII * delta_U, delta_b, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_rV_b = cross_PS(delta_xHII * delta_V, delta_rho, box_dims=Lbox, kbins=kbins)[0]
-            PS_rb_V = cross_PS(delta_xHII * delta_rho, delta_V, box_dims=Lbox, kbins=kbins)[0]
-            PS_Vb_r = cross_PS(delta_V * delta_rho, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_rV_b = cross_PS(delta_xHII * delta_V, delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb_V = cross_PS(delta_xHII * delta_b, delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_Vb_r = cross_PS(delta_V * delta_b, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
 
             PS_UV_r = cross_PS(delta_U * delta_V, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
             PS_Ur_V = cross_PS(delta_xHII * delta_U, delta_V, box_dims=Lbox, kbins=kbins)[0]
@@ -1684,22 +1684,22 @@ def investigate_expansion(param):
 
             PS_Vr_r = cross_PS(delta_V * delta_xHII, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
             PS_Ur_r = cross_PS(delta_U * delta_xHII, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
-            PS_br_r = cross_PS(delta_rho * delta_xHII, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_br_r = cross_PS(delta_b * delta_xHII, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
 
             PS_rV_rV = auto_PS(delta_xHII * delta_V, box_dims=Lbox, kbins=kbins)[0]
             PS_rU_rU = auto_PS(delta_xHII * delta_U, box_dims=Lbox, kbins=kbins)[0]
-            PS_rb_rb = auto_PS(delta_xHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb_rb = auto_PS(delta_xHII * delta_b, box_dims=Lbox, kbins=kbins)[0]
 
             PS_rUU_r = cross_PS(delta_xHII * delta_U ** 2, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
             PS_rVV_r = cross_PS(delta_xHII * delta_V ** 2, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_rbU_r = cross_PS(delta_xHII * delta_rho * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_rbU_r = cross_PS(delta_xHII * delta_b * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
             PS_rVU_r = cross_PS(delta_xHII * delta_V * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
-            PS_rVb_r = cross_PS(delta_xHII * delta_V * delta_rho, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_rVb_r = cross_PS(delta_xHII * delta_V * delta_b, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_rb_rU = cross_PS(delta_xHII * delta_rho, delta_xHII * delta_U, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb_rU = cross_PS(delta_xHII * delta_b, delta_xHII * delta_U, box_dims=Lbox, kbins=kbins)[0]
             PS_rV_rU = cross_PS(delta_xHII * delta_V, delta_xHII * delta_U, box_dims=Lbox, kbins=kbins)[0]
-            PS_rV_rb = cross_PS(delta_xHII * delta_V, delta_xHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
+            PS_rV_rb = cross_PS(delta_xHII * delta_V, delta_xHII * delta_b, box_dims=Lbox, kbins=kbins)[0]
 
 
 
