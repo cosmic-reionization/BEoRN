@@ -542,7 +542,7 @@ def grid_dTb(param, ion='bubbles', RSD=False):
 
             # Grid_Sal = S_alpha(zz_, Grid_Temp, 1 - Grid_xHII)
             Grid_xal = Grid_xal  # * Grid_Sal
-            coef = rhoc0 * h0 ** 2 * Ob * (1 + zz_) ** 3 * M_sun / cm_per_Mpc ** 3 / m_H
+            coef = x_coll_coef(z,param)
             Grid_xcoll = x_coll(z=zz_, Tk=Grid_Temp, xHI=Grid_xHI, rho_b=(delta_b + 1) * coef)
             Grid_Tspin = ((1 / T_cmb_z + (Grid_xcoll + Grid_xal) / Grid_Temp) / (1 + Grid_xcoll + Grid_xal)) ** -1
 
@@ -1310,8 +1310,8 @@ def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins
     variance_xHII, R_scale, k_values, skewness_xHII, kurtosis_xHII = compute_var_field(param, delta_fct(Grid_xHII),k_bins)
     variance_Temp, R_scale, k_values, skewness_Temp, kurtosis_Temp = compute_var_field(param, delta_fct(Grid_Temp),k_bins)
     variance_rho,  R_scale, k_values, skewness_rho,  kurtosis_rho  = compute_var_field(param, delta_b,k_bins)
-    variance_U,  R_scale, k_values, skewness_rho,  kurtosis_rho  = compute_var_field(param, delta_fct(Grid_xal/(1+Grid_xal)),k_bins)
-    variance_V,  R_scale, k_values, skewness_rho,  kurtosis_rho  = compute_var_field(param, delta_fct(1-T_cmb(z)/Grid_Temp),k_bins)
+    variance_U,  R_scale, k_values, skewness_rho,  kurtosis_rho    = compute_var_field(param, delta_fct(Grid_xal/(1+Grid_xal)),k_bins)
+    variance_V,  R_scale, k_values, skewness_rho,  kurtosis_rho    = compute_var_field(param, delta_fct(1-T_cmb(z)/Grid_Temp),k_bins)
 
     print('nbr of scales is', len(k_values))
 
@@ -1573,46 +1573,13 @@ def investigate_xal(param,HO = False):
             save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
 
-
-
     comm.Barrier()
-
-
     if rank == 0:
-        from collections import defaultdict
-        dd = defaultdict(list)
-
-
-        for ii, z in enumerate(z_arr):
-            z_str = z_string_format(z)
-            file = './physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
-            if exists(file):
-                xal_z = load_f(file)
-                for key, value in xal_z.items():
-                    dd[key].append(value)
-                os.remove(file)
-
-
-        for key, value in dd.items():  # change lists to numpy arrays
-            dd[key] = np.array(value)
-
-        dd['k'] = xal_z['k']
-
-        save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
-
+        gather_files(param, path = './physics/xal_data_', z_arr = z_arr, Ncell = Ncell)
 
         end_time = time.time()
         print('Finished investigating xal. It took in total: ', end_time - start_time)
         print('  ')
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1644,52 +1611,104 @@ def investigate_expansion(param):
             Grid_dTb  = load_grid(param, z=z, type='dTb')
 
             Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
+            Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * x_coll_coef(z,param))
+            Grid_xtot  = Grid_xcoll + Grid_xal
 
-            U = Grid_xal/(1+Grid_xal)
+            Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]), param=param)
+
+
+
+            U = Grid_xtot/(1+Grid_xtot)
             V = 1-T_cmb(z)/Grid_Temp
 
             PS_UU,kk               = auto_PS(delta_fct(U), box_dims=Lbox, kbins=kbins)
             PS_VV,kk               = auto_PS(delta_fct(V), box_dims=Lbox, kbins=kbins)
             PS_bb,kk               = auto_PS(delta_b, box_dims=Lbox, kbins=kbins)
 
-            PS_UV = cross_PS(delta_fct(U),delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_Ub = cross_PS(delta_fct(U), delta_b, box_dims=Lbox, kbins=kbins)[0]
-            PS_bV = cross_PS(delta_b, delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            delta_U, delta_V =delta_fct(U), delta_fct(V)
 
-            PS_U_UV = cross_PS(delta_fct(U), delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_U_Ub = cross_PS(delta_fct(U), delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
-            PS_U_bV = cross_PS(delta_fct(U), delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            #### without reio field
+            PS_UV = cross_PS(delta_U, delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_Ub = cross_PS(delta_U, delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_bV = cross_PS(delta_b, delta_V, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_V_UV = cross_PS(delta_fct(V), delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_V_Ub = cross_PS(delta_fct(V), delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
-            PS_V_bV = cross_PS(delta_fct(V), delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_U_UV = cross_PS(delta_U, delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_U_Ub = cross_PS(delta_U, delta_U * delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_U_bV = cross_PS(delta_U, delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_b_UV = cross_PS(delta_b, delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_b_Ub = cross_PS(delta_b, delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
-            PS_b_bV = cross_PS(delta_b, delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_V_UV = cross_PS(delta_V, delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_V_Ub = cross_PS(delta_V, delta_U * delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_V_bV = cross_PS(delta_V, delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_UV_UV = auto_PS(delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_Ub_Ub = auto_PS(delta_fct(U) * delta_b, box_dims=Lbox, kbins=kbins)[0]
-            PS_bV_bV = auto_PS(delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_b_UV = cross_PS(delta_b, delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_b_Ub = cross_PS(delta_b, delta_U * delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_b_bV = cross_PS(delta_b, delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_UV_Ub = cross_PS(delta_fct(U) * delta_fct(V), delta_fct(U) * delta_b,box_dims=Lbox, kbins=kbins)[0]
-            PS_Ub_bV = cross_PS(delta_fct(U) * delta_b, delta_b * delta_fct(V),box_dims=Lbox, kbins=kbins)[0]
-            PS_UV_bV = cross_PS(delta_fct(U) * delta_fct(V), delta_b * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_UV_UV = auto_PS(delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_Ub_Ub = auto_PS(delta_U * delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_bV_bV = auto_PS(delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_b_bUV = cross_PS(delta_b, delta_b * delta_fct(U)  * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_U_bUV = cross_PS(delta_fct(U), delta_b * delta_fct(U)  * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_V_bUV = cross_PS(delta_fct(V), delta_b * delta_fct(U)  * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_UV_Ub = cross_PS(delta_U * delta_V, delta_U * delta_b, box_dims=Lbox, kbins=kbins)[0]
+            PS_Ub_bV = cross_PS(delta_U * delta_b, delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_UV_bV = cross_PS(delta_U * delta_V, delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_bU_bUV = cross_PS(delta_b * delta_fct(U) , delta_b * delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_bV_bUV = cross_PS(delta_b * delta_fct(V), delta_b * delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_UV_bUV = cross_PS(delta_fct(U) * delta_fct(V), delta_b * delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
-            PS_bUV_bUV = auto_PS(delta_b * delta_fct(U) * delta_fct(V), box_dims=Lbox, kbins=kbins)[0]
+            PS_b_bUV = cross_PS(delta_b, delta_b * delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_U_bUV = cross_PS(delta_U, delta_b * delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_V_bUV = cross_PS(delta_V, delta_b * delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_bU_bUV = cross_PS(delta_b * delta_U, delta_b * delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_bV_bUV = cross_PS(delta_b * delta_V, delta_b * delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_UV_bUV = cross_PS(delta_U * delta_V, delta_b * delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_bUV_bUV = auto_PS(delta_b * delta_U * delta_V, box_dims=Lbox, kbins=kbins)[0]
+
+            #### with reionisation
+            PS_rU_U = cross_PS(delta_xHII * delta_U, delta_U, box_dims=Lbox, kbins=kbins)[0]
+            PS_r_UU = cross_PS(delta_xHII, delta_U ** 2, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_rb_b = cross_PS(delta_xHII * delta_rho, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_rV_V = cross_PS(delta_xHII * delta_V, delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_r_VV = cross_PS(delta_xHII, delta_V ** 2, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_Ub_r = cross_PS(delta_rho * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb_U = cross_PS(delta_xHII * delta_rho, delta_U, box_dims=Lbox, kbins=kbins)[0]
+            PS_rU_b = cross_PS(delta_xHII * delta_U, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_rV_b = cross_PS(delta_xHII * delta_V, delta_rho, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb_V = cross_PS(delta_xHII * delta_rho, delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_Vb_r = cross_PS(delta_V * delta_rho, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_UV_r = cross_PS(delta_U * delta_V, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_Ur_V = cross_PS(delta_xHII * delta_U, delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_Vr_U = cross_PS(delta_xHII * delta_V, delta_U, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_Vr_r = cross_PS(delta_V * delta_xHII, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_Ur_r = cross_PS(delta_U * delta_xHII, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_br_r = cross_PS(delta_rho * delta_xHII, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_rV_rV = auto_PS(delta_xHII * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_rU_rU = auto_PS(delta_xHII * delta_U, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb_rb = auto_PS(delta_xHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_rUU_r = cross_PS(delta_xHII * delta_U ** 2, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_rVV_r = cross_PS(delta_xHII * delta_V ** 2, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_rbU_r = cross_PS(delta_xHII * delta_rho * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_rVU_r = cross_PS(delta_xHII * delta_V * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_rVb_r = cross_PS(delta_xHII * delta_V * delta_rho, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_rb_rU = cross_PS(delta_xHII * delta_rho, delta_xHII * delta_U, box_dims=Lbox, kbins=kbins)[0]
+            PS_rV_rU = cross_PS(delta_xHII * delta_V, delta_xHII * delta_U, box_dims=Lbox, kbins=kbins)[0]
+            PS_rV_rb = cross_PS(delta_xHII * delta_V, delta_xHII * delta_rho, box_dims=Lbox, kbins=kbins)[0]
 
 
+
+            ## dTb
             PS_dTb = auto_PS(delta_fct(Grid_dTb), box_dims=Lbox, kbins=kbins)[0]
+            PS_dTb_no_reio = auto_PS(delta_fct(Grid_dTb_no_reio), box_dims=Lbox, kbins=kbins)[0]
 
             Dict = {'z': z, 'k': kk,'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV,
-                    'PS_Ub': PS_Ub,'PS_bV':PS_bV,'PS_dTb':PS_dTb,
+                    'PS_Ub': PS_Ub,'PS_bV':PS_bV,'PS_dTb':PS_dTb,'PS_dTb_no_reio':PS_dTb_no_reio,
                     'PS_U_UV': PS_U_UV, 'PS_U_Ub': PS_U_Ub, 'PS_U_bV': PS_U_bV,
                     'PS_V_UV': PS_V_UV, 'PS_V_Ub': PS_V_Ub, 'PS_V_bV': PS_V_bV,
                     'PS_b_UV': PS_b_UV, 'PS_b_Ub': PS_b_Ub, 'PS_b_bV': PS_b_bV,
@@ -1697,7 +1716,14 @@ def investigate_expansion(param):
                     'PS_UV_Ub':PS_UV_Ub, 'PS_Ub_bV':PS_Ub_bV,'PS_UV_bV':PS_UV_bV,
                     'PS_b_bUV':PS_b_bUV, 'PS_U_bUV':PS_U_bUV, 'PS_V_bUV':PS_V_bUV,
                     'PS_bU_bUV':PS_bU_bUV,'PS_bV_bUV':PS_bV_bUV,'PS_UV_bUV':PS_UV_bUV,
-                   'PS_bUV_bUV':PS_bUV_bUV }
+                    'PS_bUV_bUV':PS_bUV_bUV ,
+                              'PS_rU_U': PS_rU_U, 'PS_r_UU': PS_r_UU, 'PS_rb_b': PS_rb_b, 'PS_rV_V': PS_rV_V,
+                              'PS_r_VV': PS_r_VV, 'PS_Ub_r': PS_Ub_r, 'PS_rb_U': PS_rb_U, 'PS_rU_b': PS_rU_b,
+                              'PS_rV_b': PS_rV_b, 'PS_rb_V': PS_rb_V, 'PS_Vb_r': PS_Vb_r, 'PS_UV_r': PS_UV_r,
+                              'PS_Ur_V': PS_Ur_V, 'PS_Vr_U': PS_Vr_U, 'PS_Vr_r': PS_Vr_r, 'PS_Ur_r': PS_Ur_r,
+                              'PS_br_r': PS_br_r, 'PS_rV_rV': PS_rV_rV, 'PS_rU_rU': PS_rU_rU, 'PS_rb_rb': PS_rb_rb,
+                              'PS_rUU_r': PS_rUU_r, 'PS_rVV_r': PS_rVV_r, 'PS_rbU_r': PS_rbU_r, 'PS_rVU_r': PS_rVU_r,
+                              'PS_rVb_r': PS_rVb_r, 'PS_rb_rU': PS_rb_rU, 'PS_rV_rU': PS_rV_rU, 'PS_rV_rb': PS_rV_rb}
 
             save_f(file='./physics/data_expansion_U_V_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
