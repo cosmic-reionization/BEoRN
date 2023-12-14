@@ -12,7 +12,7 @@ from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct, T_cmb
 import os
 from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
     stacked_T_kernel, cumulated_number_halos, average_profile, log_binning, bin_edges_log
-from .couplings import x_coll, S_alpha
+from .couplings import x_coll, S_alpha, x_coll_coef
 from .global_qty import xHII_approx, compute_glob_qty
 from os.path import exists
 import tools21cm as t2c
@@ -1611,8 +1611,8 @@ def investigate_expansion(param):
             Grid_dTb  = load_grid(param, z=z, type='dTb')
 
             Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
-            Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * x_coll_coef(z,param))
-            Grid_xtot  = Grid_xcoll + Grid_xal
+            #Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * x_coll_coef(z,param))
+            Grid_xtot  = Grid_xal
 
             Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]), param=param)
 
