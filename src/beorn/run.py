@@ -369,10 +369,12 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 Grid_dTb = np.array([0])
                 Grid_dTb_no_reio = np.array([0])
 
-    PS_dTb, k_bins = auto_PS(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
+    PS_dTb, k_bins = auto_PS(delta_fct(Grid_dTb), box_dims=LBox,
                              kbins=def_k_bins(param))
-    PS_dTb_no_reio, k_bins = auto_PS(Grid_dTb_no_reio / np.mean(Grid_dTb_no_reio) - 1, box_dims=LBox,
+    PS_dTb_no_reio, k_bins = auto_PS(delta_fct(Grid_dTb_no_reio), box_dims=LBox,
                                      kbins=def_k_bins(param))
+    PS_rho_dTb = cross_PS(delta_fct(Grid_dTb),delta_b, box_dims=LBox,
+                                     kbins=def_k_bins(param))[0]
 
     if not RSD:
         dTb_RSD_mean = 0
@@ -385,12 +387,15 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             auto_PS(delta_Grid_dTb_RSD, box_dims=LBox, kbins=def_k_bins(param))[0]
         dTb_RSD_mean = np.mean(Grid_dTb_RSD)
 
+
+
         ##
 
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
                   'PS_dTb': PS_dTb, 'k': k_bins,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
-                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio)}
+                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio),
+                  'PS_rho_dTb':PS_rho_dTb}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
                                                 third_order=third_order,fourth_order=fourth_order,truncate=truncate)
