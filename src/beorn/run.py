@@ -184,6 +184,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
         Grid_dTb = factor * np.sqrt(1 + z) * (1 - Tcmb0 * (1 + z) / Grid_Temp) * (1 - Grid_xHII) * (
                 delta_b + 1) * Grid_xcoll / (1 + Grid_xcoll)
+        Grid_dTb_no_reio = factor * np.sqrt(1 + z) * (1 - Tcmb0 * (1 + z) / Grid_Temp) * (delta_b + 1) *\
+                           Grid_xcoll / (1 + Grid_xcoll)
         Grid_dTb_RSD = np.array([0])
         xcoll_mean = np.mean(Grid_xcoll)
         del Grid_xcoll
@@ -202,6 +204,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             Grid_xHII = np.array([1])
             Grid_Temp = np.array([1])
             Grid_dTb = np.array([0])
+            Grid_dTb_no_reio = np.array([0])
             Grid_xal = np.array([0])
             print('universe is fully inoinzed. Return [1] for the xHII, T and [0] for dTb.')
         else:
@@ -359,16 +362,15 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
 
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
+                Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]),param=param)
 
 
             else :
                 Grid_dTb = np.array([0])
+                Grid_dTb_no_reio = np.array([0])
 
     PS_dTb, k_bins = auto_PS(Grid_dTb / np.mean(Grid_dTb) - 1, box_dims=LBox,
                              kbins=def_k_bins(param))
-
-
-    Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]), param=param)
     PS_dTb_no_reio, k_bins = auto_PS(Grid_dTb_no_reio / np.mean(Grid_dTb_no_reio) - 1, box_dims=LBox,
                                      kbins=def_k_bins(param))
 
