@@ -388,7 +388,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
                   'PS_dTb': PS_dTb, 'k': k_bins,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
-                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_rieo)}
+                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio)}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
                                                 third_order=third_order,fourth_order=fourth_order,truncate=truncate)
@@ -1698,9 +1698,6 @@ def investigate_expansion(param):
             PS_rU_rU = auto_PS(delta_xHII * delta_U, box_dims=Lbox, kbins=kbins)[0]
             PS_rb_rb = auto_PS(delta_xHII * delta_b, box_dims=Lbox, kbins=kbins)[0]
 
-            PS_rUU_r = cross_PS(delta_xHII * delta_U ** 2, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
-            PS_rVV_r = cross_PS(delta_xHII * delta_V ** 2, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
-
             PS_rbU_r = cross_PS(delta_xHII * delta_b * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
             PS_rVU_r = cross_PS(delta_xHII * delta_V * delta_U, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
             PS_rVb_r = cross_PS(delta_xHII * delta_V * delta_b, delta_xHII, box_dims=Lbox, kbins=kbins)[0]
@@ -1729,8 +1726,8 @@ def investigate_expansion(param):
                     'PS_bU_bUV':PS_bU_bUV,'PS_bV_bUV':PS_bV_bUV,'PS_UV_bUV':PS_UV_bUV,
                     'PS_bUV_bUV':PS_bUV_bUV ,
                         'PS_rr':PS_rr,'PS_rU':PS_rU,'PS_rV':PS_rV,'PS_rb':PS_rb,
-                              'PS_rU_U': PS_rU_U, 'PS_r_UU': PS_r_UU, 'PS_rb_b': PS_rb_b, 'PS_rV_V': PS_rV_V,
-                              'PS_r_VV': PS_r_VV, 'PS_Ub_r': PS_Ub_r, 'PS_rb_U': PS_rb_U, 'PS_rU_b': PS_rU_b,
+                              'PS_rU_U': PS_rU_U, 'PS_rb_b': PS_rb_b, 'PS_rV_V': PS_rV_V,
+                              'PS_Ub_r': PS_Ub_r, 'PS_rb_U': PS_rb_U, 'PS_rU_b': PS_rU_b,
                               'PS_rV_b': PS_rV_b, 'PS_rb_V': PS_rb_V, 'PS_Vb_r': PS_Vb_r, 'PS_UV_r': PS_UV_r,
                               'PS_Ur_V': PS_Ur_V, 'PS_Vr_U': PS_Vr_U, 'PS_Vr_r': PS_Vr_r, 'PS_Ur_r': PS_Ur_r,
                               'PS_br_r': PS_br_r, 'PS_rV_rV': PS_rV_rV, 'PS_rU_rU': PS_rU_rU, 'PS_rb_rb': PS_rb_rb,
