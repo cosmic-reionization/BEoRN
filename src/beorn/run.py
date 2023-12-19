@@ -1736,7 +1736,8 @@ def investigate_expansion(param):
 
             Dict = {'z': z, 'k': kk,'dTb':np.mean(Grid_dTb),'dTb_no_reio':np.mean(Grid_dTb_no_reio),
                     'x_al':np.mean(Grid_xal),'Tk':np.mean(Grid_Temp),'xHII':np.mean(Grid_xHII),
-                    'U': np.mean(U),'V': np.mean(V),
+                    'U': np.mean(U),'V': np.mean(V), 'xal_ov_1_plus_xal': np.mean(Grid_xal/(1+Grid_xal)),
+                    '1_minus_Tcmb_over_Tk':np.mean((1 - T_cmb(z) / Grid_Temp)),
                     'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV,
                     'PS_Ub': PS_Ub,'PS_bV':PS_bV,'PS_dTb':PS_dTb,'PS_dTb_no_reio':PS_dTb_no_reio,
                     'PS_U_UV': PS_U_UV, 'PS_U_Ub': PS_U_Ub, 'PS_U_bV': PS_U_bV,
@@ -1747,7 +1748,6 @@ def investigate_expansion(param):
                     'PS_b_bUV':PS_b_bUV, 'PS_U_bUV':PS_U_bUV, 'PS_V_bUV':PS_V_bUV,
                     'PS_bU_bUV':PS_bU_bUV,'PS_bV_bUV':PS_bV_bUV,'PS_UV_bUV':PS_UV_bUV,
                     'PS_bUV_bUV':PS_bUV_bUV ,
-
                         'PS_rr':PS_rr,'PS_rU':PS_rU,'PS_rV':PS_rV,'PS_rb':PS_rb,
                               'PS_rU_U': PS_rU_U, 'PS_rb_b': PS_rb_b, 'PS_rV_V': PS_rV_V,
                               'PS_Ub_r': PS_Ub_r, 'PS_rb_U': PS_rb_U, 'PS_rU_b': PS_rU_b,
