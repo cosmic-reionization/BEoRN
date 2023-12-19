@@ -70,7 +70,7 @@ def x_coll(z, Tk, xHI, rho_b):
     x_eH = prefac * kappa_eH * n_HII
     return x_HH  + x_eH
 
-def x_coll_coef(param):
+def x_coll_coef(z,param):
     """
     Coefficient to turn rho/rho_mean into a baryon density in nbr of [H atoms /phys-cm**3]
     """
