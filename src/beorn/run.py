@@ -1618,8 +1618,8 @@ def investigate_expansion(param):
             Grid_dTb  = load_grid(param, z=z, type='dTb')
 
             Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
-            #Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * x_coll_coef(z,param))
-            Grid_xtot  = Grid_xal
+            Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * x_coll_coef(z,param))
+            Grid_xtot  = Grid_xal + Grid_xcoll
 
             Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]), param=param)
 
@@ -1741,11 +1741,11 @@ def investigate_expansion(param):
             Xi_Vb = np.mean(delta_b * delta_V)
             Xi_rV = np.mean(delta_xHII * delta_V)
             Xi_rU = np.mean(delta_xHII * delta_U)
-            Xi_rb = np.mean(delta_xHII * delta)
+            Xi_rb = np.mean(delta_xHII * delta_b)
 
             Dict = {'z': z, 'k': kk,'dTb':np.mean(Grid_dTb),'dTb_no_reio':np.mean(Grid_dTb_no_reio),
-                    'x_al':np.mean(Grid_xal),'Tk':np.mean(Grid_Temp),'xHII':np.mean(Grid_xHII),
-                    'U': np.mean(U),'V': np.mean(V),
+                    'x_al':np.mean(Grid_xal),'Tk':np.mean(Grid_Temp),'x_HII':np.mean(Grid_xHII),
+                    'U': np.mean(U),'V': np.mean(V), 'x_coll':np.mean(Grid_xcoll),
                     'Xi_UV': Xi_UV, 'Xi_Ub': Xi_Ub, 'Xi_Vb': Xi_Vb,
                     'Xi_rV': Xi_rV, 'Xi_rU': Xi_rU, 'Xi_rb': Xi_rb,
                     'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV,
