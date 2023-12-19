@@ -1673,7 +1673,7 @@ def investigate_expansion(param):
             #### with reionisation
             PS_rr = auto_PS(delta_xHII, box_dims=Lbox, kbins=kbins)[0]
             PS_rU = cross_PS(delta_xHII,delta_U, box_dims=Lbox, kbins=kbins)[0]
-            PS_rV = cross_PS(delta_xHII,delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_rV = cross_PS(delta_xHII,delta_V, box_dims=LboxP_decomp_HO, kbins=kbins)[0]
             PS_rb = cross_PS(delta_xHII,delta_b, box_dims=Lbox, kbins=kbins)[0]
 
 
@@ -1714,6 +1714,21 @@ def investigate_expansion(param):
             PS_rV_rb = cross_PS(delta_xHII * delta_V, delta_xHII * delta_b, box_dims=Lbox, kbins=kbins)[0]
 
 
+            #### terms that matter during reio/heating (+ reionisation)
+            #### these matter the most : data_UV['PS_bV_bV']+ 2*(data_UV['PS_b_bV']+data_UV['PS_V_bV'])
+
+            PS_rbV_bV  = cross_PS(delta_xHII * delta_b *  delta_V, delta_b *  delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_rbV_rbV = auto_PS(delta_xHII * delta_b *  delta_V, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_rb_bV  = cross_PS(delta_xHII * delta_b , delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_b_rbV  = cross_PS(delta_b , delta_xHII * delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_rb_rbV  = cross_PS(delta_xHII * delta_b , delta_xHII *  delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
+
+            PS_V_rbV   = cross_PS(delta_V , delta_xHII * delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_rV_bV   = cross_PS(delta_xHII * delta_V,  delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
+            PS_rV_rbV  = cross_PS(delta_xHII * delta_V , delta_xHII * delta_b * delta_V, box_dims=Lbox, kbins=kbins)[0]
+
+
 
             ## dTb
             PS_dTb = auto_PS(delta_fct(Grid_dTb), box_dims=Lbox, kbins=kbins)[0]
@@ -1732,14 +1747,18 @@ def investigate_expansion(param):
                     'PS_b_bUV':PS_b_bUV, 'PS_U_bUV':PS_U_bUV, 'PS_V_bUV':PS_V_bUV,
                     'PS_bU_bUV':PS_bU_bUV,'PS_bV_bUV':PS_bV_bUV,'PS_UV_bUV':PS_UV_bUV,
                     'PS_bUV_bUV':PS_bUV_bUV ,
+                    
                         'PS_rr':PS_rr,'PS_rU':PS_rU,'PS_rV':PS_rV,'PS_rb':PS_rb,
                               'PS_rU_U': PS_rU_U, 'PS_rb_b': PS_rb_b, 'PS_rV_V': PS_rV_V,
                               'PS_Ub_r': PS_Ub_r, 'PS_rb_U': PS_rb_U, 'PS_rU_b': PS_rU_b,
                               'PS_rV_b': PS_rV_b, 'PS_rb_V': PS_rb_V, 'PS_Vb_r': PS_Vb_r, 'PS_UV_r': PS_UV_r,
                               'PS_Ur_V': PS_Ur_V, 'PS_Vr_U': PS_Vr_U, 'PS_Vr_r': PS_Vr_r, 'PS_Ur_r': PS_Ur_r,
                               'PS_br_r': PS_br_r, 'PS_rV_rV': PS_rV_rV, 'PS_rU_rU': PS_rU_rU, 'PS_rb_rb': PS_rb_rb,
-                              'PS_rUU_r': PS_rUU_r, 'PS_rVV_r': PS_rVV_r, 'PS_rbU_r': PS_rbU_r, 'PS_rVU_r': PS_rVU_r,
-                              'PS_rVb_r': PS_rVb_r, 'PS_rb_rU': PS_rb_rU, 'PS_rV_rU': PS_rV_rU, 'PS_rV_rb': PS_rV_rb}
+                              'PS_rbU_r': PS_rbU_r, 'PS_rVU_r': PS_rVU_r,
+
+                              'PS_rVb_r': PS_rVb_r, 'PS_rb_rU': PS_rb_rU, 'PS_rV_rU': PS_rV_rU, 'PS_rV_rb': PS_rV_rb,
+                    'PS_rbV_bV' :PS_rbV_bV   ,'PS_rbV_rbV':PS_rbV_rbV ,'PS_rb_bV'  :PS_rb_bV ,'PS_b_rbV'  :PS_b_rbV,
+                 'PS_rb_rbV' :PS_rb_rbV   ,'PS_V_rbV'  :PS_V_rbV    ,'PS_rV_bV'  :PS_rV_bV ,'PS_rV_rbV' :PS_rV_rbV   }
 
             save_f(file='./physics/data_expansion_U_V_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
