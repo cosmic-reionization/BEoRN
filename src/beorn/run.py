@@ -1734,10 +1734,20 @@ def investigate_expansion(param):
             PS_dTb = auto_PS(delta_fct(Grid_dTb), box_dims=Lbox, kbins=kbins)[0]
             PS_dTb_no_reio = auto_PS(delta_fct(Grid_dTb_no_reio), box_dims=Lbox, kbins=kbins)[0]
 
+
+            ## corr fct
+            Xi_UV = np.mean(delta_V * delta_U)
+            Xi_Ub = np.mean(delta_b * delta_U)
+            Xi_Vb = np.mean(delta_b * delta_V)
+            Xi_rV = np.mean(delta_xHII * delta_V)
+            Xi_rU = np.mean(delta_xHII * delta_U)
+            Xi_rb = np.mean(delta_xHII * delta)
+
             Dict = {'z': z, 'k': kk,'dTb':np.mean(Grid_dTb),'dTb_no_reio':np.mean(Grid_dTb_no_reio),
                     'x_al':np.mean(Grid_xal),'Tk':np.mean(Grid_Temp),'xHII':np.mean(Grid_xHII),
-                    'U': np.mean(U),'V': np.mean(V), 'xal_ov_1_plus_xal': np.mean(Grid_xal/(1+Grid_xal)),
-                    '1_minus_Tcmb_over_Tk':np.mean((1 - T_cmb(z) / Grid_Temp)),
+                    'U': np.mean(U),'V': np.mean(V),
+                    'Xi_UV': Xi_UV, 'Xi_Ub': Xi_Ub, 'Xi_Vb': Xi_Vb,
+                    'Xi_rV': Xi_rV, 'Xi_rU': Xi_rU, 'Xi_rb': Xi_rb,
                     'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV,
                     'PS_Ub': PS_Ub,'PS_bV':PS_bV,'PS_dTb':PS_dTb,'PS_dTb_no_reio':PS_dTb_no_reio,
                     'PS_U_UV': PS_U_UV, 'PS_U_Ub': PS_U_Ub, 'PS_U_bV': PS_U_bV,
