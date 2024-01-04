@@ -1610,7 +1610,7 @@ def investigate_expansion(param):
         z_str = z_string_format(z)
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
-            print('----- Investigating xal for z =', z, '-------')
+            print('----- Investigating expansion for z =', z, '-------')
             Grid_Temp = load_grid(param, z=z, type='Tk')
             Grid_xHII = load_grid(param, z=z, type='bubbles')
             Grid_xal  = load_grid(param, z=z, type='lyal')
@@ -1772,7 +1772,8 @@ def investigate_expansion(param):
                     'Xi_rV': Xi_rV, 'Xi_rU': Xi_rU, 'Xi_rb': Xi_rb,
                     'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV,
                     'PS_Ub': PS_Ub,'PS_bV':PS_bV,'PS_dTb':PS_dTb,'PS_dTb_no_reio':PS_dTb_no_reio,
-                    'PS_dTb_Taylor':PS_dTb_Taylor,'dTb_fake':dTb_fake,
+                    'PS_dTb_Taylor':PS_dTb_Taylor,'dTb_fake':dTb_fake, 'dTb_Taylor':np.mean(grid_dTb_Taylor),
+
                     'PS_U_UV': PS_U_UV, 'PS_U_Ub': PS_U_Ub, 'PS_U_bV': PS_U_bV,
                     'PS_V_UV': PS_V_UV, 'PS_V_Ub': PS_V_Ub, 'PS_V_bV': PS_V_bV,
                     'PS_b_UV': PS_b_UV, 'PS_b_Ub': PS_b_Ub, 'PS_b_bV': PS_b_bV,
