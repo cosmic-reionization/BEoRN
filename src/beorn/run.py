@@ -1617,13 +1617,12 @@ def investigate_expansion(param):
             delta_b   = load_delta_b(param, z_str)
             Grid_dTb  = load_grid(param, z=z, type='dTb')
 
+
             Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
             Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * x_coll_coef(z,param))
             Grid_xtot  = Grid_xal + Grid_xcoll
 
             Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]), param=param)
-
-
 
             U = Grid_xtot/(1+Grid_xtot)
             V = 1-T_cmb(z)/Grid_Temp
@@ -1633,6 +1632,15 @@ def investigate_expansion(param):
             PS_bb,kk               = auto_PS(delta_b, box_dims=Lbox, kbins=kbins)
 
             delta_U, delta_V, delta_xHII =delta_fct(U), delta_fct(V), delta_fct(Grid_xHII)
+
+            #### dTb with Taylor expansion
+            Tk, x_tot, x_al, x_HII = np.mean(Grid_Temp), np.mean(Grid_xtot), np.mean(Grid_xal), np.mean(Grid_xHII)
+            beta_r, beta_T, beta_a = -x_HII / (1 - x_HII), T_cmb(z) / (Tk - T_cmb(z)), x_al / x_tot / (1 + x_tot)
+            dTb_fake = dTb_fct(z, Tk, x_tot, 0, x_HII, param)
+            grid_dTb_Taylor = dTb_fake * (1 + delta_b) * (1+ beta_r * delta_xHII) * (1 + beta_a * delta_fct(Grid_xal)) \
+                                        * (1 + beta_T * delta_fct(Grid_Temp))
+            PS_dTb_Taylor = auto_PS(delta_fct(grid_dTb_Taylor), box_dims=Lbox, kbins=kbins)[0]
+
 
             #### without reio field
             PS_UV = cross_PS(delta_U, delta_V, box_dims=Lbox, kbins=kbins)[0]
@@ -1758,12 +1766,13 @@ def investigate_expansion(param):
             Xi_rb = np.mean(delta_xHII * delta_b)
 
             Dict = {'z': z, 'k': kk,'dTb':np.mean(Grid_dTb),'dTb_no_reio':np.mean(Grid_dTb_no_reio),
-                    'x_al':np.mean(Grid_xal),'Tk':np.mean(Grid_Temp),'x_HII':np.mean(Grid_xHII),
+                    'x_al':x_al,'Tk':Tk,'x_HII':x_HII,
                     'U': np.mean(U),'V': np.mean(V), 'x_coll':np.mean(Grid_xcoll),
                     'Xi_UV': Xi_UV, 'Xi_Ub': Xi_Ub, 'Xi_Vb': Xi_Vb,
                     'Xi_rV': Xi_rV, 'Xi_rU': Xi_rU, 'Xi_rb': Xi_rb,
                     'PS_UU': PS_UU ,'PS_VV': PS_VV ,'PS_bb': PS_bb , 'PS_UV': PS_UV,
                     'PS_Ub': PS_Ub,'PS_bV':PS_bV,'PS_dTb':PS_dTb,'PS_dTb_no_reio':PS_dTb_no_reio,
+                    'PS_dTb_Taylor':PS_dTb_Taylor,'dTb_fake':dTb_fake,
                     'PS_U_UV': PS_U_UV, 'PS_U_Ub': PS_U_Ub, 'PS_U_bV': PS_U_bV,
                     'PS_V_UV': PS_V_UV, 'PS_V_Ub': PS_V_Ub, 'PS_V_bV': PS_V_bV,
                     'PS_b_UV': PS_b_UV, 'PS_b_Ub': PS_b_Ub, 'PS_b_bV': PS_b_bV,
