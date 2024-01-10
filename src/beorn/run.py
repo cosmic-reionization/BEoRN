@@ -1862,13 +1862,14 @@ def compute_frac_non_lin_points(param, k_values=[0.1]):
             frac_nl_lyal[0] = len(np.where(field_lyal > 1)[0]) / nGrid ** 3
             frac_nl_Tk[0] = len(np.where(field_temp > 1)[0]) / nGrid ** 3
 
-            for ik, kk in enumerate(k_values):
-                Rsmoothing = np.pi / kk
-                smoothed_lyal = smooth_field(field_lyal, Rsmoothing, Lbox, nGrid)
-                smoothed_Tk = smooth_field(field_temp, Rsmoothing, Lbox, nGrid)
+            if len(k_values)>0:
+                for ik, kk in enumerate(k_values):
+                    Rsmoothing = np.pi / kk
+                    smoothed_lyal = smooth_field(field_lyal, Rsmoothing, Lbox, nGrid)
+                    smoothed_Tk = smooth_field(field_temp, Rsmoothing, Lbox, nGrid)
 
-                frac_nl_lyal[ik + 1] = len(np.where(smoothed_lyal > 1)[0]) / nGrid ** 3
-                frac_nl_Tk[ik + 1] = len(np.where(smoothed_Tk > 1)[0]) / nGrid ** 3
+                    frac_nl_lyal[ik + 1] = len(np.where(smoothed_lyal > 1)[0]) / nGrid ** 3
+                    frac_nl_Tk[ik + 1] = len(np.where(smoothed_Tk > 1)[0]) / nGrid ** 3
 
 
             k = np.concatenate((np.array([0]), np.array(k_values)))
