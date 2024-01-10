@@ -432,19 +432,31 @@ def initialise_mpi4py(param):
     Initialise the mpi4py parallelisation. Returns the rank, size, and com.
     """
 
-    from mpi4py import MPI
-    comm = MPI.COMM_WORLD
-
     if param.sim.cores > 1:
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
         import mpi4py.MPI
         rank = mpi4py.MPI.COMM_WORLD.Get_rank()
         size = mpi4py.MPI.COMM_WORLD.Get_size()
     else:
+        comm = None
         rank = 0
         size = 1
 
     return comm, rank, size
 
+def Barrier(comm):
+    """
+    Parameters
+    ----------
+    comm : Either None, either MPI.COMM_WORLD.
+
+    Returns
+    ----------
+    Just to avoid error when running BEoRN on a laptop without mpi4py
+    """
+    if comm is not None:
+        comm.Barrier()
 
 
 
@@ -506,3 +518,10 @@ def gather_files(param, path, z_arr, Ncell):
     dd['k'] = data_z['k']
 
     save_f(file= path + str(Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
+
+
+
+
+
+
+

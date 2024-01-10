@@ -38,6 +38,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
     following their evolution from cosmic dawn to the end of reionization. It stores the profile in a directory "./profiles"
     """
 
+
     comm, rank, size = initialise_mpi4py(param)
 
     if rank == 0:
@@ -1635,6 +1636,7 @@ def investigate_expansion(param):
 
             #### dTb with Taylor expansion
             Tk, x_tot, x_al, x_HII = np.mean(Grid_Temp), np.mean(Grid_xtot), np.mean(Grid_xal), np.mean(Grid_xHII)
+
             beta_r, beta_T, beta_a = -x_HII / (1 - x_HII), T_cmb(z) / (Tk - T_cmb(z)), x_al / x_tot / (1 + x_tot)
             dTb_fake = dTb_fct(z, Tk, x_tot, 0, x_HII, param)
             grid_dTb_Taylor = dTb_fake * (1 + delta_b) * (1+ beta_r * delta_xHII) * (1 + beta_a * delta_fct(Grid_xal)) \
@@ -1813,6 +1815,79 @@ def investigate_expansion(param):
         print('Finished calculating U, V, delta_b auto and cross power spectra. It took in total: ', end_time - start_time)
         print('  ')
 
+
+
+
+
+
+
+###COMPUTING THE FRACTION OF POINTS IN LYAL AND Tk THAT MAKE THE TAYLOR EXP WRONG.
+
+def compute_frac_non_lin_points(param, k_values=[0.1]):
+    # k_values : value to smooth the field in h/Mpc
+    # Dictionnary output contains :
+    # frac_nl_lyal :
+    #     2d array of shape (zz,k_values+1). Containing fraction of points such that xal/(1+xal)*dxal >1
+    #     first k value is the unsmoothed field, the other are smoothed over scale k
+    # frac_nl_temp :  same but for delta_T
+
+    start_time = time.time()
+    print('Computing fractions of points where Taylor exp is not valid.')
+
+    comm, rank, size = initialise_mpi4py(param)
+
+    z_arr = def_redshifts(param)
+    Ncell, Lbox = param.sim.Ncell, param.sim.Lbox
+    nGrid = Ncell
+
+    for ii, z in enumerate(z_arr):
+        z = np.round(z, 2)
+        z_str = z_string_format(z)
+        if rank == ii % size:
+            print('Core nbr', rank, 'is taking care of z = ', z)
+            print('----- Going for z =', z, '-------')
+            # read in grids
+            Grid_Temp = load_grid(param, z=z, type='Tk')
+            Grid_xal = load_grid(param, z=z, type='lyal')
+            xal = np.mean(Grid_xal)
+
+            # the array containing the fraction of points for k=0, and then kvalues
+            frac_nl_lyal = np.zeros((len(k_values) + 1))
+            frac_nl_Tk = np.zeros((len(k_values) + 1))
+
+            ##define the fields that have to be <<1 for the Taylor exp to be valid
+            field_lyal = xal / (1 + xal) * delta_fct(Grid_xal)
+            field_temp = delta_fct(Grid_Temp)
+
+            frac_nl_lyal[0] = len(np.where(field_lyal > 1)[0]) / nGrid ** 3
+            frac_nl_Tk[0] = len(np.where(field_temp > 1)[0]) / nGrid ** 3
+
+            for ik, kk in enumerate(k_values):
+                Rsmoothing = np.pi / kk
+                smoothed_lyal = smooth_field(field_lyal, Rsmoothing, Lbox, nGrid)
+                smoothed_Tk = smooth_field(field_temp, Rsmoothing, Lbox, nGrid)
+
+                frac_nl_lyal[ik + 1] = len(np.where(smoothed_lyal > 1)[0]) / nGrid ** 3
+                frac_nl_Tk[ik + 1] = len(np.where(smoothed_Tk > 1)[0]) / nGrid ** 3
+
+
+            k = np.concatenate((np.array([0]), np.array(k_values)))
+            Dict = {'z': z, 'frac_nl_lyal': frac_nl_lyal, 'frac_nl_Tk': frac_nl_Tk, 'k':k}
+
+            save_f(file='./physics/frac_nl_points_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
+                   obj=Dict)
+            print('----- Done for z =', z, '-------')
+
+    #comm.Barrier()
+    Barrier(comm)
+
+    if rank == 0:
+        gather_files(param, path='./physics/frac_nl_points_', z_arr=z_arr, Ncell=Ncell)
+
+        end_time = time.time()
+        print('Finished calculating the fraction of points that are non linear for lyal and Tk. It took in total: ',
+              end_time - start_time)
+        print('  ')
 
 
 
