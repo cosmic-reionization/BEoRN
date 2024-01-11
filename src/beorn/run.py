@@ -1855,7 +1855,7 @@ def investigate_Tylor_no_reio(param):
             Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
             Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * x_coll_coef(z,param))
             Grid_xtot  = Grid_xal + Grid_xcoll
-
+            PS_bb, kk = auto_PS(delta_b, box_dims=Lbox, kbins=kbins)
             Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]), param=param)
 
             U = Grid_xtot/(1+Grid_xtot)
