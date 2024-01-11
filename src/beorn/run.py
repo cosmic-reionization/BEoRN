@@ -374,8 +374,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                              kbins=def_k_bins(param))
     PS_dTb_no_reio, k_bins = auto_PS(delta_fct(Grid_dTb_no_reio), box_dims=LBox,
                                      kbins=def_k_bins(param))
-    PS_rho_dTb = cross_PS(delta_fct(Grid_dTb),delta_b, box_dims=LBox,
-                                     kbins=def_k_bins(param))[0]
+
 
     if not RSD:
         dTb_RSD_mean = 0
@@ -395,11 +394,13 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
                   'PS_dTb': PS_dTb, 'k': k_bins,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
-                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio),
-                  'PS_rho_dTb':PS_rho_dTb}
+                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio)}
     if cross_corr:
-        GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_b,
+        GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal,Grid_dTb, delta_b,
                                                 third_order=third_order,fourth_order=fourth_order,truncate=truncate)
+
+
+
     save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
 
     if variance:
@@ -658,7 +659,7 @@ def compute_GS(param, string='', RSD=False, ion='bubbles'):
 
 
 
-def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, delta_rho, third_order=False, fourth_order=False, truncate = False):
+def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal, Grid_dTb, delta_rho, third_order=False, fourth_order=False, truncate = False):
     nGrid = param.sim.Ncell
     Lbox = param.sim.Lbox  # Mpc/h
 
@@ -719,9 +720,13 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
     PS_T_xHII = cross_PS(delta_T, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
     PS_lyal_xHII = cross_PS(delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
 
+    PS_rho_dTb = cross_PS(delta_fct(Grid_dTb), delta_rho, box_dims=Lbox,
+                          kbins=kbins)[0]
+
+
     dict_cross_corr = {'PS_xHII': PS_xHII, 'PS_T': PS_T, 'PS_xal': PS_xal, 'PS_rho': PS_rho, 'PS_T_lyal': PS_T_lyal,
                        'PS_T_xHII': PS_T_xHII, 'PS_lyal_xHII': PS_lyal_xHII, 'PS_rho_xHII': PS_rho_xHII,
-                       'PS_rho_xal': PS_rho_xal, 'PS_rho_T': PS_rho_T}
+                       'PS_rho_xal': PS_rho_xal, 'PS_rho_T': PS_rho_T,'PS_rho_dTb': PS_rho_dTb}
 
     if third_order:
         PS_ra_a = cross_PS(delta_XHII * delta_x_al, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
@@ -1870,6 +1875,7 @@ def investigate_Tylor_no_reio(param):
             dTb_fake = dTb_fct(z, Tk, x_tot, 0, x_HII, param)
             grid_dTb_Taylor = dTb_fake * (1 + delta_b) * (1+ beta_r * delta_xHII) * (1 + beta_a * delta_fct(Grid_xal)) \
                                         * (1 + beta_T * delta_fct(Grid_Temp))
+
             PS_dTb_Taylor = auto_PS(delta_fct(grid_dTb_Taylor), box_dims=Lbox, kbins=kbins)[0]
 
             dTb_fake_no_reio = dTb_fct(z, Tk, x_tot, 0, 0, param)
