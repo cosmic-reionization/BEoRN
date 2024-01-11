@@ -33,7 +33,7 @@ def load_halo(param, z_str):
 
     for dim in ['X','Y','Z']:
         # in case you want to do High rez on a sub box of your Nbody sim
-        indices = np.intersect1d(indices,np.where(halo_catalog[dim][indices] < param.sim.Lbox))
+        indices = np.intersect1d(indices,np.where(halo_catalog[dim] < param.sim.Lbox))
 
     # remove halos not forming stars
     halo_catalog['M'] = halo_catalog['M'][indices]
