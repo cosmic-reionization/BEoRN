@@ -27,15 +27,16 @@ def load_halo(param, z_str):
     z is the redshift of the snapshot (outupt of z_string_format)
     """
     catalog_dir = param.sim.halo_catalogs
+    Lbox = param.sim.Lbox
     catalog = catalog_dir + z_str
     halo_catalog = load_f(catalog)
     indices = np.intersect1d(np.where(halo_catalog['M'] > param.source.M_min),np.where(halo_catalog['M'] < param.source.M_max))
 
     # remove halos not forming stars
     halo_catalog['M'] = halo_catalog['M'][indices]
-    halo_catalog['X'] = halo_catalog['X'][indices]
-    halo_catalog['Y'] = halo_catalog['Y'][indices]
-    halo_catalog['Z'] = halo_catalog['Z'][indices]
+    halo_catalog['X'] = halo_catalog['X'][indices]%Lbox
+    halo_catalog['Y'] = halo_catalog['Y'][indices]%Lbox
+    halo_catalog['Z'] = halo_catalog['Z'][indices]%Lbox
 
     return halo_catalog
 
