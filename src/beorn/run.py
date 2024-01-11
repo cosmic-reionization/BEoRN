@@ -1872,8 +1872,8 @@ def investigate_Tylor_no_reio(param):
                                         * (1 + beta_T * delta_fct(Grid_Temp))
             PS_dTb_Taylor = auto_PS(delta_fct(grid_dTb_Taylor), box_dims=Lbox, kbins=kbins)[0]
 
-
-            grid_dTb_Taylor_no_rieo = dTb_fake * (1 + delta_b)  * (1 + beta_a * delta_fct(Grid_xal)) \
+            dTb_fake_no_reio = dTb_fct(z, Tk, x_tot, 0, 0, param)
+            grid_dTb_Taylor_no_rieo = dTb_fake_no_reio * (1 + delta_b)  * (1 + beta_a * delta_fct(Grid_xal)) \
                               * (1 + beta_T * delta_fct(Grid_Temp))
             PS_dTb_Taylor_no_reio = auto_PS(delta_fct(grid_dTb_Taylor_no_rieo), box_dims=Lbox, kbins=kbins)[0]
 
@@ -1887,7 +1887,7 @@ def investigate_Tylor_no_reio(param):
                     'U': np.mean(U),'V': np.mean(V), 'x_coll':np.mean(Grid_xcoll),
                     'PS_dTb':PS_dTb,'PS_dTb_no_reio':PS_dTb_no_reio,
                     'PS_dTb_Taylor':PS_dTb_Taylor,'dTb_fake':dTb_fake, 'dTb_Taylor':np.mean(grid_dTb_Taylor),
-                    'PS_dTb_Taylor_no_reio':PS_dTb_Taylor_no_reio,'dTb_Taylor_no_reio':np.mean(grid_dTb_Taylor_no_rieo)}
+                    'PS_dTb_Taylor_no_reio':PS_dTb_Taylor_no_reio,'dTb_fake_no_reio':dTb_fake_no_reio,'dTb_Taylor_no_reio':np.mean(grid_dTb_Taylor_no_rieo)}
 
             save_f(file='./physics/Taylor_no_reio_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
