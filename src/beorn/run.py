@@ -237,6 +237,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                         ### We count with np.unique the number of halos in each cell. Then we do not have to loop over halo positions in --> profiles_on_grid/put_profiles_group
                         # base_nGrid_position = Pos_Halos_Grid[indices][:, 0] + nGrid * Pos_Halos_Grid[indices][:,1] + nGrid ** 2 * Pos_Halos_Grid[ indices][:,2]
                         # unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
+
                         unique_base_nGrid_poz, nbr_of_halos = cumulated_number_halos(param, H_X[indices], H_Y[indices], H_Z[indices], cic=cic)
 
                         ZZ_indice = unique_base_nGrid_poz // (nGrid ** 2)
@@ -259,8 +260,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                 renorm = np.trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (
                                         LBox / (1 + z)) ** 3 / np.mean(kernel_xHII)
                                 # extra_ion = put_profiles_group(Pos_Halos_Grid[indices], kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(kernel_xHII) / 1e-7 * renorm
-
-                                # extra_ion
                                 Grid_xHII_i += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
                                                                   nbr_of_halos,
                                                                   kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(
@@ -270,7 +269,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                 # Grid_xHII_i += extra_ion
 
                             del kernel_xHII
-
                         if lyal:
                             ### We use this stacked_kernel functions to impose periodic boundary conditions when the lyal or T profiles extend outside the box size. Very important for Lyman-a.
                             kernel_xal = stacked_lyal_kernel(r_lyal * (1 + z), x_alpha_prof, LBox, nGrid,
@@ -348,24 +346,22 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 #Grid_xHII = smooth_field(Grid_xHII, Rsmoothing, LBox, nGrid)
                 #delta_b   = smooth_field(delta_b, Rsmoothing, LBox, nGrid)
 
+
+            if xcoll:
+                print('--- Including xcoll fluctuations in dTb ---')
+                Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
+                xcoll_mean = np.mean(Grid_xcoll)
+                Grid_xtot = Grid_xcoll + Grid_xal
+                del Grid_xcoll
+            else:
+                print('--- NOT including xcoll fluctuations in dTb ---')
+                xcoll_mean = x_coll(z=z, Tk=np.mean(Grid_Temp), xHI=(1 - np.mean(Grid_xHII)), rho_b=coef)
+                Grid_xtot = Grid_xal + xcoll_mean
+
+
             if dTb:
-
-                if xcoll:
-                    print('--- Including xcoll fluctuations in dTb ---')
-                    Grid_xcoll = x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
-                    xcoll_mean = np.mean(Grid_xcoll)
-                    Grid_xtot = Grid_xcoll + Grid_xal
-                    del Grid_xcoll
-                else:
-                    print('--- NOT including xcoll fluctuations in dTb ---')
-                    xcoll_mean = x_coll(z=z, Tk=np.mean(Grid_Temp), xHI=(1 - np.mean(Grid_xHII)), rho_b=coef)
-                    Grid_xtot = Grid_xal + xcoll_mean
-
-
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
                 Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]),param=param)
-
-
             else :
                 Grid_dTb = np.array([0])
                 Grid_dTb_no_reio = np.array([0])
