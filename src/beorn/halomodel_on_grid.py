@@ -160,8 +160,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                             if not np.any(kernel_xHII > 0):
                                 ### if the bubble volume is smaller than the grid size,we paint central cell with ion fraction value
                                 Grid_xHII_i[XX_indice, YY_indice, ZZ_indice] += np.trapz(
-                                    x_HII_profile * 4 * np.pi * r_reio ** 2, r_reio) / (LBox / nGrid / (
-                                        1 + z)) ** 3 * nbr_of_halos
+                                    x_HII_profile * 4 * np.pi * r_reio ** 2, r_reio) / (LBox / nGrid) ** 3 * nbr_of_halos
 
                             else:
                                 renorm = np.trapz(x_HII_profile * 4 * np.pi * r_reio ** 2, r_reio) / (
