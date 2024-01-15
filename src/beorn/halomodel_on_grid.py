@@ -119,8 +119,9 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                 Grid_xHII = np.zeros((nGrid, nGrid, nGrid))
                 Grid_Temp = np.zeros((nGrid, nGrid, nGrid))
                 Grid_xal = np.zeros((nGrid, nGrid, nGrid))
+                Grid_xHII_i = np.zeros((nGrid, nGrid, nGrid))
 
-
+                V_reio = 0
                 for i in range(len(M_Bin)):
                     indices = np.where(Indexing == i)[0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
 
@@ -146,6 +147,31 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                         XX_indice = (unique_base_nGrid_poz - ZZ_indice * nGrid ** 2 - YY_indice * nGrid)
 
                         ## Every halos in mass bin i are assumed to have mass M_bin[i].
+                        if ion:
+                            r_reio,x_HII_profile = HM_PS['r_reio'],HM_PS['rho_reio'][ind_z,:,i]
+                            profile_xHII = interp1d(r_reio, x_HII_profile, bounds_error=False,
+                                                    fill_value=(1, 0))
+                            kernel_xHII = profile_to_3Dkernel(profile_xHII, nGrid, LBox)
+
+                          #  V_bubble = 4*np.pi*np.trapz(x_HII_profile*r_reio**2,r_reio)
+                           # print('V_bubble is :',V_bubble)
+                           # V_reio += np.sum(nbr_of_halos)*V_bubble
+
+                            if not np.any(kernel_xHII > 0):
+                                ### if the bubble volume is smaller than the grid size,we paint central cell with ion fraction value
+                                Grid_xHII_i[XX_indice, YY_indice, ZZ_indice] += np.trapz(
+                                    x_HII_profile * 4 * np.pi * r_reio ** 2, r_reio) / (LBox / nGrid / (
+                                        1 + z)) ** 3 * nbr_of_halos
+
+                            else:
+                                renorm = np.trapz(x_HII_profile * 4 * np.pi * r_reio ** 2, r_reio) / (
+                                        LBox) ** 3 / np.mean(kernel_xHII)
+                             #   print('renorm for reio is ',renorm)
+                                Grid_xHII_i += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),nbr_of_halos,
+                                       kernel_xHII * 1e-7 / np.sum(kernel_xHII)) * np.sum(kernel_xHII) / 1e-7 * renorm
+                            del kernel_xHII
+
+
                         if lyal:
                             ### We use this stacked_kernel functions to impose periodic boundary conditions when the lyal or T profiles extend outside the box size. Very important for Lyman-a.
                             kernel_xal = stacked_lyal_kernel(r_lyal, x_alpha_prof, LBox, nGrid,
@@ -154,7 +180,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                                     LBox) ** 3 / np.mean(kernel_xal)
 
                             M_a = np.trapz(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal)
-                            print('Renorm for lyal is :',renorm)
+                            #print('Renorm for lyal is :',renorm)
 
                             if np.any(kernel_xal > 0):
                                 Grid_xal += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
@@ -170,7 +196,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                                                         nGrid_min=param.sim.nGrid_min_heat)
                             renorm = np.trapz(Temp_profile * 4 * np.pi * r_temp ** 2, r_temp) / (
                                     LBox ) ** 3 / np.mean(kernel_T)
-                            print('Renorm for Tk is :', renorm)
+                            #print('Renorm for Tk is :', renorm)
                             if np.any(kernel_T > 0):
                                 # Grid_Temp += put_profiles_group(Pos_Halos_Grid[indices],  kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(kernel_T) / 1e-7 * renorm
                                 Grid_Temp += put_profiles_group(np.array((XX_indice, YY_indice, ZZ_indice)),
@@ -178,15 +204,26 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                                                                 kernel_T * 1e-7 / np.sum(kernel_T)) * np.sum(
                                     kernel_T) / 1e-7 * renorm
                             del kernel_T
-                            print('MEAN GRID TEMP IS :',np.mean(Grid_Temp))
+                            #print('MEAN GRID TEMP IS :',np.mean(Grid_Temp))
 
                         end_time = time.time()
                         print(len(indices), 'halos in mass bin ', i,
                               '. It took ' + print_time(end_time - start_time) + ' to paint the profiles.')
 
                 print('.... Done painting profiles. ')
+               # print('V reio total is ',V_reio)
 
                 # Grid_Storage = np.copy(Grid_xHII_i)
+                t_start_spreading = time.time()
+                if np.sum(Grid_xHII_i) < nGrid ** 3 and ion:
+                    Grid_xHII = Spreading_Excess_Fast(param, Grid_xHII_i)
+                else:
+                    Grid_xHII = np.array([1])
+
+                print('MEAN Grid_xHII is ',np.mean(Grid_xHII))
+
+                print('.... Done. It took:', print_time(time.time() - t_start_spreading),
+                      'to redistribute excess photons from the overlapping regions.')
 
                 if np.all(Grid_xHII == 0):
                     Grid_xHII = np.array([0])
