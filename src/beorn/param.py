@@ -23,9 +23,23 @@ def source_par():
 
         "E_min_xray": 500,
         "E_max_xray": 2000,              # energy cutoff for the xray band.
-
         "alS_xray": 2.5,                 ##PL sed Xray part N ~ nu**-alS [nbr of photons/s/Hz]
         "cX":  3.4e40,                   # Xray normalization [(erg/s) * (yr/Msun)] (astro-ph/0607234 eq22)
+
+
+
+        ### To compare to Licorice
+        "xray_type": "PL",  # Can be PL (power-law) or Licorice
+        "fX_AGN": 0.4 * 0.1 ,
+        "fX_XRB": 0.6 * 0.1  ,
+        "sed_XRB":None    ,    ## 2d array containing energy and  sed normalized to 1 (eV, sed)
+        "f_esc_type": 'cst' , ## cst : redshift indep. Licorice : 2 valeurs en fonction du z.
+        "z_thresh_f_esc":None, ## redshif at which the escape fraction changes value.
+        "min_xHII":0, ## set all pixels where xHII=0 to this value
+
+
+        "E_min_sed_xray": 500,  # minimum energy of normalization of xrays in eV
+        "E_max_sed_xray": 2000,  # minimum energy of normalization of xrays in eV
 
         "N_al"    : 9690,                # nbr of lyal photons per baryons in stars
         "alS_lyal": 1.001,               ## PL for lyal
@@ -47,6 +61,11 @@ def source_par():
     }
 
     return Bunch(par)
+
+
+
+
+
 
 def solver_par():
     par = {
@@ -79,8 +98,11 @@ def sim_par(): ## used when computing and painting profiles on a grid
         "thresh_pixel" : None,      ## when spreading the excess ionisation fraction, we treat all the connected regions with less that "thresh_pixel" as a single connected region(to speed up)
         "approx" : True,            ## when spreading the excess ionisation fraction and running distance_tranform_edt, whether or not to do the subgrid approx.
         "nGrid_min_heat": 4,             ## stacked_T_kernel
-        "nGrid_min_lyal": 32,            ## stacked_lyal_kernel
+        "nGrid_min_lyal": 16,            ## stacked_lyal_kernel
         "random_seed": 12345,            ## when using 21cmFAST 2LPT solver.
+
+        "T_saturated":False, ## If True, we will assum Tk>>Tcmb
+        "reio": True,        ## If False, we will assume xHII = 0
     }
     return Bunch(par)
 
@@ -96,7 +118,7 @@ def cosmo_par():
     'ns': 0.96,
     'ps': pkg_resources.resource_filename('beorn', "files/PCDM_Planck.dat"),      ### This is the path to the input Linear Power Spectrum
     'corr_fct' : pkg_resources.resource_filename('beorn', "files/corr_fct.dat"),  ### This is the path where the corresponding correlation function will be stored. You can change it to anything.
-    'HI_frac' : 1-0.08,       # fraction of Helium. Only used when running H_He_Final. 1-fraction is Helium then.  0.2453 of total mass is in He according to BBN, so in terms of number density it is  1/(1+4*(1-f_He_bymass)/f_He_bymass)  ~0.075.
+    'HI_frac' : 1-0.08,       # fraction of HI. Only used when running H_He_Final. 1-fraction is Helium then.  0.2453 of total mass is in He according to BBN, so in terms of number density it is  1/(1+4*(1-f_He_bymass)/f_He_bymass)  ~0.075.
     "clumping" : 1,         # to rescale the background density. set to 1 to get the normal 2h profile term.
     "z_decoupl" : 135,      # redshift at which the gas decouples from CMB and starts cooling adiabatically according to Tcmb0*(1+z)**2/(1+zdecoupl)
     }

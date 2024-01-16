@@ -220,6 +220,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 Grid_Temp = np.zeros((nGrid, nGrid, nGrid))
                 Grid_xal = np.zeros((nGrid, nGrid, nGrid))
 
+
                 for i in range(len(M_Bin)):
                     indices = np.where(Indexing == i)[0]  ## indices in H_Masses of halos that have an initial mass at z=z_start between M_Bin[i-1] and M_Bin[i]
                     Mh_ = grid_model.Mh_history[ind_z, i]
@@ -231,6 +232,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                         R_bubble, rho_alpha_, Temp_profile = average_profile(param, grid_model, H_Masses[indices],ind_z, i)
                         x_HII_profile[np.where(radial_grid < R_bubble / (1 + zgrid))] = 1  # grid_model.R_bubble[ind_z, i]
                         # Temp_profile = grid_model.rho_heat[ind_z, :, i]
+
 
                         r_lyal = grid_model.r_lyal  # np.logspace(-5, 2, 1000, base=10)     ##    physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
                         # rho_alpha_ = grid_model.rho_alpha[ind_z, :, i]  # rho_alpha(r_lyal, Mh_, zgrid, param)[0]
@@ -327,10 +329,17 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
                 Grid_Temp += T_adiab_fluctu(z, param, delta_b)
 
+
             if read_temp:
                 Grid_Temp = load_grid(param, z=z, type='Tk')
+            if param.sim.T_saturated :
+                Grid_Temp = np.array([1e50])
+
             if read_ion:
                 Grid_xHII = load_grid(param, z=z, type='bubbles')
+            if not param.sim.reio :
+                Grid_xHII = np.array([0])
+
             if read_lyal:
                 Grid_xal = load_grid(param, z=z, type='lyal')
             else:
@@ -393,7 +402,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
                   'PS_dTb': PS_dTb, 'k': k_bins,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
-                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(q)}
+                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio)}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal,Grid_dTb, delta_b,
                                                 third_order=third_order,fourth_order=fourth_order,truncate=truncate)
