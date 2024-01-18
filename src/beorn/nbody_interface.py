@@ -54,7 +54,7 @@ class HaloCataloguePkdgrav3(ReaderPkdgrav3):
             Omega_m=0.31, rho_c=2.77536627e11, verbose=True):
         super().__init__(box_len, nGrid, Omega_m, rho_c, verbose)
 
-    def read_fof_data(self, filename, z):
+    def read_fof_data(self, filename, z, dtype=None):
         BOX  = self.box_len
         GRID = self.nGrid
         OMEGA_MAT = self.Omega_m
@@ -68,26 +68,27 @@ class HaloCataloguePkdgrav3(ReaderPkdgrav3):
         self.dMassFac = dMassFac
         self.dVelFac  = dVelFac
 
-        dtype = np.dtype([
-            ('rPot', '<f4', (3,)),
-            ('minPot', '<f4'),
-            ('rcen', '<f4', (3,)),
-            ('rcom', '<f4', (3,)),
-            ('vcom', '<f4', (3,)),
-            ('angular', '<f4', (3,)),
-            ('inertia', '<f4', (6,)),
-            ('sigma', '<f4'),
-            ('rMax', '<f4'),
-            ('fMass', '<f4'),
-            ('fEnvironDensity0', '<f4'),
-            ('fEnvironDensity1', '<f4'),
-            ('rHalf', '<f4'),
-            ('nBH', '<i4'),
-            ('nStar', '<i4'),
-            ('nGas', '<i4'),
-            ('nDM', '<i4'),
-            ('iGlobalGid', '<u8')
-        ])
+        if dtype is None:
+            dtype = np.dtype([
+                ('rPot', '<f4', (3,)),
+                ('minPot', '<f4'),
+                ('rcen', '<f4', (3,)),
+                ('rcom', '<f4', (3,)),
+                ('vcom', '<f4', (3,)),
+                ('angular', '<f4', (3,)),
+                ('inertia', '<f4', (6,)),
+                ('sigma', '<f4'),
+                ('rMax', '<f4'),
+                ('fMass', '<f4'),
+                ('fEnvironDensity0', '<f4'),
+                ('fEnvironDensity1', '<f4'),
+                ('rHalf', '<f4'),
+                # ('nBH', '<i4'),
+                # ('nStar', '<i4'),
+                # ('nGas', '<i4'),
+                # ('nDM', '<i4'),
+                # ('iGlobalGid', '<u8')
+            ])
 
         data = np.fromfile(filename, dtype=dtype)
         self.fof_data = data
@@ -108,9 +109,11 @@ class HaloCataloguePkdgrav3(ReaderPkdgrav3):
                 vel = [dVelFac * g['vcom'][j] for j in range(3)]
                 fMass = dMassFac * g['fMass']
                 if dtype in ['str','string',str]: 
-                    line = f"{fMass} {pos[0]:20.14f} {pos[1]:20.14f} {pos[2]:20.14f} {g['iGlobalGid']}"
+                    # line = f"{fMass} {pos[0]:20.14f} {pos[1]:20.14f} {pos[2]:20.14f} {g['iGlobalGid']}"
+                    line = f"{fMass} {pos[0]:20.14f} {pos[1]:20.14f} {pos[2]:20.14f}"
                 else:
-                    line = np.array([fMass,pos[0],pos[1],pos[2],g['iGlobalGid']]).astype(dtype)
+                    # line = np.array([fMass,pos[0],pos[1],pos[2],g['iGlobalGid']]).astype(dtype)
+                    line = np.array([fMass,pos[0],pos[1],pos[2]]).astype(dtype)
                 # print(line)
                 str_data.append(line)
             str_data = np.array(str_data)
