@@ -346,7 +346,7 @@ def load_pkdgrav_density_field(file, LBox):
     pkd = pkd.T  ### take the transpose to match X_ion map coordinates
     V_total = LBox ** 3
     V_cell = (LBox / nGrid) ** 3
-    mass = pkd * rhoc0 * V_total
+    mass = (1+pkd) * rhoc0 * V_total
     rho_m = mass / V_cell
     delta_b = (rho_m) / np.mean(rho_m) - 1
     return delta_b
