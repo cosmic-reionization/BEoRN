@@ -387,6 +387,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             else :
                 Grid_dTb = np.array([0])
                 Grid_dTb_no_reio = np.array([0])
+                Grid_dTb_T_sat = np.array([0])
 
     PS_dTb, k_bins = auto_PS(delta_fct(Grid_dTb), box_dims=LBox,
                              kbins=def_k_bins(param))
@@ -1919,7 +1920,7 @@ def investigate_Tylor_no_reio(param):
             save_f(file='./physics/Taylor_no_reio_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
             print('----- Done for z =', z, '-------')
-
+q
     Barrier(comm)
 
     if rank == 0:
