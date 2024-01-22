@@ -1920,7 +1920,7 @@ def investigate_Tylor_no_reio(param):
             save_f(file='./physics/Taylor_no_reio_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
             print('----- Done for z =', z, '-------')
-q
+
     Barrier(comm)
 
     if rank == 0:
