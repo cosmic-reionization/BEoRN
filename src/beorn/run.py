@@ -191,6 +191,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         Grid_dTb_no_reio = factor * np.sqrt(1 + z) * (1 - Tcmb0 * (1 + z) / Grid_Temp) * (delta_b + 1) *\
                            Grid_xcoll / (1 + Grid_xcoll)
         Grid_dTb_RSD = np.array([0])
+        Grid_dTb_T_sat = factor * np.sqrt(1 + z) * (1 - Grid_xHII) * (delta_b + 1) * Grid_xcoll / (1 + Grid_xcoll)
         xcoll_mean = np.mean(Grid_xcoll)
         del Grid_xcoll
 
