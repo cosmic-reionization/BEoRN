@@ -2012,3 +2012,61 @@ def compute_frac_non_lin_points(param, k_values=[0.1]):
 
 
 
+
+def investigate_expansion_mean_xcoll(param):
+
+    if not os.path.isdir('./physics'):
+        os.mkdir('./physics')
+
+    start_time = time.time()
+    print('Computing PS of xal/(1+xal).')
+
+    comm, rank, size = initialise_mpi4py(param)
+
+    kbins = def_k_bins(param)
+    z_arr = def_redshifts(param)
+    Ncell, Lbox = param.sim.Ncell, param.sim.Lbox
+    nGrid = Ncell
+
+    for ii, z in enumerate(z_arr):
+        z = np.round(z, 2)
+        z_str = z_string_format(z)
+        if rank == ii % size:
+            print('Core nbr', rank, 'is taking care of z = ', z)
+            print('----- Investigating expansion for z =', z, '-------')
+            Grid_Temp = load_grid(param, z=z, type='Tk')
+            Grid_xHII = load_grid(param, z=z, type='bubbles')
+            Grid_xal  = load_grid(param, z=z, type='lyal')
+            delta_b   = load_delta_b(param, z_str)
+            Grid_dTb  = load_grid(param, z=z, type='dTb')
+
+
+            Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
+            Grid_xcoll = x_coll(z=z, Tk=np.mean(Grid_Temp), xHI=(1 - np.mean(Grid_xHII)), rho_b= 1 * x_coll_coef(z,param))
+            Grid_xtot  = Grid_xal + Grid_xcoll
+
+            U = Grid_xtot/(1+Grid_xtot)
+            V = 1-T_cmb(z)/Grid_Temp
+
+            PS_UU,kk               = auto_PS(delta_fct(U), box_dims=Lbox, kbins=kbins)
+            PS_VV,kk               = auto_PS(delta_fct(V), box_dims=Lbox, kbins=kbins)
+
+            Dict = {'z': z, 'k': kk
+                    'U': np.mean(U),'V': np.mean(V),
+                    'PS_UU': PS_UU ,'PS_VV': PS_VV }
+
+            save_f(file='./physics/data_expansion_U_V_meanxcoll_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
+                   obj=Dict)
+            print('----- Done for z =', z, '-------')
+
+    comm.Barrier()
+
+    if rank == 0:
+        gather_files(param, path = './physics/data_expansion_U_V_meanxcoll_', z_arr = z_arr, Ncell = Ncell)
+
+        end_time = time.time()
+        print('Finished calculating U, V, delta_b auto and cross power spectra. It took in total: ', end_time - start_time)
+        print('  ')
+
+
+
