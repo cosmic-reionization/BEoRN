@@ -2051,7 +2051,7 @@ def investigate_expansion_mean_xcoll(param):
             PS_UU,kk               = auto_PS(delta_fct(U), box_dims=Lbox, kbins=kbins)
             PS_VV,kk               = auto_PS(delta_fct(V), box_dims=Lbox, kbins=kbins)
 
-            Dict = {'z': z, 'k': kk
+            Dict = {'z': z, 'k': kk,
                     'U': np.mean(U),'V': np.mean(V),
                     'PS_UU': PS_UU ,'PS_VV': PS_VV }
 
