@@ -1267,6 +1267,7 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
         if rank == ii % size:
             z_arr = def_redshifts(param)
             nGrid = param.sim.Ncell
+            z_str = z_string_format(z)
             file = './variances/var_z' + str(nGrid) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
             if not exists(file):
                 print('Core nbr', rank, 'is taking care of z = ', z)
@@ -2048,7 +2049,7 @@ def investigate_expansion_mean_xcoll(param):
 
 
             Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
-            Grid_xcoll = x_coll(z=z, Tk=np.mean(Grid_Temp), xHI=(1 - np.mean(Grid_xHII)), rho_b= 1 * x_coll_coef(z,param))
+            Grid_xcoll = np.mean(x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * x_coll_coef(z,param)))
             Grid_xtot  = Grid_xal + Grid_xcoll
 
             U = Grid_xtot/(1+Grid_xtot)
