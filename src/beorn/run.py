@@ -1265,6 +1265,7 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
     for ii, z in enumerate(z_arr):
         z = np.round(z, 2)
         if rank == ii % size:
+            file = './variances/var_z' + str(nGrid) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
             if not exists(file):
                 print('Core nbr', rank, 'is taking care of z = ', z)
                 print('----- Computing variance for z =', z, '-------')
@@ -1285,9 +1286,8 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
                 else : delta_b = None
 
 
-                compute_var_single_zcompute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins)
+                compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins)
                 print('----- Variance at z = ', z, ' is computed -------')
-                
             else :
                 continue
 
