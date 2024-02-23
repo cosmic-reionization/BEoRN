@@ -1265,6 +1265,8 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
     for ii, z in enumerate(z_arr):
         z = np.round(z, 2)
         if rank == ii % size:
+            z_arr = def_redshifts(param)
+            nGrid = param.sim.Ncell
             file = './variances/var_z' + str(nGrid) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
             if not exists(file):
                 print('Core nbr', rank, 'is taking care of z = ', z)
