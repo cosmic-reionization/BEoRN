@@ -2,6 +2,7 @@ numpy
 scipy
 matplotlib
 pytest
+cmasher
 
 # needed for readthedocs
 ipython
