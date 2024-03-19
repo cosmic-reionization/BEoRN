@@ -65,7 +65,7 @@ def create_data_dir(data_dir):
         os.mkdir(data_dir)
 
 
-def simulate_matter_21cmfast(param, IC=None, data_dir=None):
+def simulate_matter_21cmfast(param, redshift_list=None, IC=None, data_dir=None):
     import py21cmfast as p21c
     create_data_dir(data_dir)
 
@@ -87,13 +87,24 @@ def simulate_matter_21cmfast(param, IC=None, data_dir=None):
                                     )
 
     random_seed = param.sim.random_seed
-    print('random seed is : ', random_seed)
-    print('We will store halo catalogs in ', param.sim.halo_catalogs,'and density fields in ', param.sim.dens_field)
+    print('random seed: ', random_seed)
 
-    redshift_list = def_redshifts(param)
+    if redshift_list is None: 
+        redshift_list = def_redshifts(param)
 
-    if param.sim.dens_field  is None or param.sim.halo_catalogs is None:
-        print('You should specify a path for param.sim.dens_field and param.sim.halo_catalogs. It should be of the form path+dir+name. For instance param.sim.dens_field = ./dir_density/dens_21cmFast_z')
+    if param.sim.dens_field  is None:
+        print('We strongly advice to specify a path for param.sim.dens_field to write the densities.')
+        print('It should be of the form path+dir+name. For instance param.sim.dens_field = ./dir_density/dens_21cmFast_z')
+    else:
+        print('We will store the density fields in', param.sim.dens_field)
+    if param.sim.halo_catalogs is None:
+        print('We strongly advice to specify a path for param.sim.halo_catalogs to write the halo catalogues.') 
+        print('It should be of the form path+dir+name. For instance param.sim.dens_field = ./dir_density/dens_21cmFast_z')
+    else:
+        print('We will store halo catalogs in', param.sim.halo_catalogs) 
+    
+    dens_dict = {}
+    halo_catalog_dict = {}
     with p21c.global_params.use(INITIAL_REDSHIFT=300, CLUMPING_FACTOR=2.0):
         for redshift in redshift_list:
             if IC is None:
@@ -131,9 +142,16 @@ def simulate_matter_21cmfast(param, IC=None, data_dir=None):
                          'z': redshift, 'Lbox': Lbox
                          }
 
-            save_f(obj=dens, file=param.sim.dens_field + z_string_format(redshift) + '.0')
-            save_f(obj=halo_list, file=param.sim.halo_catalogs + z_string_format(redshift))
-
+            try:
+                save_f(obj=dens, file=param.sim.dens_field + z_string_format(redshift) + '.0')
+                save_f(obj=halo_list, file=param.sim.halo_catalogs + z_string_format(redshift))
+            except:
+                pass
+            # dens_dict[f'{redshift:05.2f}'] = dens
+            # halo_catalog_dict[f'{redshift:05.2f}'] = halo_list
+            dens_dict[redshift] = dens
+            halo_catalog_dict[redshift] = halo_list
 
     end_time = time.time()
     print('...done | Runtime =', print_time(end_time - start_time))
+    return {'dens': dens_dict, 'halo_list': halo_catalog_dict}

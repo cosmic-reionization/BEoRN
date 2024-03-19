@@ -122,7 +122,7 @@ def compute_profiles(param):
 
 def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
                               read_lyal=False, RSD=False, xcoll=True, S_al=True, cross_corr=False, third_order=False,fourth_order=False,
-                              cic=False, variance=False,Rsmoothing=0,truncate=False):
+                              cic=False, variance=False,Rsmoothing=0, truncate=False):
     """
     Paint the Tk, xHII and Lyman alpha profiles on a grid for a single halo catalog named filename.
 
@@ -146,13 +146,15 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     LBox = param.sim.Lbox  # Mpc/h
     nGrid = param.sim.Ncell  # number of grid cells
 
-    halo_catalog = load_halo(param, z_str)
+    try: halo_catalog = load_halo(param, z_str)
+    except: halo_catalog = param.sim.halo_catalogs[float(z_str)] #param.sim.halo_catalogs[z_str]
     H_Masses, H_X, H_Y, H_Z, z = halo_catalog['M'], halo_catalog['X'], halo_catalog['Y'], halo_catalog['Z'], \
                                  halo_catalog['z']
 
     ### To later add up the adiabatic Tk fluctuations at the grid level.
     if temp or dTb:
-        delta_b = load_delta_b(param, z_str)  # rho/rhomean-1
+        try: delta_b = load_delta_b(param, z_str)  # rho/rhomean-1
+        except: delta_b = param.sim.dens_fields[float(z_str)] #param.sim.dens_fields[z_str]
     else:
         delta_b = np.array([0])
 
@@ -508,7 +510,7 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
     model_name = param.sim.model_name
 
     if catalog_dir is None:
-        print('You should specify param.sim.halo_catalogs. Should be a file containing the rockstar halo catalogs.')
+        print('You should specify param.sim.halo_catalogs. Should be a file containing the halo catalogs.')
 
     print('Painting profiles on a grid with', nGrid, 'pixels per dim. Box size is', LBox, 'cMpc/h.')
 

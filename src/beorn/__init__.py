@@ -12,3 +12,4 @@ from .halo_finder import *
 #from .run_Ross19 import  *
 from .massaccretion import *
 from .plotting import *
+from .gravity import *
