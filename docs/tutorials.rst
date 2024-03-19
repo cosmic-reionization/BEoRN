@@ -10,3 +10,4 @@ The following examples will help you get started with ``beorn``:
    :caption: Examples:
 
    examples/Test_case_with_N_halos.ipynb
+   examples/post_process_Nbody.ipynb
