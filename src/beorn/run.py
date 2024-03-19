@@ -191,6 +191,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         Grid_dTb_no_reio = factor * np.sqrt(1 + z) * (1 - Tcmb0 * (1 + z) / Grid_Temp) * (delta_b + 1) *\
                            Grid_xcoll / (1 + Grid_xcoll)
         Grid_dTb_RSD = np.array([0])
+        Grid_dTb_T_sat = factor * np.sqrt(1 + z) * (1 - Grid_xHII) * (delta_b + 1) * Grid_xcoll / (1 + Grid_xcoll)
         xcoll_mean = np.mean(Grid_xcoll)
         del Grid_xcoll
 
@@ -209,6 +210,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             Grid_Temp = np.array([1])
             Grid_dTb = np.array([0])
             Grid_dTb_no_reio = np.array([0])
+            Grid_dTb_T_sat = np.array([0])
             Grid_xal = np.array([0])
             print('universe is fully inoinzed. Return [1] for the xHII, T and [0] for dTb.')
         else:
@@ -273,9 +275,16 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                                 # print('bubble volume is ', len(indices) * bubble_volume,'pMpc, grid volume is', np.sum(extra_ion)* (LBox /nGrid/ (1 + z)) ** 3 )
                                 # Grid_xHII_i += extra_ion
 
+                            # fill in empty pixels with the min xHII
+                            Grid_xHII_i[Grid_xHII_i<param.source.min_xHII] = param.source.min_xHII
+
                             del kernel_xHII
                         if lyal:
                             ### We use this stacked_kernel functions to impose periodic boundary conditions when the lyal or T profiles extend outside the box size. Very important for Lyman-a.
+                            if isinstance(truncate, float):
+                                # truncate below a certain radius
+                                x_alpha_prof[r_lyal * (1 + z)< truncate] = x_alpha_prof[r_lyal * (1 + z)< truncate][-1]
+
                             kernel_xal = stacked_lyal_kernel(r_lyal * (1 + z), x_alpha_prof, LBox, nGrid,
                                                              nGrid_min=param.sim.nGrid_min_lyal)
                             renorm = np.trapz(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal) / (
@@ -290,6 +299,9 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                             del kernel_xal
 
                         if temp:
+                            if isinstance(truncate, float):
+                                # truncate below a certain radius
+                                Temp_profile[radial_grid * (1 + z)< truncate] = Temp_profile[radial_grid * (1 + z)< truncate][-1]
                             kernel_T = stacked_T_kernel(radial_grid * (1 + z), Temp_profile, LBox, nGrid,
                                                         nGrid_min=param.sim.nGrid_min_heat)
                             renorm = np.trapz(Temp_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (
@@ -305,7 +317,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                         end_time = time.time()
                         print(len(indices), 'halos in mass bin ', i,
                               '. It took ' + print_time(end_time - start_time) + ' to paint the profiles.')
-
                 print('.... Done painting profiles. ')
 
                 print('Dealing with the overlap of ionised bubbles.... ')
@@ -374,13 +385,17 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             if dTb:
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
                 Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]),param=param)
+                Grid_dTb_T_sat = dTb_fct(z=z, Tk=1e50, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII,param=param)
             else :
                 Grid_dTb = np.array([0])
                 Grid_dTb_no_reio = np.array([0])
+                Grid_dTb_T_sat = np.array([0])
 
     PS_dTb, k_bins = auto_PS(delta_fct(Grid_dTb), box_dims=LBox,
                              kbins=def_k_bins(param))
     PS_dTb_no_reio, k_bins = auto_PS(delta_fct(Grid_dTb_no_reio), box_dims=LBox,
+                                     kbins=def_k_bins(param))
+    PS_dTb_T_sat, k_bins = auto_PS(delta_fct(Grid_dTb_T_sat), box_dims=LBox,
                                      kbins=def_k_bins(param))
 
 
@@ -402,7 +417,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
                   'PS_dTb': PS_dTb, 'k': k_bins,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
-                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio)}
+                  'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio),
+                  'PS_dTb_T_sat':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_T_sat)}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal,Grid_dTb, delta_b,
                                                 third_order=third_order,fourth_order=fourth_order,truncate=truncate)
@@ -685,7 +701,7 @@ def compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal
         Grid_xal = np.full((nGrid, nGrid, nGrid), 0)
 
 
-    if truncate :
+    if truncate is True:
         #xal = np.mean(Grid_xal)
         #Grid_xal[np.where(Grid_xal > 1 + 2 * xal)] = 1 + 2 * xal
         delta_x_al = delta_fct(Grid_xal)
@@ -1249,27 +1265,34 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
     for ii, z in enumerate(z_arr):
         z = np.round(z, 2)
         if rank == ii % size:
-            print('Core nbr', rank, 'is taking care of z = ', z)
-            print('----- Computing variance for z =', z, '-------')
-            if temp :
-                Grid_Temp = load_grid(param, z=z, type='Tk')
-            else : Grid_Temp = None
+            z_arr = def_redshifts(param)
+            nGrid = param.sim.Ncell
+            z_str = z_string_format(z)
+            file = './variances/var_z' + str(nGrid) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
+            if not exists(file):
+                print('Core nbr', rank, 'is taking care of z = ', z)
+                print('----- Computing variance for z =', z, '-------')
+                if temp :
+                    Grid_Temp = load_grid(param, z=z, type='Tk')
+                else : Grid_Temp = None
 
-            if ion:
-                Grid_xHII = load_grid(param, z=z, type='bubbles')
-            else : Grid_xHII = None
+                if ion:
+                    Grid_xHII = load_grid(param, z=z, type='bubbles')
+                else : Grid_xHII = None
 
-            if lyal :
-                Grid_xal  = load_grid(param, z=z, type='lyal')
-            else : Grid_xal = None
+                if lyal :
+                    Grid_xal  = load_grid(param, z=z, type='lyal')
+                else : Grid_xal = None
 
-            if rho_b:
-                delta_b   = load_delta_b(param, z_string_format(z))
-            else : delta_b = None
+                if rho_b:
+                    delta_b   = load_delta_b(param, z_string_format(z))
+                else : delta_b = None
 
 
-            compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins)
-            print('----- Variance at z = ', z, ' is computed -------')
+                compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins)
+                print('----- Variance at z = ', z, ' is computed -------')
+            else :
+                continue
 
     comm.Barrier()
 
@@ -1907,7 +1930,7 @@ def investigate_Tylor_no_reio(param):
                    obj=Dict)
             print('----- Done for z =', z, '-------')
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         gather_files(param, path = './physics/Taylor_no_reio_', z_arr = z_arr, Ncell = Ncell)
@@ -1993,6 +2016,64 @@ def compute_frac_non_lin_points(param, k_values=[0.1]):
 
 
 
+
+
+
+
+def investigate_expansion_mean_xcoll(param):
+
+    if not os.path.isdir('./physics'):
+        os.mkdir('./physics')
+
+    start_time = time.time()
+    print('Computing PS of xal/(1+xal).')
+
+    comm, rank, size = initialise_mpi4py(param)
+
+    kbins = def_k_bins(param)
+    z_arr = def_redshifts(param)
+    Ncell, Lbox = param.sim.Ncell, param.sim.Lbox
+    nGrid = Ncell
+
+    for ii, z in enumerate(z_arr):
+        z = np.round(z, 2)
+        z_str = z_string_format(z)
+        if rank == ii % size:
+            print('Core nbr', rank, 'is taking care of z = ', z)
+            print('----- Investigating expansion for z =', z, '-------')
+            Grid_Temp = load_grid(param, z=z, type='Tk')
+            Grid_xHII = load_grid(param, z=z, type='bubbles')
+            Grid_xal  = load_grid(param, z=z, type='lyal')
+            delta_b   = load_delta_b(param, z_str)
+            Grid_dTb  = load_grid(param, z=z, type='dTb')
+
+
+            Grid_Temp, Grid_xHII, Grid_xal = format_grid_for_PS_measurement(Grid_Temp, Grid_xHII, Grid_xal, nGrid)
+            Grid_xcoll = np.mean(x_coll(z=z, Tk=Grid_Temp, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * x_coll_coef(z,param)))
+            Grid_xtot  = Grid_xal + Grid_xcoll
+
+            U = Grid_xtot/(1+Grid_xtot)
+            V = 1-T_cmb(z)/Grid_Temp
+
+            PS_UU,kk               = auto_PS(delta_fct(U), box_dims=Lbox, kbins=kbins)
+            PS_VV,kk               = auto_PS(delta_fct(V), box_dims=Lbox, kbins=kbins)
+
+            Dict = {'z': z, 'k': kk,
+                    'U': np.mean(U),'V': np.mean(V),
+                    'PS_UU': PS_UU ,'PS_VV': PS_VV }
+
+            save_f(file='./physics/data_expansion_U_V_meanxcoll_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
+                   obj=Dict)
+            print('----- Done for z =', z, '-------')
+
+    comm.Barrier()
+
+    if rank == 0:
+        gather_files(param, path = './physics/data_expansion_U_V_meanxcoll_', z_arr = z_arr, Ncell = Ncell)
+
+        end_time = time.time()
+        print('Finished calculating U, V, delta_b auto and cross power spectra. It took in total: ', end_time - start_time)
+        print('  ')
 
 
 

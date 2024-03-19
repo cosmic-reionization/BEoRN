@@ -19,7 +19,7 @@ def log_binning(array1, array2):
 
      Returns
      -------
-     Return the indices of the bins (array2) to which each value in input array (array1) belongs, in logarithmic scale
+     Return the indices of the bins (array2) to which each value of input array (array1) belongs, in logarithmic scale
     """
 
     # np.argmin(np.abs(np.log10(Mh_[:, None] / Mh_history_HR[ind_z, :])), axis=1)
@@ -151,8 +151,6 @@ def cumulated_number_halos(param, H_X, H_Y, H_Z, cic=False):
 #            # a cumulated cic coeff of "cumulated_coeff"
 #        unique_base_nGrid_poz, nbr_of_halos = unique_positions, cumulated_coeff
 ########### this is the end of the slow version
-
-
     return unique_base_nGrid_poz, nbr_of_halos
 
 
@@ -637,7 +635,7 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
     return kernel_T_HM
 
 
-def profile_1D_ion(r, c1=2, c2=5):  #
+def sigmoid_fct(r, c1=2, c2=5):  #
     """
     1D ionization profile, sigmoid function. 1 when ionized, 0 when neutral.
 
@@ -649,3 +647,4 @@ def profile_1D_ion(r, c1=2, c2=5):  #
     """
     out = 1 - 1 / (1 + np.exp(-c1 * (np.abs(r) - c2)))
     return out
+

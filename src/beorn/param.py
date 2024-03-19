@@ -118,7 +118,7 @@ def cosmo_par():
     'ns': 0.96,
     'ps': pkg_resources.resource_filename('beorn', "files/PCDM_Planck.dat"),      ### This is the path to the input Linear Power Spectrum
     'corr_fct' : pkg_resources.resource_filename('beorn', "files/corr_fct.dat"),  ### This is the path where the corresponding correlation function will be stored. You can change it to anything.
-    'HI_frac' : 1-0.08,       # fraction of HI. Only used when running H_He_Final. 1-fraction is Helium then.  0.2453 of total mass is in He according to BBN, so in terms of number density it is  1/(1+4*(1-f_He_bymass)/f_He_bymass)  ~0.075.
+    'HI_frac' : 1-0.08,       # HI number fraction fraction of HI. Only used when running H_He_Final. 1-fraction is Helium then.  0.2453 of total mass is in He according to BBN, so in terms of number density it is  1/(1+4*(1-f_He_bymass)/f_He_bymass)  ~0.075.
     "clumping" : 1,         # to rescale the background density. set to 1 to get the normal 2h profile term.
     "z_decoupl" : 135,      # redshift at which the gas decouples from CMB and starts cooling adiabatically according to Tcmb0*(1+z)**2/(1+zdecoupl)
     }
