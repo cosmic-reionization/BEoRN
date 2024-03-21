@@ -24,7 +24,12 @@ def initialise_21cmfast(param, data_dir=None):
     IC, pslin, klin : The initial conditions, followed by the power spectrum of the matter field.
     """
 
-    import py21cmfast as p21c
+    try: 
+        import py21cmfast as p21c
+    except:
+        print('To use the density and halo catalogues from 21cmfast, install the python version of that code:')
+        print('https://21cmfast.readthedocs.io/en/latest/installation.html')
+        return None
 
     create_data_dir(data_dir)
 
@@ -66,7 +71,12 @@ def create_data_dir(data_dir):
 
 
 def simulate_matter_21cmfast(param, redshift_list=None, IC=None, data_dir=None):
-    import py21cmfast as p21c
+    try: 
+        import py21cmfast as p21c
+    except:
+        print('To use the density and halo catalogues from 21cmfast, install the python version of that code:')
+        print('https://21cmfast.readthedocs.io/en/latest/installation.html')
+        return None
     create_data_dir(data_dir)
 
     start_time = time.time()
