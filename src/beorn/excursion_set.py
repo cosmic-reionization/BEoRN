@@ -13,7 +13,7 @@ import datetime
 from os.path import exists
 from .astro import f_esc, f_star_Halo
 import warnings
-from .compute_profiles import Ngdot_ion
+from .computing_profiles import Ngdot_ion
 from .functions import *
 
 
