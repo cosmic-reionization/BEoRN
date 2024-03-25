@@ -294,7 +294,7 @@ def Beta(zz, PS, qty='Tk'):
         print('qty should be either Tk, lyal, or reio.')
 
 
-def cross_PS(arr1, arr2, box_dims, kbins):
+def cross_PS(arr1, arr2, box_dims, kbinload_grids):
     return t2c.power_spectrum.cross_power_spectrum_1d(arr1, arr2, box_dims=box_dims, kbins=kbins)
 
 
@@ -519,8 +519,9 @@ def gather_files(param, path, z_arr, Ncell):
     for key, value in dd.items():  # change lists to numpy arrays
         dd[key] = np.array(value)
 
-    dd['k'] = data_z['k']
-
+    if 'k' in dd:
+        dd['k'] = data_z['k']
+        
     save_f(file= path + str(Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
 
 
