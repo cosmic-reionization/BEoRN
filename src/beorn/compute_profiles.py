@@ -128,7 +128,7 @@ def Ngdot_ion(param, zz, Mh,dMh_dt):
 
     if (param.source.type == 'SED'):
        # dMh_dt = param.source.alpha_MAR * Mh * (zz + 1) * Hubble(zz, param)  ## [(Msol/h) / yr]
-        Ngam_dot_ion = dMh_dt / h0 * f_star_Halo(param, Mh) * Ob / Om * f_esc(param, Mh) * param.source.Nion / sec_per_year / m_H * M_sun
+        Ngam_dot_ion = dMh_dt / h0 * f_star_Halo(param, Mh) * Ob / Om * f_esc(param, Mh,zz) * param.source.Nion / sec_per_year / m_H * M_sun
         Ngam_dot_ion[np.where(Mh < param.source.M_min)] = 0
         return Ngam_dot_ion
     elif param.source.type == 'Ghara':

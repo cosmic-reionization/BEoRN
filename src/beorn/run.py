@@ -1456,6 +1456,7 @@ def compute_corr_fct(param):
 
     for ii, z in enumerate(z_arr):
         if rank == ii % size:
+            print('Core nbr', rank, 'is taking care of z = ', z)
             z_str = z_string_format(z)
             delta_xHII = delta_fct(load_grid(param, z=z, type='bubbles'))
             delta_Tk = delta_fct(load_grid(param, z=z, type='Tk'))
