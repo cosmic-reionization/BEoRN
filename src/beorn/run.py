@@ -1450,66 +1450,56 @@ def compute_corr_fct(param):
 
     start_time = time.time()
     print('Compute correlation functions of the fields, for r=0.')
-
     z_arr = def_redshifts(param)
-    Xi_TT = np.zeros((len(z_arr)))
-    Xi_aa = np.zeros((len(z_arr)))
-    Xi_Tb = np.zeros((len(z_arr)))
-    Xi_rT = np.zeros((len(z_arr)))
-    Xi_ar = np.zeros((len(z_arr)))
-    Xi_aT = np.zeros((len(z_arr)))
-    Xi_rb = np.zeros((len(z_arr)))
-    Xi_ab = np.zeros((len(z_arr)))
 
-    Xi_rba = np.zeros((len(z_arr)))
-    Xi_rbT = np.zeros((len(z_arr)))
-    Xi_raT = np.zeros((len(z_arr)))
-    Xi_raa = np.zeros((len(z_arr)))
-    Xi_rTT = np.zeros((len(z_arr)))
-
-    Xi_aTb = np.zeros((len(z_arr)))
-    Xi_aTrb = np.zeros((len(z_arr)))
-    Xi_aab = np.zeros((len(z_arr)))
-    Xi_aarb = np.zeros((len(z_arr)))
-    Xi_TTb = np.zeros((len(z_arr)))
-    Xi_TTrb = np.zeros((len(z_arr)))
+    comm, rank, size = initialise_mpi4py(param)
 
     for ii, z in enumerate(z_arr):
-        delta_xHII = delta_fct(load_grid(param, z=z, type='bubbles'))
-        delta_Tk = delta_fct(load_grid(param, z=z, type='Tk'))
-        delta_lyal = delta_fct(load_grid(param, z=z, type='lyal'))
-        delta_b = load_delta_b(param, z_string_format(z))
-        Xi_TT[ii] = np.mean(delta_Tk ** 2)
-        Xi_aa[ii] = np.mean(delta_lyal ** 2)
-        Xi_Tb[ii] = np.mean(delta_b * delta_Tk)
-        Xi_rT[ii] = np.mean(delta_xHII * delta_Tk)
-        Xi_ar[ii] = np.mean(delta_xHII * delta_lyal)
-        Xi_aT[ii] = np.mean(delta_Tk * delta_lyal)
-        Xi_rb[ii] = np.mean(delta_xHII * delta_b)
-        Xi_ab[ii] = np.mean(delta_b * delta_lyal)
+        if rank == ii % size:
+            z_str = z_string_format(z)
+            delta_xHII = delta_fct(load_grid(param, z=z, type='bubbles'))
+            delta_Tk = delta_fct(load_grid(param, z=z, type='Tk'))
+            delta_lyal = delta_fct(load_grid(param, z=z, type='lyal'))
+            delta_b = load_delta_b(param, z_string_format(z))
+            Xi_TT = np.mean(delta_Tk ** 2)
+            Xi_aa = np.mean(delta_lyal ** 2)
+            Xi_Tb = np.mean(delta_b * delta_Tk)
+            Xi_rT = np.mean(delta_xHII * delta_Tk)
+            Xi_ar = np.mean(delta_xHII * delta_lyal)
+            Xi_aT = np.mean(delta_Tk * delta_lyal)
+            Xi_rb = np.mean(delta_xHII * delta_b)
+            Xi_ab = np.mean(delta_b * delta_lyal)
 
-        Xi_rba[ii] = np.mean(delta_xHII * delta_b * delta_lyal)
-        Xi_rbT[ii] = np.mean(delta_xHII * delta_b * delta_Tk)
-        Xi_raT[ii] = np.mean(delta_xHII * delta_lyal * delta_Tk)
-        Xi_raa[ii] = np.mean(delta_xHII * delta_lyal ** 2)
-        Xi_rTT[ii] = np.mean(delta_xHII * delta_Tk ** 2)
+            Xi_rba = np.mean(delta_xHII * delta_b * delta_lyal)
+            Xi_rbT = np.mean(delta_xHII * delta_b * delta_Tk)
+            Xi_raT = np.mean(delta_xHII * delta_lyal * delta_Tk)
+            Xi_raa = np.mean(delta_xHII * delta_lyal ** 2)
+            Xi_rTT = np.mean(delta_xHII * delta_Tk ** 2)
 
-        Xi_aTb[ii] = np.mean(delta_lyal * delta_Tk * delta_b)
-        Xi_aTrb[ii] = np.mean(delta_lyal * delta_Tk * delta_xHII * delta_b)
-        Xi_aab[ii] = np.mean(delta_lyal ** 2 * delta_b)
-        Xi_aarb[ii] = np.mean(delta_lyal ** 2 * delta_xHII * delta_b)
-        Xi_TTb[ii] = np.mean(delta_Tk ** 2 * delta_b)
-        Xi_TTrb[ii] = np.mean(delta_Tk ** 2 * delta_xHII * delta_b)
+            Xi_aTb = np.mean(delta_lyal * delta_Tk * delta_b)
+            Xi_aTrb = np.mean(delta_lyal * delta_Tk * delta_xHII * delta_b)
+            Xi_aab = np.mean(delta_lyal ** 2 * delta_b)
+            Xi_aarb = np.mean(delta_lyal ** 2 * delta_xHII * delta_b)
+            Xi_TTb = np.mean(delta_Tk ** 2 * delta_b)
+            Xi_TTrb = np.mean(delta_Tk ** 2 * delta_xHII * delta_b)
 
-    Dict = {'z': np.array(z_arr), 'Xi_TT': Xi_TT, 'Xi_aa': Xi_aa, 'Xi_Tb': Xi_Tb, 'Xi_rT': Xi_rT, 'Xi_ar': Xi_ar,
-            'Xi_aT': Xi_aT, 'Xi_rb': Xi_rb, 'Xi_ab': Xi_ab,
-            'Xi_rba': Xi_rba, 'Xi_rbT': Xi_rbT, 'Xi_raT': Xi_raT, 'Xi_raa': Xi_raa, 'Xi_rTT': Xi_rTT,
-            'Xi_aTb': Xi_aTb, 'Xi_aTrb': Xi_aTrb, 'Xi_aab': Xi_aab, 'Xi_aarb': Xi_aarb, 'Xi_TTb': Xi_TTb,
-            'Xi_TTrb': Xi_TTrb}
-    end_time = time.time()
-    print('Finished computing Xi at r=0. It took in total: ', print_time(end_time - start_time))
-    print('  ')
-    save_f(file='./variances/Xi_corr_fct_' + str(param.sim.Ncell) + '.pkl', obj=Dict)
+            Dict = {'z': z, 'Xi_TT': Xi_TT, 'Xi_aa': Xi_aa, 'Xi_Tb': Xi_Tb, 'Xi_rT': Xi_rT, 'Xi_ar': Xi_ar,
+                'Xi_aT': Xi_aT, 'Xi_rb': Xi_rb, 'Xi_ab': Xi_ab,
+                'Xi_rba': Xi_rba, 'Xi_rbT': Xi_rbT, 'Xi_raT': Xi_raT, 'Xi_raa': Xi_raa, 'Xi_rTT': Xi_rTT,
+                'Xi_aTb': Xi_aTb, 'Xi_aTrb': Xi_aTrb, 'Xi_aab': Xi_aab, 'Xi_aarb': Xi_aarb, 'Xi_TTb': Xi_TTb,
+                'Xi_TTrb': Xi_TTrb}
+
+            save_f(file='./variances/Xi_corr_fct_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl', obj=Dict)
+
+    comm.Barrier()
+
+    if rank == 0:
+        gather_files(param, path='./variances/Xi_corr_fct_', z_arr=z_arr, Ncell=param.sim.Ncell)
+
+        end_time = time.time()
+        print('Finished computing Xi at r=0. It took in total: ', print_time(end_time - start_time))
+        print('  ')
+
 
 
 
