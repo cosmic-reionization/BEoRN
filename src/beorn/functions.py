@@ -491,7 +491,7 @@ def format_grid_for_PS_measurement(Grid_Temp,Grid_xHII,Grid_xal,nGrid) :
 
 
 
-def gather_files(param, path, z_arr, Ncell):
+def gather_files(param, path, z_arr, Ncell, remove=True):
     """
     Parameters
     ----------
@@ -514,14 +514,15 @@ def gather_files(param, path, z_arr, Ncell):
             data_z = load_f(file)
             for key, value in data_z.items():
                 dd[key].append(value)
-            os.remove(file)
+            if remove:
+                os.remove(file)
 
     for key, value in dd.items():  # change lists to numpy arrays
         dd[key] = np.array(value)
 
     if 'k' in dd:
         dd['k'] = data_z['k']
-        
+
     save_f(file= path + str(Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
 
 
