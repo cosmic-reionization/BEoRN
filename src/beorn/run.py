@@ -420,7 +420,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                   'PS_dTb': PS_dTb, 'k': k_bins,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
                   'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio),
-                  'PS_dTb_T_sat':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_T_sat)}
+                  'PS_dTb_T_sat':PS_dTb_T_sat,'dTb_T_sat': np.mean(Grid_dTb_T_sat)}
     if cross_corr:
         GS_PS_dict = compute_cross_correlations(param, GS_PS_dict, Grid_Temp, Grid_xHII, Grid_xal,Grid_dTb, delta_b,
                                                 third_order=third_order,fourth_order=fourth_order,truncate=truncate)
@@ -1019,12 +1019,9 @@ def compute_PS(param, Tspin=False, RSD=False, ion='bubbles', cross_corr=False):
         dTb_arr[ii] = np.mean(Grid_dTb)
 
         if cross_corr:
-            PS_T_lyal[ii] = cross_PS(delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[
-                0]
-            PS_T_xHII[ii] = cross_PS(delta_T, delta_XHII, box_dims=Lbox, kbins=kbins)[
-                0]
-            PS_lyal_xHII[ii] = \
-                cross_PS(delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_T_lyal[ii] = cross_PS(delta_T, delta_x_al, box_dims=Lbox, kbins=kbins)[0]
+            PS_T_xHII[ii] = cross_PS(delta_T, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
+            PS_lyal_xHII[ii] = cross_PS(delta_x_al, delta_XHII, box_dims=Lbox, kbins=kbins)[0]
 
         if Tspin:
             PS_Ts[ii] = auto_PS(delta_Tspin, box_dims=Lbox, kbins=kbins)[0]
@@ -1502,9 +1499,6 @@ def compute_corr_fct(param):
         end_time = time.time()
         print('Finished computing Xi at r=0. It took in total: ', print_time(end_time - start_time))
         print('  ')
-
-
-
 
 
 
@@ -2059,7 +2053,7 @@ def investigate_expansion_mean_xcoll(param):
                    obj=Dict)
             print('----- Done for z =', z, '-------')
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         gather_files(param, path = './physics/data_expansion_U_V_meanxcoll_', z_arr = z_arr, Ncell = Ncell)
