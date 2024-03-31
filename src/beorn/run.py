@@ -365,6 +365,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                     Grid_xal = Grid_xal * S_alpha(z, np.mean(Grid_Temp), 1 - np.mean(Grid_xHII)) / 4 / np.pi
 
 
+
             if Rsmoothing > 0:
                 Grid_xal  = smooth_field(Grid_xal, Rsmoothing, LBox, nGrid)
                 Grid_Temp = smooth_field(Grid_Temp, Rsmoothing, LBox, nGrid)
@@ -387,7 +388,11 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             if dTb:
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
                 Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]),param=param)
-                Grid_dTb_T_sat = dTb_fct(z=z, Tk=1e50, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII,param=param)
+
+                Grid_xcoll_sat =  x_coll(z=z, Tk=1e50, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
+                Grid_dTb_T_sat = dTb_fct(z=z, Tk=1e50, xtot = Grid_xal + Grid_xcoll_sat, delta_b=delta_b, x_HII=Grid_xHII, param=param)
+                del Grid_xcoll_sat
+
             else :
                 Grid_dTb = np.array([0])
                 Grid_dTb_no_reio = np.array([0])
