@@ -65,7 +65,7 @@ class lightcone:
         print((2 * nbr + 1))
         return av
 
-    def plotting_lightcone(self, save='./lightcone.jpg'):
+    def plotting_lightcone(self, save='./lightcone.jpg',save_data_slice = None ):
         import cmasher as cmr
         from matplotlib.colors import TwoSlopeNorm
 
@@ -86,6 +86,9 @@ class lightcone:
         yi = np.array([np.linspace(0, int(self.Lbox), self.xf_lc.shape[1]) for i in range(xi.shape[1])]).T
         zj = self.slice_av(self.xf_lc, 0, self.slice_nbr)  # self.xf_lc[64,:,:] #slice_av(self.xf_lc, 1, 64)
 
+        if save_data_slice is not None :
+            save_f(file=save_data_slice,obj={'xi':xi,'yi':yi,'zj':zj})
+            
         fig, axs = plt.subplots(1, 1, figsize=(20, 6))
         ax2 = axs.twiny()
         im = axs.pcolor(xi, yi, zj, cmap=cmap, norm=norm)
