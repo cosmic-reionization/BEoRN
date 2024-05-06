@@ -91,6 +91,25 @@ def f_esc(param,Mh,zz=None):
     return np.minimum(fesc,1)
 
 
+def f_Xh(param,x_e):
+    """
+     Parameters
+     ----------
+     x_e : Free electron fraction in the neutral medium
+
+     Returns
+     ----------
+     Fraction of X-ray energy deposited as heat in the IGM.
+     Dimensionless. Various fitting functions exist in the literature
+    """
+    # Schull 1985 fit.
+    # C,a,b = 0.9971, 0.2663, 1.3163
+    # fXh = C * (1-(1-x_e**a)**b)
+    
+    fXh = x_e ** 0.225
+    return fXh
+
+
 
 def eps_xray(nu_,param):
     """
