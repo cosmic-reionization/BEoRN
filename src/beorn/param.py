@@ -25,22 +25,7 @@ def source_par():
         "E_max_xray": 2000,              # energy cutoff for the xray band.
         "alS_xray": 2.5,                 ##PL sed Xray part N ~ nu**-alS [nbr of photons/s/Hz]
         "cX":  3.4e40,                   # Xray normalization [(erg/s) * (yr/Msun)] (astro-ph/0607234 eq22)
-
-
-
-        ### To compare to Licorice
-        "xray_type": "PL",  # Can be PL (power-law) or Licorice
-        "fX_AGN": 0.4 * 0.1 ,
-        "fX_XRB": 0.6 * 0.1  ,
-        "sed_XRB":None    ,    ## 2d array containing energy and  sed normalized to 1 (eV, sed)
-        "f_esc_type": 'cst' , ## cst : redshift indep. Licorice : 2 valeurs en fonction du z.
-        "z_thresh_f_esc":None, ## redshif at which the escape fraction changes value.
-        "min_xHII":0, ## set all pixels where xHII=0 to this value
-
-
-        "E_min_sed_xray": 500,  # minimum energy of normalization of xrays in eV
-        "E_max_sed_xray": 2000,  # minimum energy of normalization of xrays in eV
-
+        
         "N_al"    : 9690,                # nbr of lyal photons per baryons in stars
         "alS_lyal": 1.001,               ## PL for lyal
 
@@ -58,6 +43,8 @@ def source_par():
         "f0_esc": 0.15,                   # photon escape fraction f_esc = f0_esc * (M/Mp)^pl_esc
         "Mp_esc": 1e10,
         "pl_esc": 0.0,
+
+        "min_xHII": 0,  ## set all pixels where xHII=0 to this value
     }
 
     return Bunch(par)
