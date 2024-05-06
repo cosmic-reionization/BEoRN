@@ -30,13 +30,15 @@ def source_par():
 
         ### To compare to Licorice
         "xray_type": "PL",  # Can be PL (power-law) or Licorice
-        "fX_AGN": 0.4 * 0.1 ,
-        "fX_XRB": 0.6 * 0.1  ,
+        "fX_AGN": 0.4 ,
         "sed_XRB":None    ,    ## 2d array containing energy and  sed normalized to 1 (eV, sed)
         "f_esc_type": 'cst' , ## cst : redshift indep. Licorice : 2 valeurs en fonction du z.
         "z_thresh_f_esc":None, ## redshif at which the escape fraction changes value.
         "min_xHII":0, ## set all pixels where xHII=0 to this value
-
+        "Nion_z": None, ## if not None, can be a 2D array (zz,Nion) with z-dependent Nion values
+        "coef_compton": 1, # mutl coeff for compton heating, to adjust adiab temperature and fit it to Lico.
+        "fX":1,
+        "xal_boxes_path": None, ## Path to xal boxes --> (Use licorice lyman-alpha coupling boxes in dTb)
 
         "E_min_sed_xray": 500,  # minimum energy of normalization of xrays in eV
         "E_max_sed_xray": 2000,  # minimum energy of normalization of xrays in eV

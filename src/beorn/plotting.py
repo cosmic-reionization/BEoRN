@@ -84,7 +84,7 @@ def plot_Beorn_PS_of_z(k, GS_Beorn, PS_Beorn, ls='-', lw=1, color='b', RSD=False
                     color=color,label='expansion')
 
 
-def plot_2d_map(grid,  Lbox=None, slice_nbr=None, qty='label', scale='lin'):
+def plot_2d_map(grid,  Lbox=None, slice_nbr=None, qty='label', scale='lin',vmin=None,vmax=None,cmap='viridis',ax=None,fig=None):
     # Ncell : int, nbr of grid pixels
     # slice_nbr : int, slice to plot
     # Lbox : int, Box size in Mpc/h
@@ -101,11 +101,17 @@ def plot_2d_map(grid,  Lbox=None, slice_nbr=None, qty='label', scale='lin'):
     elif scale == 'log':
         norm = matplotlib.colors.LogNorm()
     else:
-        print('scale should be lin or log.')
+        norm = scale
 
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+    slice = grid[:, slice_nbr, :]
+    if vmin is None:
+        vmin=np.min(slice)
+    if vmax is None:
+        vmax=np.max(slice)
     pos = ax.pcolormesh(np.linspace(0, Lbox, Ncell + 1), np.linspace(0, Lbox, Ncell + 1),
-                        grid[:, slice_nbr, :], norm=norm)  # , interpolation='none')#,vmin = -5,vmax = 2.)
+                        slice, norm=norm,vmin = vmin,vmax =vmax,cmap=cmap)  # , interpolation='none')#
     cb = fig.colorbar(pos, ax=ax, label=qty)
     ax.set_xlabel('cMpc/h', fontsize=14)
     ax.set_ylabel('cMpc/h', fontsize=14)
@@ -145,12 +151,13 @@ def expansion_terms_beorn(PS):
 
 
 
-def expansion_dTb_PS(PS,higher_order=False ,coef=1,coef_3th_order=0,coef_4th_order=0,remove_T_2nd_order = 1):
+def expansion_dTb_PS(PS,HO_r_b=False,higher_order=False ,coef=0,coef_3th_order=0,coef_4th_order=0,remove_T_2nd_order = 1,coef_alpha=1,reio=True,coef_rbrb = 1):
     """
     Parameters
     ----------
     PS : BEoRN output power spectra, with all cross correlations computed.
     higher_order : Bool. Includes higher order PS term including xHII field. (r)
+    HO_r_b : Bool. Includes HO term in matter and reio.
     coef : 1 or 0, used to suppress the terms originating from axpansion to 2nd order of xal/(1+xal) and 1/T
 
     remove_T_2nd_order : if equals to zero, removes all terms coming from second order T expansion in dTb formula :  -beta_T * delta_T**2
@@ -182,14 +189,21 @@ def expansion_dTb_PS(PS,higher_order=False ,coef=1,coef_3th_order=0,coef_4th_ord
     PS_ra = beta_r[:, None] * beta_a[:, None] * PS['PS_lyal_xHII']
     PS_rT = beta_r[:, None] * beta_T[:, None] * PS['PS_T_xHII']
 
-    PS_dTb_HM_style = PS_bb + PS_aa + PS_TT + PS_rr + 2 * (PS_ab + PS_Tb + PS_aT + PS_rb + PS_ra + PS_rT)
+    PS_dTb_HM_style = PS_bb + PS_aa + PS_TT  + 2 * (PS_ab + PS_Tb + PS_aT)
 
+    if reio:
+        PS_dTb_HM_style += PS_rr + 2 * (PS_rb + PS_ra + PS_rT)
+    if HO_r_b :
+        PS_rrb = PS['PS_br_r'] * (2 * beta_r ** 2)[:, None]
+        PS_rbb = PS['PS_rb_b'] * (2 * beta_r)[:, None]
+        PS_rbrb = PS['PS_rb_rb'] * (beta_r ** 2)[:, None] *coef_rbrb
+        PS_dTb_HM_style +=  PS_rbb + PS_rrb +  PS_rbrb
 
     if higher_order:
         print('computing PS to 3rd order in delta_r')
-        PS_raa = PS['PS_ra_a'] * 2 * (beta_r * beta_a ** 2)[:, None] + coef* PS['PS_r_aa'] * 2 * (beta_r * beta_a_2)[:, None]
+        PS_raa = PS['PS_ra_a'] * 2 * (beta_r * beta_a ** 2)[:, None] + coef * PS['PS_r_aa'] * 2 * (beta_r * beta_a_2)[:, None]
         PS_rTT = PS['PS_rT_T'] * 2 * (beta_r * beta_T ** 2)[:, None] - remove_T_2nd_order * coef * PS['PS_r_TT'] * 2 * (beta_r * beta_T)[:, None]
-        PS_rbb = PS['PS_rb_b'] * (2 * beta_r)[:, None]
+
 
         #PS_raa = PS['PS_raa'] * (2 * beta_r * beta_a ** 2 + coef * 2 * beta_r * beta_a_2)[:, None]
         #PS_rTT = PS['PS_rTT'] * (2 * beta_r * beta_T ** 2 - coef * 2 * beta_r * beta_T)[:, None]
@@ -199,21 +213,21 @@ def expansion_dTb_PS(PS,higher_order=False ,coef=1,coef_3th_order=0,coef_4th_ord
         PS_aTr = (PS['PS_aT_r']+PS['PS_ar_T']+PS['PS_Tr_a']) * (2 * beta_T * beta_r * beta_a)[:, None]
 
         PS_rra = PS['PS_ar_r'] * (2 * beta_r ** 2 * beta_a)[:, None]
-        PS_rrb = PS['PS_br_r'] * (2 * beta_r ** 2)[:, None]
+
         PS_rrT = PS['PS_Tr_r'] * (2 * beta_r ** 2 * beta_T)[:, None]
 
         #PS_rTrT = PS['PS_rTrT'] * (beta_T * beta_r ** 2 * (beta_T - 2))[:, None]
         #PS_rara = PS['PS_rara'] * (beta_a ** 2 * beta_r ** 2 * (1 - 2 * PS['x_al']))[:, None]
         PS_rara = PS['PS_ra_ra'] * (beta_r **2 * beta_a ** 2)[:, None] + coef* PS['PS_raa_r'] * 2 * (beta_r ** 2 * beta_a_2)[:, None]
         PS_rTrT = PS['PS_rT_rT'] * (beta_T **2 * beta_r ** 2)[:, None] - remove_T_2nd_order * coef* PS['PS_rTT_r'] * 2 * (beta_r ** 2 * beta_T)[:, None]
-        PS_rbrb = PS['PS_rb_rb'] * (beta_r ** 2)[:, None]
+
 
         PS_rarb = (2*PS['PS_rba_r']+2*PS['PS_rb_ra']) * (beta_r ** 2 * beta_a)[:, None]
         PS_rTra = (2*PS['PS_rTa_r']+2*PS['PS_rT_ra']) * (beta_r ** 2 * beta_T * beta_a)[:, None]
         PS_rTrb = (2*PS['PS_rTb_r']+2*PS['PS_rT_rb']) * (beta_r ** 2 * beta_T)[:, None]
 
-        PS_dTb_HM_style += PS_rTT + PS_raa + PS_rbb + PS_rTb + PS_abr + PS_aTr + PS_rrT + PS_rra + PS_rrb + \
-                           PS_rTrT + PS_rara + PS_rbrb + PS_rarb + PS_rTrb + PS_rTra
+        PS_dTb_HM_style += PS_rTT + PS_raa  + PS_rTb + PS_abr + PS_aTr + PS_rrT + PS_rra  + \
+                           PS_rTrT + coef_alpha* PS_rara  + PS_rarb + PS_rTrb + PS_rTra
 
 
     if coef_3th_order>0:

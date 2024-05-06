@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.spatial import cKDTree
 from collections import deque
-from mpi4py import MPI
+
 from time import time
 
 class FoFHaloFinder:
@@ -134,6 +134,7 @@ class FoFHaloFinderMPI(FoFHaloFinder):
         - linking_length: Linking length for FoF algorithm
         - min_num_particles: Minimum number of particles for a halo
         """
+        from mpi4py import MPI
         super().__init__(positions, linking_length, min_num_particles)
         self.comm = MPI.COMM_WORLD
         self.rank = self.comm.Get_rank()

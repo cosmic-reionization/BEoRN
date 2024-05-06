@@ -65,7 +65,47 @@ def xHII_approx(param, halo_catalog):
     return zgrid, x_HII
 
 
-def compute_glob_qty(param):
+
+def bin_halo_masses(param,z_str,Mh_bin_array,read_h_bins):
+    # April 2024  - Paris observatory
+    # read_h_bins : If False, will bin halo masses. Default thing. If yes, will read in the stored halo mass bins.
+    # I've added this when comparing to Licorice, to speed up the process.
+    # Use this with caution.
+    # THIS FUNCTION IS NOW JUST USED inside compute_glob_qty.
+    import os
+    from os.path import exists
+    catalog_dir = param.sim.halo_catalogs
+    catalog_bins = catalog_dir + z_str+ '_Mh_bins'
+
+    if read_h_bins and exists(catalog_bins):
+        #print('Reading in ',catalog_bins)
+        dict_ = load_f(catalog_bins)
+        z, bins, number_per_bins = np.copy(dict_['z']),np.copy(dict_['bins']),np.copy(dict_['number_per_bins'])
+        del dict_
+    else :
+        halo_catalog = load_halo(param, z_str)
+        H_Masses = halo_catalog['M']
+        H_Masses = np.delete(H_Masses, np.where(
+            H_Masses < param.source.M_min))  ## remove element smaller than minimum SF halo mass.
+        z = halo_catalog['z']
+
+        bins = np.digitize(np.log10(H_Masses), np.log10(Mh_bin_array), right=False)
+
+        # if H_Masses is digitized to Mh_bin_array[i] it means it should take the value of M_Bin[i-1] (bin 0 is what's on the left...)
+        # M_Bin                0.   1.    2.    3.  ...
+        # Mh_bin_array     0.  | 1. |  2. |  3. |  4. ....
+        bins, number_per_bins = np.unique(bins, return_counts=True)
+
+        #print('----Calculating hmass bins --- ')
+        if not exists(catalog_bins):
+            save_f(catalog_bins,obj= {'z':z,'bins':bins, 'number_per_bins':number_per_bins})
+
+    return z, bins, number_per_bins
+
+
+def compute_glob_qty(param, read_h_bins=False):
+    # E_deposited : bool. Compute or not the total energy deposited as heat by xray photons.
+
     print('Computing global quantities (sfrd, Tk, xHII, dTb, xal, xcoll) from 1D profiles and halo catalogs....')
     LBox = param.sim.Lbox  # Mpc/h
     model_name = param.sim.model_name
@@ -77,7 +117,7 @@ def compute_glob_qty(param):
 
     zz = []
     xHII = []
-    Tk = []
+    Tk,Tad = [],[]
     sfrd = []
     s_alpha = []
     x_alpha = []
@@ -86,12 +126,8 @@ def compute_glob_qty(param):
 
     z_arr = def_redshifts(param)
     for ii, z in enumerate(z_arr):
+        print('z :',z )
         z_str = z_string_format(z)
-        halo_catalog = load_halo(param, z_str)
-        H_Masses = halo_catalog['M']
-        H_Masses = np.delete(H_Masses, np.where(
-            H_Masses < param.source.M_min))  ## remove element smaller than minimum SF halo mass.
-        z = halo_catalog['z']
 
         ind_z = np.argmin(np.abs(grid_model.z_history - z))
         radial_grid = grid_model.r_grid_cell / (1 + z)  # pMpc/h
@@ -100,12 +136,8 @@ def compute_glob_qty(param):
         Mh_bin_array = np.concatenate(([Mh_z_bin[0] / 2], np.sqrt(Mh_z_bin[1:] * Mh_z_bin[:-1]),
                                        [2 * Mh_z_bin[-1]]))  ## shape of binning array is (len(M_bin)+1)
         # Mh_bin_array = Mh_bin_array * np.exp(-param.source.alpha_MAR * (z - z_start))
-        bins = np.digitize(np.log10(H_Masses), np.log10(Mh_bin_array), right=False)
 
-        # if H_Masses is digitized to Mh_bin_array[i] it means it should take the value of M_Bin[i-1] (bin 0 is what's on the left...)
-        # M_Bin                0.   1.    2.    3.  ...
-        # Mh_bin_array     0.  | 1. |  2. |  3. |  4. ....
-        bins, number_per_bins = np.unique(bins, return_counts=True)
+        z, bins, number_per_bins = bin_halo_masses(param,z_str,Mh_bin_array, read_h_bins)
         bins = bins.clip(max=len(M_Bin))
 
         ### Ionisation
@@ -137,6 +169,7 @@ def compute_glob_qty(param):
         SFRD = np.sum(number_per_bins * dMstar_dt[bins - 1])
         SFRD = SFRD / LBox ** 3  #### [(Msol/h) / yr /(cMpc/h)**3]
 
+
         coef = rhoc0 * h0 ** 2 * Ob * (1 + z) ** 3 * M_sun / cm_per_Mpc ** 3 / m_H
         Salpha = S_alpha(z, Temp, 1 - x_HII)
         x_al = x_al * Salpha / 4 / np.pi
@@ -144,9 +177,10 @@ def compute_glob_qty(param):
         xtot = xcoll + x_al
         dTb = factor * np.sqrt(1 + z) * (1 - Tcmb0 * (1 + z) / Temp) * (1 - x_HII) * xtot / (1 + xtot)
 
+        Tad.append(T_adiab(z, param))
         Tk.append(Temp)
         zz.append(z)
-        xHII.append(x_HII)
+        xHII.append(max(x_HII,param.source.min_xHII) )
         sfrd.append(SFRD)
         s_alpha.append(Salpha)
         x_alpha.append(x_al)
@@ -156,12 +190,12 @@ def compute_glob_qty(param):
 
     print( '....done. Returns a dictionnary.')
 
-    zz, Tk, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr = np.array(zz), np.array(Tk), np.array(xHII), np.array(
+    zz, Tk, Tad, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr = np.array(zz), np.array(Tk), np.array(Tad), np.array(xHII), np.array(
         sfrd), np.array(s_alpha), np.array(x_alpha), np.array(dTb_arr), np.array(xcoll_arr)
     #matrice = np.array([zz, Tk, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr])
     #zz, Tk, xHII, sfrd, s_alpha, x_alpha, dTb_arr, xcoll_arr = matrice[:, matrice[0].argsort()]  ## sort according to zz
 
-    return {'z': zz, 'Tk': Tk, 'x_HII': xHII, 'sfrd': sfrd, 'S_al': s_alpha, 'x_al': x_alpha, 'dTb': dTb_arr,
+    return {'z': zz, 'Tk': Tk, 'Tad':Tad,'x_HII': xHII, 'sfrd': sfrd, 'S_al': s_alpha, 'x_al': x_alpha, 'dTb': dTb_arr,
             'xcoll': xcoll_arr}
 
 

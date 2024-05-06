@@ -51,4 +51,11 @@ sigma_s = 6.6524 * 10 ** -25 # [cm**2]
 Hz_per_eV = 241799050402293
 
 ##Thomson scattering cross-section in meters
-sigma_T = 6.6524 * 10 ** -29
+sigma_T = 6.6524 * 10 ** -29 #m2
+
+f_He_nbr = 0.08 #Helium number fraction
+
+
+sigm_steph_boltz = 5.670374419e-8 # W/m^2/K^4 (Stephan Boltz constant)
+
+Joules_per_eV = 1.60218e-19

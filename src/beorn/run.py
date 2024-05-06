@@ -388,7 +388,6 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             if dTb:
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
                 Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]),param=param)
-
                 Grid_xcoll_sat =  x_coll(z=z, Tk=1e50, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
                 Grid_dTb_T_sat = dTb_fct(z=z, Tk=1e50, xtot = Grid_xal + Grid_xcoll_sat, delta_b=delta_b, x_HII=Grid_xHII, param=param)
                 del Grid_xcoll_sat
@@ -422,6 +421,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         ##
 
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
+                  'Tk_neutral':np.mean(Grid_Temp*(1-Grid_xHII))/np.mean(1-Grid_xHII),
                   'PS_dTb': PS_dTb, 'k': k_bins,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
                   'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio),

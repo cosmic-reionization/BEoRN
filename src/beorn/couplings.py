@@ -118,7 +118,7 @@ def eps_lyal(nu,param):
 
     h0    = param.cosmo.h
     N_al  = param.source.N_al  #9690 number of lya photons per protons (baryons) in stars
-    alS = param.source.alS_lyal
+    alS   = param.source.alS_lyal
 
     nu_min_norm  = nu_al
     nu_max_norm  = nu_LL

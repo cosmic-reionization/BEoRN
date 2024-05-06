@@ -128,7 +128,7 @@ def Ngdot_ion(param, zz, Mh,dMh_dt):
 
     if (param.source.type == 'SED'):
        # dMh_dt = param.source.alpha_MAR * Mh * (zz + 1) * Hubble(zz, param)  ## [(Msol/h) / yr]
-        Ngam_dot_ion = dMh_dt / h0 * f_star_Halo(param, Mh) * Ob / Om * f_esc(param, Mh,zz) * param.source.Nion / sec_per_year / m_H * M_sun
+        Ngam_dot_ion = dMh_dt / h0 * f_star_Halo(param, Mh) * Ob / Om * f_esc(param, Mh,zz) * N_ion_(param,zz) / sec_per_year / m_H * M_sun
         Ngam_dot_ion[np.where(Mh < param.source.M_min)] = 0
         return Ngam_dot_ion
     elif param.source.type == 'Ghara':
@@ -176,8 +176,23 @@ def R_bubble(param, zz, M_accr,dMh_dt):
     #source = lambda V, t: Ngam_interp(t) / nb0 - alpha_HII(1e4) * C / cm_per_Mpc ** 3 * h0 ** 3 * nb0_interp(t) * V  # eq 65 from barkana and loeb
     source = lambda V, a: km_per_Mpc / (hubble(1 / a - 1, param) * a) * (Ngam_interp(a) / nb0 - alpha_HII(1e4) * C / cm_per_Mpc ** 3 * h0 ** 3 * nb0_interp(a) * V)  # eq 65 from barkana and loeb
 
-    bubble_vol = odeint(source, np.zeros(len(M_accr[0])), aa)
 
+    if param.source.f_esc_type == 'Licorice_bis':
+        ### Second option. In Lico simulation, Lbox= 200Mpc/h, nGrid = 256
+        ### We change the f_esc value at the bubble level, when R bubble is such that Vbub = 0.03*Vcell
+        Lbox_lico, nGrid_lico = 200, 256
+        V_thresh = (Lbox_lico / nGrid_lico) ** 3 * 0.03
+        f0_esc = param.source.f0_esc
+
+        def f_esc_boost(V):
+            sigm_ = sigmoid_fct(V, c1=1000, c2=V_thresh) # 0 for V>c2, 1 otherwise
+            fesc_coef = sigm_ * 3e-3/ f0_esc + (1 - sigm_) * 0.275/ f0_esc
+            return fesc_coef
+
+        source = lambda V, a: km_per_Mpc / (hubble(1 / a - 1, param) * a) * (
+                    Ngam_interp(a) * f_esc_boost(V) / nb0 - alpha_HII(1e4) * C / cm_per_Mpc ** 3 * h0 ** 3 * nb0_interp(a) * V)
+
+    bubble_vol = odeint(source, np.zeros(len(M_accr[0])), aa)
     return (3*bubble_vol/4/np.pi)**(1/3)
 
 
@@ -200,6 +215,7 @@ def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
     Om = param.cosmo.Om
     Ob = param.cosmo.Ob
     h0 = param.cosmo.h
+
     zstar = 35
     Emin = param.source.E_min_xray
     Emax = param.source.E_max_xray
@@ -256,13 +272,14 @@ def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
 
 
             #fXh =  np.maximum((rho_xe[i]+2e-4)**0.225  ,0.11)    # 1.0 # 0.13 # 0.15 ---> 0.11 matches the f_heat we have in cross_sections.py, for T_neutral
-            fXh = xe[i]**0.225
-
+            fXh = f_Xh(param,xe[i])  #**0.225
+            fX = f_X_(param,zz[i]) # z-dependent f_X to compare with Licorice
             pref_nu = ((nH0 / nb0) * sigma_HI(nu * h_eV_sec) * (nu * h_eV_sec - E_HI) + (nHe0 / nb0) * sigma_HeI(nu * h_eV_sec) * (nu * h_eV_sec - E_HeI))   # [cm^2 * eV] 4 * np.pi *
+
 
             heat_nu = pref_nu[:, None,None] * flux   # [cm^2*eV/s/Hz]
             heat_of_r = trapz(heat_nu, nu, axis=0)  # [cm^2*eV/s]
-            rho_xray[i, :,:] = fXh * heat_of_r / (4 * np.pi * (rr/(1+zz[i])) ** 2)[:,None] / (cm_per_Mpc/h0) ** 2  # [eV/s]  1/(rr/(1 + zz[i]))**2
+            rho_xray[i, :,:] = fXh * fX * heat_of_r / (4 * np.pi * (rr/(1+zz[i])) ** 2)[:,None] / (cm_per_Mpc/h0) ** 2  # [eV/s]  1/(rr/(1 + zz[i]))**2
 
     return rho_xray
 
@@ -604,8 +621,6 @@ def cum_optical_depth(zz,E,param):
     #hydrogen and helium cross sections
     sHI   = sigma_HI(Erest)*(h0/cm_per_Mpc)**2   #[Mpc/h]^2
     sHeI  = sigma_HeI(Erest)*(h0/cm_per_Mpc)**2  #[Mpc/h]^2
-
-
 
     nb0   = rhoc0*Ob/(m_p_in_Msun*h0)                    # [h/Mpc]^3
 

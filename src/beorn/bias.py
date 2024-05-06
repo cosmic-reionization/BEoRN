@@ -149,9 +149,6 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False,fit=False,remov
 
     import time
 
-    if not os.path.isdir(dir+'./Halo_bias'):
-        os.mkdir(dir+'./Halo_bias')
-
     start_time = time.time()
     print('Computing halo bias.')
 
@@ -164,6 +161,10 @@ def compute_bias(param, tab_M=None,dir='',zmax = 100,cross=False,fit=False,remov
     else:
         rank = 0
         size = 1
+
+    if rank==0:
+        if not os.path.isdir(dir+'./Halo_bias'):
+            os.mkdir(dir+'./Halo_bias')
 
     kbins = def_k_bins(param)
     z_arr = def_redshifts(param)

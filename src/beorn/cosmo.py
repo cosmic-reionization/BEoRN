@@ -70,7 +70,13 @@ def T_adiab(z,param):
     """
     Temperature of the gas assuming it decoupled from CMB at z = param.cosmo.z_decoupl and then cooled adiabatically.
     """
-    return Tcmb0 * (1 + z) ** 2 / (1 + param.cosmo.z_decoupl)
+    T_ad = Tcmb0 * (1 + z) ** 2 / (1 + param.cosmo.z_decoupl)
+
+    if param.sim.licorice :
+        from .licorice import compute_Tad_licorice
+        T_ad = compute_Tad_licorice(param,z)
+
+    return T_ad
 
 def T_adiab_fluctu(z,param,delta_b):
     """

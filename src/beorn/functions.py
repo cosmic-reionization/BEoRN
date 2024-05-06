@@ -109,6 +109,8 @@ def load_delta_b(param, zz):
         delta_b = load_f(dens_field + zz + '.0')
     elif param.sim.dens_field_type == 'array':
         delta_b = np.loadtxt(dens_field + zz)
+    elif param.sim.dens_field_type == 'licorice':
+        delta_b = load_f(dens_field + zz +'.pkl')
     else:
         print('param.sim.dens_field_type should be either 21cmFAST or pkdgrav.')
 
@@ -174,7 +176,10 @@ def load_grid(param, z, type=None):
     if type == 'dTb':
         return load_f(dir_name + 'dTb_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'lyal':
-        return load_f(dir_name + 'xal_' + nGrid + '_' + out_name + '_z' + z_str)
+        if param.source.xal_boxes_path is None :
+            return load_f(dir_name + 'xal_' + nGrid + '_' + out_name + '_z' + z_str)
+        else :
+            return reshape_grid(load_f(param.source.xal_boxes_path + z_str),param.sim.Ncell)
     elif type == 'Tk':
         return load_f(dir_name + 'Tk_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'exc_set':
@@ -294,7 +299,7 @@ def Beta(zz, PS, qty='Tk'):
         print('qty should be either Tk, lyal, or reio.')
 
 
-def cross_PS(arr1, arr2, box_dims, kbinload_grids):
+def cross_PS(arr1, arr2, box_dims, kbins):
     return t2c.power_spectrum.cross_power_spectrum_1d(arr1, arr2, box_dims=box_dims, kbins=kbins)
 
 
@@ -327,7 +332,7 @@ def print_time(delta_t):
     return "{:0>8}".format(str(timedelta(seconds=round(delta_t))))
 
 
-def load_pkdgrav_density_field(file, LBox):
+def load_pkdgrav_density_field(file, LBox, out='delta'):
     """
     Parameters
     ----------
@@ -348,8 +353,15 @@ def load_pkdgrav_density_field(file, LBox):
     V_cell = (LBox / nGrid) ** 3
     mass  = (pkd * rhoc0 * V_total).astype(np.float64)
     rho_m = mass / V_cell
-    delta_b = (rho_m) / np.mean(rho_m, dtype=np.float64) - 1
-    return delta_b
+    if out == 'delta':
+        delta_b = (rho_m) / np.mean(rho_m, dtype=np.float64) - 1
+        output = delta_b
+    elif out == 'rho':
+        output = rho_m
+    else:
+        print('out should be delta or rho.')
+        exit()
+    return output
 
 
 
