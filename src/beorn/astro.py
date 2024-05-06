@@ -12,9 +12,16 @@ from .functions import *
 
 def BB_Planck(nu, T):
     """
-    Input : nu in [Hz], T in [K]
-    Returns : BB Spectrum [J.s-1.m−2.Hz−1]
+    Parameters
+    ----------
+    nu : float. Photon frequency in [Hz]
+    T : float. Black-Body temperature in [K]
+
+    Returns
+    ----------
+    Black-Body spectrum (Planck's law) in [J.s-1.m−2.Hz−1]
     """
+
     a_ = 2.0 * h__ * nu**3 / c__**2
     intensity = 4 * np.pi * a_ / ( np.exp(h__*nu/(k__*T)) - 1.0)
     return intensity
@@ -23,18 +30,36 @@ def BB_Planck(nu, T):
 
 def S_fct(Mh, Mt, g3, g4):
     """
-    Suppression function in f_star. See eq.6 in arXiv:2305.15466.
+    Parameters
+    ----------
+    Mh : float. Halo mass in [Msol/h]
+    Mt : float. Cutoff mass in [Msol/h]
+    g3,g4 : floats. Control the power-law behavior of the fct.
+
+    Returns
+    ----------
+    Small-scale part of the stellar-to-halo function f_star. See eq.6 in arXiv:2305.15466.
+    (g3,g4) = (1,1),(0,0),(4,-4) gives a boost, power-law, cutoff of SFE at small scales, respectively.
     """
+
     return (1 + (Mt / Mh) ** g3) ** g4
 
 
 def f_star_Halo(param,Mh):
     """
+    Parameters
+    ----------
+    Mh : float. Halo mass in [Msol/h]
+    param : Bunch
+
+    Returns
+    ----------
     fstar * Mh_dot * Ob/Om = Mstar_dot.
     fstar is therefore the conversion from baryon accretion rate  to star formation rate.
     See eq.(5) in arXiv:2305.15466.
-    Double power law.
+    Double power law + either boost or cutoff at small scales (S_fct)
     """
+
     f_st = param.source.f_st
     Mp = param.source.Mp
     g1 = param.source.g1
@@ -47,7 +72,18 @@ def f_star_Halo(param,Mh):
     return fstar
 
 
-def f_esc(param,Mh):
+def f_esc(param,Mh,zz=None):
+    """
+    Parameters
+    ----------
+    Mh : float. Halo mass in [Msol/h]
+    param : Bunch
+
+    Returns
+    ----------
+    Escape fraction of ionising photons
+    """
+
     f0  = param.source.f0_esc
     Mp  = param.source.Mp_esc
     pl  = param.source.pl_esc
