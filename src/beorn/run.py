@@ -46,26 +46,27 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
         if variance:
             if not os.path.isdir('./variances'):
                 os.mkdir('./variances')
-    comm.Barrier()
+    Barrier(comm)
 
     if compute_profile:
         if rank == 0:
             compute_profiles(param)
-        comm.Barrier()
+        Barrier(comm)
 
     if rank == 0:
         print(' ------------ PAINTING BOXES ------------ ')
-    comm.Barrier()
+    Barrier(comm)
 
     paint_boxes(param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp, check_exists=check_exists,
                 read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
                 cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance,Rsmoothing=Rsmoothing)
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         print(' ------------ MERGING PS FILES  ------------ ')
-        gather_GS_PS_files(param, remove=True)
+        gather_files(param, path='./physics/GS_PS_', z_arr = def_redshifts(param), Ncell=param.sim.Ncell,remove=True)
+        #gather_GS_PS_files(param, remove=True)
 
     if variance:
         if rank == 1 % size:
@@ -432,7 +433,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
 
 
-    save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
+    save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str+ '.pkl', obj=GS_PS_dict)
 
     if variance:
         import copy
@@ -527,17 +528,8 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
         z = np.round(z, 2)
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
-            if check_exists:
-                if exists('./grid_output/xHII_' + str(nGrid) + '_' + model_name + '_z' + z_str):
+            if check_exists and exists('./grid_output/xHII_' + str(nGrid) + '_' + model_name + '_z' + z_str):
                     print('xHII map for z = ', z, 'already painted. Skipping.')
-                else:
-                    print('----- Painting 3D map for z =', z, '-------')
-                    paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
-                                              read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                              cross_corr=cross_corr, third_order=third_order,fourth_order=fourth_order, cic=cic,
-                                              variance=variance,Rsmoothing=Rsmoothing,truncate=truncate)
-                    print('----- Snapshot at z = ', z, ' is done -------')
-                    print(' ')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
@@ -1298,7 +1290,7 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
             else :
                 continue
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         gather_files(param, path='./variances/var_z', z_arr=z_arr, Ncell=param.sim.Ncell)
@@ -1307,43 +1299,6 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
         print('Finished computing variances. It took in total: ',
               end_time - start_time)
         print('  ')
-
-
-
-def gather_variances(param):
-    """
-    gather all variances files at different z into a single file
-
-    Parametersdata_UV_default
-    ----------
-    param : dictionnary
-
-    Returns
-    ---------
-    Store in a single file all the var with shape (zz,kk)
-    """
-    from collections import defaultdict
-
-    dd = defaultdict(list)
-
-    z_arr = def_redshifts(param)
-    for ii, z in enumerate(z_arr):
-        z_str = z_string_format(z)
-        file = './variances/var_z' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
-        if exists(file):
-            var_z = load_f(file)
-            for key, value in var_z.items():
-                dd[key].append(value)
-            os.remove(file)
-
-    for key, value in dd.items():  # change lists to numpy arrays
-        dd[key] = np.array(value)
-
-    dd['k'] = var_z['k']
-    dd['R'] = var_z['R']
-
-    save_f(file='./variances/var_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
-
 
 def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins):
     # k_bins : extra kbins to measure the variance at same k values as PS
@@ -1496,7 +1451,7 @@ def compute_corr_fct(param):
 
             save_f(file='./variances/Xi_corr_fct_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl', obj=Dict)
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         gather_files(param, path='./variances/Xi_corr_fct_', z_arr=z_arr, Ncell=param.sim.Ncell)
@@ -1609,7 +1564,7 @@ def investigate_xal(param,HO = False):
             save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
 
-    comm.Barrier()
+    Barrier(comm)
     if rank == 0:
         gather_files(param, path = './physics/xal_data_', z_arr = z_arr, Ncell = Ncell)
 
@@ -1840,7 +1795,7 @@ def investigate_expansion(param):
                    obj=Dict)
             print('----- Done for z =', z, '-------')
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         gather_files(param, path = './physics/data_expansion_U_V_', z_arr = z_arr, Ncell = Ncell)

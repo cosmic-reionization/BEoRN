@@ -23,24 +23,24 @@ def source_par():
 
         "E_min_xray": 500,
         "E_max_xray": 2000,              # energy cutoff for the xray band.
-        "alS_xray": 2.5,                 ##PL sed Xray part N ~ nu**-alS [nbr of photons/s/Hz]
+        "alS_xray": 1.00001,                 ##PL sed Xray part N ~ nu**-alS [nbr of photons/s/Hz]
         "cX":  3.4e40,                   # Xray normalization [(erg/s) * (yr/Msun)] (astro-ph/0607234 eq22)
         
         "N_al"    : 9690,                # nbr of lyal photons per baryons in stars
-        "alS_lyal": 1.001,               ## PL for lyal
+        "alS_lyal": 0.0,               ## PL for lyal
 
-        "M_min" : 1e5,                   # Minimum mass of star forming halo. Mdark in HM
+        "M_min" : 1e8,                   # Minimum mass of star forming halo. Mdark in HM
         "M_max" : 1e16,                   # Maximum mass of star forming halo
         'f_st': 0.05,
-        'Mp': 1e11,
+        'Mp': 2.8e11 * 0.68,
         'g1': 0.49,
         'g2': -0.61,
-        'Mt': 1e7,
+        'Mt': 1e8,
         'g3': 4,
         'g4': -1,
 
-        'Nion'  : 2665,
-        "f0_esc": 0.15,                   # photon escape fraction f_esc = f0_esc * (M/Mp)^pl_esc
+        'Nion'  : 5000,
+        "f0_esc": 0.2,                   # photon escape fraction f_esc = f0_esc * (M/Mp)^pl_esc
         "Mp_esc": 1e10,
         "pl_esc": 0.0,
 
@@ -48,8 +48,6 @@ def source_par():
     }
 
     return Bunch(par)
-
-
 
 
 
