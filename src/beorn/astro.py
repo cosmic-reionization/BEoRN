@@ -113,16 +113,23 @@ def f_Xh(param,x_e):
 
 def eps_xray(nu_,param):
     """
-    Spectral distribution function of x-ray emission.
-    In  [1/s/Hz*(yr*h/Msun)]
-    Note : we include fX in cX in this code.
+    Parameters
+    ----------
+    nu_ : float. Photon frequency in [Hz]
+    param : Bunch
+
+    Returns
+    ----------
+    Spectral distribution function of x-ray emission in [1/s/Hz*(yr*h/Msun)]
     See Eq.2 in arXiv:1406.4120
+    Note : fX is included in cX in this code.
     """
-    # param.source.cX  ## [erg / s /SFR]
+
+    # param.source.cX  is in [erg / s /SFR]
 
     sed_xray = param.source.alS_xray
     norm_xray = (1 - sed_xray) / ((param.source.E_max_sed_xray / h_eV_sec) ** (1 - sed_xray) - (param.source.E_min_sed_xray / h_eV_sec) ** ( 1 - sed_xray)) ## [Hz**al-1]
-   # param.source.cX * eV_per_erg * norm_xray * nu_ ** (-sed_xray) * Hz_per_eV   # [eV/eV/s/SFR]
+    # param.source.cX * eV_per_erg * norm_xray * nu_ ** (-sed_xray) * Hz_per_eV   # [eV/eV/s/SFR]
 
     return param.source.cX/param.cosmo.h * eV_per_erg * norm_xray * nu_ ** (-sed_xray) /(nu_*h_eV_sec)   # [photons/Hz/s/SFR]
 
