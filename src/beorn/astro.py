@@ -72,7 +72,7 @@ def f_star_Halo(param,Mh):
     return fstar
 
 
-def f_esc(param,Mh,zz=None):
+def f_esc(param,Mh):
     """
     Parameters
     ----------

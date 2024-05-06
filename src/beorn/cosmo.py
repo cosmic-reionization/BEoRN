@@ -12,7 +12,7 @@ import scipy.integrate as integrate
 from astropy.cosmology import FlatLambdaCDM
 
 
-def hubble(z,param):
+def hubble(z, param):
     """
     Hubble parameter [km.s-1.Mpc-1]
     """
@@ -86,10 +86,10 @@ def E(x,param):
     return np.sqrt(param.cosmo.Om*(x**(-3))+1-param.cosmo.Om)
 
 def D_non_normalized(a,param):
-    """""
+    """
     a : input array 
     Integrate from a~0 (0.001) to a. We checked that it gives same results than integrate.quad for z=0 to 30
-    """""
+    """
     if np.any(a<0.001):
         print('Integration pb in Growth Factor.')
         exit()
@@ -131,7 +131,7 @@ def cosmo_astropy(param):
 
 def correlation_fct(param):
     """
-    This function is called when the RT solver is initialized.
+    Old function that we are not using now (2024). It might be usefull in the future to compute the 2-h term profile for non-homogeneous IGM.
     If the path to a new power spectrum (other than in src/files/PCDM_Planck.dat) is given in param.cosmo.ps,
     then the corr_function at z=0 is recomputed and then written at the location param.cosmo.corr_fct.
     Otherwise this function simply prints that it will read in the corr_fct from param.cosmo.corr_fct.
