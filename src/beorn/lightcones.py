@@ -19,7 +19,7 @@ class lightcone:
         self.nGrid = param.sim.Ncell
         self.qty = qty  # the quantity you want to plot
         self.Lbox = param.sim.Lbox
-        self.z_liste = param.solver.Nz
+        self.z_liste = def_redshifts(param)
         self.param = param
         self.slice_nbr = slice_nbr
         print('nGrid is', self.nGrid, '. Lbox is', self.Lbox, 'Mpc.', 'Plotting lightcone for z =', self.z_liste,'and slice nbr',slice_nbr)
