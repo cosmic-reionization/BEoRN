@@ -72,7 +72,7 @@ def sim_par(): ## used when computing and painting profiles on a grid
         "Ncell" : 128,              # nbr of pixels of the final grid.
         "Lbox" : 100,               # Box lenght, in [Mpc/h]
         "halo_catalogs": None,      # path to the directory containing all the halo catalogs.
-        "store_grids": True,        # whether or not to store the grids. If not, will just store the power spectra.
+        "store_grids": ['Tk','bubbles','lyal' ,'dTb'],        # whether or not to store the grids. If not, will just store the power spectra.
         "dens_field": None,         # path and name of the input density field on a grid. Used in run.py to compute dTb maps.
         "dens_field_type": 'pkdgrav',  # Can be either 21cmFAST of pkdgrav. It adapts the format and normalization of the density field...
         "Nh_part_min":50,           # Halo with less than Mh_part_min are excluded.
@@ -80,7 +80,8 @@ def sim_par(): ## used when computing and painting profiles on a grid
         "kmin": 3e-2,
         "kmax": 4,
         "kbin": 30,                ## either a path to a text files containing kbins edges values or an int (nbr of bins to measure PS)
-        "thresh_pixel" : None,      ## when spreading the excess ionisation fraction, we treat all the connected regions with less that "thresh_pixel" as a single connected region(to speed up)
+        "thresh_pixel" : None,      ## when spreading the excess ionisation fraction, we treat all the connected regions with less that "thresh_pixel" as a single connected region(to speed up)....
+                                    ##....  if set to None, a default nonzero value will be used.
         "approx" : True,            ## when spreading the excess ionisation fraction and running distance_tranform_edt, whether or not to do the subgrid approx.
         "nGrid_min_heat": 4,             ## stacked_T_kernel
         "nGrid_min_lyal": 16,            ## stacked_lyal_kernel
