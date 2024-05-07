@@ -24,7 +24,7 @@ from .functions import *
 def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
              read_lyal=False,
              check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
-             variance=False, compute_corr_fct_=False,Rsmoothing=0
+             variance=False, compute_corr_fct_=False,Rsmoothing=0, GS = False
              ):
     """
     Function to run the code. Several options are available.
@@ -73,7 +73,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
             print(' ------------ COMPUTING VARIANCES OF SMOOTHED FIELDS LYA, T, XHII  ------------ ')
             gather_variances(param)
 
-    if rank == 2 % size:
+    if GS and rank == 2 % size:
         print(' ------------ COMPUTING GLOBAL QUANTITIES FROM PROFILES AND HALO CATALOGS  ------------ ')
         GS = compute_glob_qty(param)
         save_f(file='./physics/GS_approx' + '_' + param.sim.model_name + '.pkl', obj=GS)
@@ -83,6 +83,10 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
             print(' ------------ COMPUTING CORRELATION FUNCTIONS AT R=0  ------------ ')
             compute_corr_fct(param)
 
+    Barrier(comm)
+    if rank == 0:
+        print(' ------------ DONE ------------ ')
+    
     return None
 
 
