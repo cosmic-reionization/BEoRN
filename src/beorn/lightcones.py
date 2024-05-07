@@ -87,8 +87,8 @@ class lightcone:
         zj = self.slice_av(self.xf_lc, 0, self.slice_nbr)  # self.xf_lc[64,:,:] #slice_av(self.xf_lc, 1, 64)
 
         if save_data_slice is not None :
-            save_f(file=save_data_slice,obj={'xi':xi,'yi':yi,'zj':zj})
-            
+            save_f(file=save_data_slice,obj={'xi':xi,'yi':yi,'zj':zj,'mean':self.mean_array})
+
         fig, axs = plt.subplots(1, 1, figsize=(20, 6))
         ax2 = axs.twiny()
         im = axs.pcolor(xi, yi, zj, cmap=cmap, norm=norm)
