@@ -294,7 +294,7 @@ def Beta(zz, PS, qty='Tk'):
         print('qty should be either Tk, lyal, or reio.')
 
 
-def cross_PS(arr1, arr2, box_dims, kbinload_grids):
+def cross_PS(arr1, arr2, box_dims, kbins):
     return t2c.power_spectrum.cross_power_spectrum_1d(arr1, arr2, box_dims=box_dims, kbins=kbins)
 
 
