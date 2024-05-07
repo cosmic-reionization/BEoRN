@@ -410,6 +410,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     if not RSD:
         dTb_RSD_mean = 0
         PS_dTb_RSD = 0
+        Grid_dTb_RSD = Grid_dTb
     else:
         print('Computing RSD for snapshot...')
         Grid_dTb_RSD = dTb_RSD(param, z, delta_b, Grid_dTb)
@@ -441,19 +442,15 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             param)  # we do this since in compute_var we change the kbins to go to smaller scales.
         compute_var_single_z(param_copy, z, Grid_xal, Grid_xHII, Grid_Temp, k_bins)
 
-    if param.sim.store_grids:
-        if temp:
+    if param.sim.store_grids is not False:
+        if 'Tk' in param.sim.store_grids:
             save_grid(param, z=z, grid=Grid_Temp, type='Tk')
-        if ion:
+        if 'bubbles' in param.sim.store_grids:
             save_grid(param, z=z, grid=Grid_xHII, type='bubbles')
-        if lyal:
+        if 'lyal' in param.sim.store_grids:
             save_grid(param, z=z, grid=Grid_xal, type='lyal')
-        if dTb:
-            if not RSD:
-                save_grid(param, z=z, grid=Grid_dTb, type='dTb')
-                # save_f(file='./grid_output/dTb_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_dTb)
-            else:
-                save_grid(param, z=z, grid=Grid_dTb_RSD, type='dTb')
+        if 'dTb' in param.sim.store_grids:
+            save_grid(param, z=z, grid=Grid_dTb_RSD, type='dTb')
 
 
 def gather_GS_PS_files(param, remove=False):
