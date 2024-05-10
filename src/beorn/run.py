@@ -86,7 +86,7 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
     Barrier(comm)
     if rank == 0:
         print(' ------------ DONE ------------ ')
-    
+
     return None
 
 
@@ -529,8 +529,8 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
         z = np.round(z, 2)
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
-            if check_exists and exists('./grid_output/xHII_' + str(nGrid) + '_' + model_name + '_z' + z_str):
-                    print('xHII map for z = ', z, 'already painted. Skipping.')
+            if check_exists and exists('./grid_output/dTb_' + str(nGrid) + '_' + model_name + '_z' + z_str):
+                    print('dTb map for z = ', z, 'already painted. Skipping.')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,

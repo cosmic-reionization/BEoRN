@@ -8,8 +8,16 @@ import matplotlib
 import numpy as np
 from matplotlib import pyplot as plt
 from .constants import *
-from .functions import Beta
+from .functions import Beta, find_nearest
 from beorn.cosmo import dTb_fct
+
+def Delta_21cm_PS_fixed_k(k,PS,plot=True):
+    kk, zz = PS['k'], PS['z']
+    k_value, ind_k = find_nearest(k,kk)
+    if plot:
+        print('k-value picked is ',k_value,'h/Mpc.')
+    Delta_sq = PS['dTb']**2 * PS['PS_dTb'][:,ind_k]/2/np.pi**2
+    return zz, Delta_sq
 
 def plot_Beorn(physics, qty='dTb', xlim=None, ylim=None, label='', color='C0', ls='-', lw=1, alpha=1):
     """""""""
