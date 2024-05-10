@@ -11,7 +11,7 @@ from .functions import *
 
 
 class lightcone:
-    def __init__(self, param, qty='dTb',slice_nbr = 64):
+    def __init__(self, param, qty='dTb',slice_nbr = None):
         self.path = './grid_output/'
         self.mean_array = []
         self.coeval_set = {}
@@ -21,7 +21,9 @@ class lightcone:
         self.Lbox = param.sim.Lbox
         self.z_liste = def_redshifts(param)
         self.param = param
-        self.slice_nbr = slice_nbr
+        if slice_nbr is None: self.slice_nbr = int(self.nGrid/2)
+        else :  self.slice_nbr = slice_nbr
+
         print('nGrid is', self.nGrid, '. Lbox is', self.Lbox, 'Mpc.', 'Plotting lightcone for z =', self.z_liste,'and slice nbr',slice_nbr)
 
     def load_boxes(self):
@@ -86,8 +88,14 @@ class lightcone:
         yi = np.array([np.linspace(0, int(self.Lbox), self.xf_lc.shape[1]) for i in range(xi.shape[1])]).T
         zj = self.slice_av(self.xf_lc, 0, self.slice_nbr)  # self.xf_lc[64,:,:] #slice_av(self.xf_lc, 1, 64)
 
+        zj_average_1 = self.slice_av(self.xf_lc, 1, self.slice_nbr)
+        zj_average_2 = self.slice_av(self.xf_lc, 2, self.slice_nbr)
+        zj_average_3 = self.slice_av(self.xf_lc, 3, self.slice_nbr)
+        zj_average_4 = self.slice_av(self.xf_lc, 4, self.slice_nbr)
+
         if save_data_slice is not None :
-            save_f(file=save_data_slice,obj={'xi':xi,'yi':yi,'zj':zj,'mean':self.mean_array})
+            save_f(file=save_data_slice,obj={'xi':xi,'yi':yi,'zj':zj,'mean':self.mean_array,'zj_av_1':zj_average_1,\
+                                             'zj_av_2':zj_average_2,'zj_av_3':zj_average_3,'zj_av_4':zj_average_4})
 
         fig, axs = plt.subplots(1, 1, figsize=(20, 6))
         ax2 = axs.twiny()
