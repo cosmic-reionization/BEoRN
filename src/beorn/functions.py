@@ -191,8 +191,10 @@ def load_grid(param, z, type=None):
             return np.zeros((Ncell, Ncell, Ncell)) + 1
         else:
             return grid
+    elif type=='matter':
+        grid = load_delta_b(param, z_str)
     else:
-        print('grid type should be dTb, lyal, Tk, exc_set, sem_num, or bubbles. Abort')
+        print('grid type should be dTb, lyal, Tk, matter, exc_set, sem_num, or bubbles. Abort')
         exit()
 
 
