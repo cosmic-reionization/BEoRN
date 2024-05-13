@@ -83,7 +83,7 @@ class lightcone:
             label ='dTb [mK]'
         else:
             cmap = plt.get_cmap('viridis')
-            norm = TwoSlopeNorm(vmin=np.min(self.mean_array), vcenter=0, vmax=np.maximum(0.1, np.max(self.mean_array)))
+            norm = TwoSlopeNorm(vmin=np.min(0.1,np.min(self.mean_array)), vcenter=0, vmax=np.maximum(0.1, np.max(self.mean_array)))
             label = r'$\delta_{\mathrm{m}}$'
 
         xi = np.array([self.zs_lc for i in range(self.xf_lc.shape[1])])
