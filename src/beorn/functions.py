@@ -193,6 +193,7 @@ def load_grid(param, z, type=None):
             return grid
     elif type=='matter':
         grid = load_delta_b(param, z_str)
+        return grid
     else:
         print('grid type should be dTb, lyal, Tk, matter, exc_set, sem_num, or bubbles. Abort')
         exit()
