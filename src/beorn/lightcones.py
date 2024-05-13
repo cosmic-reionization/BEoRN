@@ -11,8 +11,8 @@ from .functions import *
 
 
 class lightcone:
-    def __init__(self, param, qty='dTb',slice_nbr = None):
-        self.path = './grid_output/'
+    def __init__(self, param, qty='dTb',slice_nbr = None,path='./grid_output/'):
+        self.path = path
         self.mean_array = []
         self.coeval_set = {}
         self.zs_set = []
@@ -82,20 +82,22 @@ class lightcone:
             cmap = plt.get_cmap('cmr.iceburn')
             label ='dTb [mK]'
         else:
+            cmap = plt.get_cmap('viridis')
             norm = TwoSlopeNorm(vmin=np.min(self.mean_array), vcenter=0, vmax=np.maximum(0.1, np.max(self.mean_array)))
+            label = r'$\delta_{\mathrm{m}}$'
 
         xi = np.array([self.zs_lc for i in range(self.xf_lc.shape[1])])
         yi = np.array([np.linspace(0, int(self.Lbox), self.xf_lc.shape[1]) for i in range(xi.shape[1])]).T
         zj = self.slice_av(self.xf_lc, 0, self.slice_nbr)  # self.xf_lc[64,:,:] #slice_av(self.xf_lc, 1, 64)
 
-        zj_average_1 = self.slice_av(self.xf_lc, 1, self.slice_nbr)
-        zj_average_2 = self.slice_av(self.xf_lc, 2, self.slice_nbr)
-        zj_average_3 = self.slice_av(self.xf_lc, 3, self.slice_nbr)
-        zj_average_4 = self.slice_av(self.xf_lc, 4, self.slice_nbr)
+        #zj_average_1 = self.slice_av(self.xf_lc, 1, self.slice_nbr)
+        #zj_average_2 = self.slice_av(self.xf_lc, 2, self.slice_nbr)
+        #zj_average_3 = self.slice_av(self.xf_lc, 3, self.slice_nbr)
+        #zj_average_4 = self.slice_av(self.xf_lc, 4, self.slice_nbr)
 
         if save_data_slice is not None :
-            save_f(file=save_data_slice,obj={'xi':xi,'yi':yi,'zj':zj,'mean':self.mean_array,'zj_av_1':zj_average_1,\
-                                             'zj_av_2':zj_average_2,'zj_av_3':zj_average_3,'zj_av_4':zj_average_4})
+            save_f(file=save_data_slice,obj={'xi':xi,'yi':yi,'zj':zj,'mean':self.mean_array})#,'zj_av_1':zj_average_1,\
+                                            # 'zj_av_2':zj_average_2,'zj_av_3':zj_average_3,'zj_av_4':zj_average_4})
 
         fig, axs = plt.subplots(1, 1, figsize=(20, 6))
         ax2 = axs.twiny()
