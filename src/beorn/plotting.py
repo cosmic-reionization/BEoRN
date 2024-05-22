@@ -13,11 +13,16 @@ from beorn.cosmo import dTb_fct
 
 def Delta_21cm_PS_fixed_k(k,PS,plot=True):
     kk, zz = PS['k'], PS['z']
-    k_value, ind_k = find_nearest(k,kk)
+    k_value, ind_k = find_nearest(kk,k)
     if plot:
         print('k-value picked is ',k_value,'h/Mpc.')
-    Delta_sq = PS['dTb']**2 * PS['PS_dTb'][:,ind_k]/2/np.pi**2
-    return zz, Delta_sq
+    Delta_sq = k_value**3*PS['dTb']**2 * PS['PS_dTb'][:,ind_k]/2/np.pi**2
+    return zz, Delta_sq, k_value
+
+def nu_MHz(aa):
+    # observed 21cm frequency in Mhz for a given scale fac aa
+    return 1420*aa
+
 
 def plot_Beorn(physics, qty='dTb', xlim=None, ylim=None, label='', color='C0', ls='-', lw=1, alpha=1):
     """""""""
@@ -151,6 +156,20 @@ def expansion_terms_beorn(PS):
 
     return PS_bb ,PS_aa ,PS_TT ,PS_rr ,PS_ab , PS_Tb , PS_aT , PS_rb , PS_ra , PS_rT
 
+def expansion_terms_beorn_HO_reio(PS):
+    from beorn.functions import Beta
+
+    kk, zz = PS['k'], PS['z']
+    beta_r, beta_T, beta_a = Beta(zz, PS, qty='reio'), Beta(zz, PS, qty='Tk'), Beta(zz, PS, qty='lyal')
+
+    for key, value in PS.items():  # change lists to numpy arrays
+        PS[key] = np.nan_to_num(PS[key])
+
+    PS_rbb = PS['PS_rb_b'] * (2 * beta_r)[:, None]
+    PS_rrb = PS['PS_br_r'] * (2 * beta_r ** 2)[:, None]
+    PS_rbrb = PS['PS_rb_rb'] * (beta_r ** 2)[:, None]
+
+    return PS_rbb ,PS_rrb ,PS_rbrb
 
 
 def expansion_dTb_PS(PS,higher_order=False ,coef=1,coef_3th_order=0,coef_4th_order=0,remove_T_2nd_order = 1):
@@ -1205,7 +1224,7 @@ def plot_FAST_RT_PS_of_z(k, k_values_fast, path_to_FAST_PS, GS_Beorn, PS_Beorn, 
         print(PS_dTb_RT_RSD / PS_dTb_RT)
 
 
-def plot_HM_PS_of_z(k, PS, color, label='', ls='--'):
+def plot_HM_PS_of_z(k, PS, color, label='', ls='--',lw=2):
     """""""""
     Plot a HM PS as a fct of k
     PS : output of coda.halomodel
@@ -1215,7 +1234,7 @@ def plot_HM_PS_of_z(k, PS, color, label='', ls='--'):
     ind_k = np.argmin(np.abs(kk * 0.68 - k))
     print('k HM is', PS['k'][ind_k] * 0.68)
     try:
-        plt.semilogy(zz, kk[ind_k] ** 3 * PS['dTb'] ** 2 * np.abs(PS['P_mu0'][:, ind_k]) / 2 / np.pi ** 2, ls=ls, lw=1,
+        plt.semilogy(zz, kk[ind_k] ** 3 * PS['dTb'] ** 2 * np.abs(PS['P_mu0'][:, ind_k]) / 2 / np.pi ** 2, ls=ls, lw=lw,
                      alpha=1, label=label, color=color)
     except Exception:
         print('RT:', PS.keys())
@@ -1243,7 +1262,10 @@ def plot_PS_fast(z, file, color, ax, Beta=1, label='', qty='xHII', ls='--', alph
         print('Fast :', PS.keys())
     plt.legend()
     plt.xlabel('k [1/Mpc]')
-
+    plt.ylim(1e-1, 1e3)
+    plt.xlim(6, 22)
+    plt.legend(title='$ k^{3}P(k)/(2\pi^{2})$')
+    plt.xlabel('z', fontsize=14)
 
 def plot_PS_HM(z, PS, color, ax, label='', qty='rr', with_dTb=False):
     """""""""
@@ -1394,3 +1416,65 @@ def horizontal_plot_for_lightcone(Beorn_GS, Beorn_PS):
         plt.yticks(size=15)
     plt.legend(fontsize=15, loc='upper left')
     plt.savefig('./Model_3_Beorn_P(z)_For_Lightcone_Plot.pdf')
+
+
+
+def plot_reio_constraints():
+    """
+    Combined constrainted on averaged xHII
+    TAKEN FROM  : --> The short ionizing photon mean free path at z=6 in Cosmic Dawn III,
+                    a new fully-coupled radiation-hydrodynamical simulation of the Epoch of Reionization
+
+    """
+    # plt.errorbar([7.143946073101785], [0.591468163757487],yerr=[[0.591-0.4014],[0.7998-0.591]],markersize=6,marker = 'x')
+
+    ## LyA E Fraction
+    ## the point with yerr + and -
+    plt.errorbar([6.980], [0.60060], yerr=[[0.6006 - 0.524], [0.69103 - 0.6006]], color='lightcoral', markersize=6,
+                 marker='d', label='LAE fraction')
+    plt.errorbar([7.037], [0.4027], yerr=[[0.4027 - 0.255], [0.51280 - 0.4027]], color='lightcoral', markersize=6,
+                 marker='d')
+    plt.errorbar([6.98420], [0.2428], yerr=[[0.2428 - 0.1956], [0.2939 - 0.2428]], color='lightcoral', markersize=6,
+                 marker='d')
+    ## one wiht only yerr -->
+    plt.errorbar([6.954], [0.4787], yerr=[[0.4787 - 0.428], [0]], color='lightcoral', markersize=6, marker='d',
+                 uplims=True, )
+    plt.errorbar([7.9937], [0.7], yerr=[[0.688 - 0.633], [0]], color='lightcoral', markersize=6, marker='d',
+                 uplims=True, )
+    plt.errorbar([7.9787], [0.3439], yerr=[[0.3439 - 0.286283], [0]], color='lightcoral', markersize=6, marker='d',
+                 uplims=True, )
+    ## one with x and y err
+    plt.errorbar([7.5916], [0.117122], yerr=[[0.117122 - 0.064], [0.21279 - 0.117122]],
+                 xerr=([7.5916 - 6.99439], [8.188973 - 7.5916]), color='lightcoral', markersize=6, marker='d')
+    ### QSO damping wings
+    plt.errorbar([6.191], [0.888], yerr=[[0.888 - 0.833], [0]], color='darkseagreen', markersize=6, marker='s',
+                 uplims=True, label='QSO damping wings')
+    plt.errorbar([7.08696], [0.88765], yerr=[[0.887654 - 0.8352], [0]], color='darkseagreen', markersize=6, marker='s',
+                 uplims=True, )
+    plt.errorbar([7.07], [0.660914], yerr=[[0.660914 - 0.6045], [0]], color='darkseagreen', markersize=6, marker='s',
+                 uplims=True, )
+    plt.errorbar([7.0701], [0.74217], yerr=[[0.74217 - 0.68975033], [0.7893549 - 0.74217]], color='darkseagreen',
+                 markersize=6, marker='s')
+    plt.errorbar([6.965], [0.29129], yerr=[[0.29129 - .06456], [0.4892027 - 0.29129]], color='darkseagreen',
+                 markersize=6, marker='s')
+    plt.errorbar([7.53], [0.3936], yerr=[[0.3936 - 0.28225], [0.50243 - 0.3936]], color='darkseagreen', markersize=6,
+                 marker='s')
+    ## GRB Damping wings
+    plt.plot([5.91], [0.94], color='cyan', markersize=6, marker='o', label='GRB Damping wings')
+    ##Lyal LF
+    # plt.errorbar([6.6030974], [0.7427821],yerr = [[0],[0.797900-0.7427821]],color='purple',markersize=6,marker='X',lolims=True,label='Lyα LF')
+    #  plt.errorbar([6.6], [0.92],yerr = [[0.05],[0.08]],color='purple',markersize=6,marker='X',label='Lyα LF') #2101.01205v3
+    # plt.errorbar([7], [0.72],yerr = [[0.5],[0.05]],color='purple',markersize=6,marker='X')
+    # plt.errorbar([7.3], [0.17],yerr = [[0.07],[0.06]],color='purple',markersize=6,marker='X')
+
+    # Dark Pixel Fraction
+    plt.errorbar([5.61], [0.89107611], yerr=[[0], [0.944881 - 0.891076115]], color='y', markersize=6, marker='*',
+                 lolims=True, label='Dark pixel fraction')
+    plt.errorbar([5.917], [0.880577], yerr=[[0], [0.93569553 - 0.880577]], color='y', markersize=6, marker='*',
+                 lolims=True, )
+    # Lyal EW
+    plt.errorbar([7.6], [0.51], yerr=[[0.19], [0.19]], color='thistle', markersize=6, marker='H', label='Lyα EW')
+    # Lyal EW 2303.03419 Bruton et al
+    plt.errorbar([10.6], [0.12], yerr=[[0], [0.1]], color='thistle', markersize=6, marker='H', lolims=True)
+
+

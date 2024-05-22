@@ -67,24 +67,31 @@ class lightcone:
         print((2 * nbr + 1))
         return av
 
+
+
+    def define_norm_cbar_label(self):
+        if self.qty == 'Tk':
+            norm, cmap, label = matplotlib.colors.LogNorm(), plt.get_cmap('plasma'), r'$T_{\mathrm{k}} [K]$'
+        elif self.qty == 'lyal':
+            norm, cmap, label = matplotlib.colors.LogNorm(vmin=np.min(mean_dTb[mean_dTb > 0]), vmax=np.max(mean_dTb)), plt.get_cmap('cividis'), r'$x_{\mathrm{al}}$'
+        elif self.qty == 'matter':
+            norm, cmap, label = matplotlib.colors.Normalize(vmin=-1,vmax=5),plt.get_cmap('viridis'), r'$\delta_{\mathrm{m}}$'
+        elif self.qty == 'bubbles':
+            norm, cmap, label = matplotlib.colors.Normalize(vmin=0,vmax=1),plt.get_cmap('binary'), r'$x_{\mathrm{HII}}$'
+        elif self.qty == 'dTb':
+            norm, cmap, label = TwoSlopeNorm(vmin=np.min(zj), vcenter=0, vmax=max(np.max(zj),0.001)),my_color_gradient_(),'$\overline{dT}_{\mathrm{b}}$ [mK]'
+        else:
+            norm = matplotlib.colors.LogNorm(vmin=np.min(zj) + 1, vmax=np.max(zj) + 1)
+        return norm, cmap, label
+
+
     def plotting_lightcone(self, save='./lightcone.jpg',save_data_slice = None ):
         import cmasher as cmr
         from matplotlib.colors import TwoSlopeNorm
 
         print('Range for Lightcone plot is :', np.min(self.mean_array), np.max(self.mean_array))
 
-        if self.qty == 'bubbles':
-            norm = TwoSlopeNorm(vmin=0, vcenter=0.5,vmax=1)
-            cmap = plt.get_cmap('viridis')
-            label = 'xHII'
-        elif self.qty == 'dTb':
-            norm = TwoSlopeNorm(vmin=np.min(self.mean_array), vcenter=0, vmax=np.maximum(0.1, np.max(self.mean_array)))
-            cmap = plt.get_cmap('cmr.iceburn')
-            label ='dTb [mK]'
-        else:
-            cmap = plt.get_cmap('viridis')
-            norm = TwoSlopeNorm(vmin=0, vcenter=0.5,vmax=1)#TwoSlopeNorm(vmin=np.min(0.1,np.min(self.mean_array)), vcenter=0, vmax=np.maximum(0.1, np.max(self.mean_array)))
-            label = r'$\delta_{\mathrm{m}}$'
+        norm, cmap, label = define_norm_cbar_label()
 
         xi = np.array([self.zs_lc for i in range(self.xf_lc.shape[1])])
         yi = np.array([np.linspace(0, int(self.Lbox), self.xf_lc.shape[1]) for i in range(xi.shape[1])]).T
@@ -130,3 +137,17 @@ class lightcone:
         plt.savefig(save)  # , bbox_inches='tight')
         plt.show()
 
+
+def my_color_gradient_():
+    my_gradient = \
+        LinearSegmentedColormap.from_list('my_gradient', (
+            # Edit this gradient at https://eltos.github.io/gradient/#0:78E4FF-20:006DC2-49:001250-50:000000-51:562500-71.9:CF8400-100:FFEC33
+            (0.000, (0.471, 0.894, 1.000)),
+            (0.200, (0.000, 0.427, 0.761)),
+            (0.490, (0.000, 0.071, 0.314)),
+            (0.500, (0.000, 0.000, 0.000)),
+            (0.510, (0.337, 0.145, 0.000)),
+            (0.719, (0.812, 0.518, 0.000)),
+            (1.000, (1.000, 0.925, 0.200))))
+    #Good sharp gradient for dTb : https://eltos.github.io/gradient/#0:78E4FF-20:006DC2-49:001250-50:000000-51:562500-71.9:CF5D00-100:FFEC33
+    return my_gradient

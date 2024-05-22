@@ -7,7 +7,7 @@ import os.path
 import numpy as np
 from scipy.integrate import cumtrapz, trapz, quad
 from scipy.interpolate import splrep,splev
-from .constants import rhoc0,c_km_s, Tcmb0, sec_per_year, km_per_Mpc
+from .constants import *
 import scipy.integrate as integrate
 from astropy.cosmology import FlatLambdaCDM
 
@@ -231,3 +231,48 @@ def M_to_Tvir(M, z, param):
     conv_fact = 1.98e4 * (mu / 0.6) * (Om * Delc / Omz / 18 / np.pi ** 2) ** (1. / 3) * ((1 + z) / 10)
     Tvir = conv_fact * (M * param.cosmo.h / 1e8) ** (2. / 3)
     return Tvir
+
+
+
+def Thomson_optical_depth(zz, xHII, param):
+    """
+    Cumulative optical optical depth of array zz.
+    xHII : global ionisation fraction history
+    See e.g. Eq. 6 of 1406.4120 or eq. 12 from 2101.01712, or eq. 84 from Planck_2018_results_L06.
+    """
+    # check if zz array is in increasing order.
+    is_increasing = zz[0]<zz[-1]
+    if not is_increasing: zz,xHII = np.flip(zz),np.flip(xHII)
+
+    z0 = zz[0]
+    if z0 > 0:  ## the integral has to be done starting from z=0
+        low_z = np.arange(0, z0, 0.5)
+        zz = np.concatenate((low_z, zz))
+        xHII = np.concatenate((np.full(len(low_z), xHII[0]), xHII))
+
+    if xHII[0] < 1:
+        xHII[0] = 1
+        print(
+            'Warning: reionisation is not complete at the lower redshift available!! The CMB otpical depth calculation will be wrong.')
+
+    from scipy.integrate import cumtrapz, trapz, odeint
+    Ob = param.cosmo.Ob
+    h0 = param.cosmo.h
+
+    # hydrogen and helium cross sections
+    sHII = sigma_T * 1e4 * (h0 / cm_per_Mpc) ** 2  # [Mpc/h]^2
+    nb0 = rhoc0 * Ob / (m_p_in_Msun * h0)  # [h/Mpc]^3
+    # H abundances
+    nHII = xHII * nb0 * (1 + zz) ** 3  # [h/Mpc]^3
+    # proper line element
+    dldz = c_km_s * h0 / hubble(zz, param) / (1 + zz)  # [Mpc/h]
+    # integrate
+    tau_int = dldz * (nHII * sHII)  # + nHeI*sHeI + nHeII*sHeII)
+    tau = cumtrapz(tau_int, x=zz, axis=0, initial=0.0)
+
+    return zz, tau  # [np.where(zz>=z0)]
+
+
+def R_of_M(M):
+    R = (3 * M / (200 * rhoc0 * 0.31 * np.pi * 4)) ** (1 / 3)
+    return R_of_M
