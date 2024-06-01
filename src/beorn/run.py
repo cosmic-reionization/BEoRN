@@ -200,6 +200,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         Grid_dTb_RSD = np.array([0])
         Grid_dTb_T_sat = factor * np.sqrt(1 + z) * (1 - Grid_xHII) * (delta_b + 1) * Grid_xcoll / (1 + Grid_xcoll)
         xcoll_mean = np.mean(Grid_xcoll)
+        T_spin = np.mean(Tspin_fct(Tcmb0 * (1 + z), Grid_Temp, Grid_xcoll))
         del Grid_xcoll
 
     else:
@@ -395,6 +396,8 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 Grid_dTb_no_reio = np.array([0])
                 Grid_dTb_T_sat = np.array([0])
 
+        T_spin = np.mean(Tspin_fct(Tcmb0 * (1 + z), Grid_Temp, Grid_xtot))
+
     PS_dTb, k_bins = auto_PS(delta_fct(Grid_dTb), box_dims=LBox,
                              kbins=def_k_bins(param))
     PS_dTb_no_reio, k_bins = auto_PS(delta_fct(Grid_dTb_no_reio), box_dims=LBox,
@@ -416,7 +419,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         dTb_RSD_mean = np.mean(Grid_dTb_RSD)
 
 
-    T_spin = np.mean(Tspin_fct(Tcmb0 * (1 + z), Grid_Temp, Grid_xtot))
+
         ##
 
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
