@@ -395,7 +395,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]),param=param)
 
                 Grid_xcoll_sat =  x_coll(z=z, Tk=1e50, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
-                Grid_dTb_T_sat = dTb_fct(z=z, Tk=1e50, xtot = Grid_xal + Grid_xcoll_sat, delta_b=delta_b, x_HII=Grid_xHII, param=param)
+                Grid_dTb_T_sat = dTb_fct(z=z, Tk=1e50, xtot = 1e50, delta_b=delta_b, x_HII=Grid_xHII, param=param)
                 del Grid_xcoll_sat
 
             else :
@@ -1098,7 +1098,7 @@ def saturated_Tspin(param, ion='bubbles'):
     model_name = param.sim.model_name
     nGrid = param.sim.Ncell
     Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
-    factor = 27 * Ob * h0 ** 2 / 0.023 * np.sqrt(0.15 / Om / h0 ** 2 / 10)  # factor used in dTb calculation
+    factor = dTb_factor(param)  # factor used in dTb calculation
 
     Lbox = param.sim.Lbox  # Mpc/h
     if isinstance(param.sim.kbin, int):
@@ -1128,17 +1128,7 @@ def saturated_Tspin(param, ion='bubbles'):
             delta_b = 0
         zz.append(zz_)
 
-        if ion == 'exc_set':
-            Grid_xHII = pickle.load(
-                file=open('./grid_output/xHII_exc_set_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5],
-                          'rb'))
-        elif ion == 'Sem_Num':
-            Grid_xHII = pickle.load(
-                file=open('./grid_output/xHII_Sem_Num_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5],
-                          'rb'))
-        else:
-            Grid_xHII = pickle.load(
-                file=open('./grid_output/xHII_Grid' + str(nGrid) + model_name + '_snap' + filename[4:-5], 'rb'))
+        Grid_xHII = load_grid(param, z, type=ion)
 
         Grid_dTb = factor * np.sqrt(1 + zz_) * (1 - Grid_xHII) * (delta_b + 1)
 
