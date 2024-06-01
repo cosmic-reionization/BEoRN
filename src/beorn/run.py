@@ -344,19 +344,13 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                     print('universe is fully inoinzed. Return [1] for Grid_xHII.')
                     Grid_xHII = np.array([1])
 
-
                 Grid_Temp += T_adiab_fluctu(z, param, delta_b)
-
 
             if read_temp:
                 Grid_Temp = load_grid(param, z=z, type='Tk')
-            if param.sim.T_saturated :
-                Grid_Temp = np.array([1e50])
 
             if read_ion:
                 Grid_xHII = load_grid(param, z=z, type='bubbles')
-            if not param.sim.reio :
-                Grid_xHII = np.array([0])
 
             if read_lyal:
                 Grid_xal = load_grid(param, z=z, type='lyal')
@@ -394,9 +388,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
                 Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]),param=param)
 
-                Grid_xcoll_sat =  x_coll(z=z, Tk=1e50, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
                 Grid_dTb_T_sat = dTb_fct(z=z, Tk=1e50, xtot = 1e50, delta_b=delta_b, x_HII=Grid_xHII, param=param)
-                del Grid_xcoll_sat
 
             else :
                 Grid_dTb = np.array([0])

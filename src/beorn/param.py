@@ -86,9 +86,6 @@ def sim_par(): ## used when computing and painting profiles on a grid
         "nGrid_min_heat": 4,             ## stacked_T_kernel
         "nGrid_min_lyal": 16,            ## stacked_lyal_kernel
         "random_seed": 12345,            ## when using 21cmFAST 2LPT solver.
-
-        "T_saturated":False, ## If True, we will assum Tk>>Tcmb
-        "reio": True,        ## If False, we will assume xHII = 0
     }
     return Bunch(par)
 
