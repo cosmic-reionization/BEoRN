@@ -17,7 +17,7 @@ from .global_qty import xHII_approx, compute_glob_qty
 from os.path import exists
 import tools21cm as t2c
 import scipy
-from .cosmo import dTb_factor
+from .cosmo import dTb_factor, Tspin_fct
 from .functions import *
 
 
