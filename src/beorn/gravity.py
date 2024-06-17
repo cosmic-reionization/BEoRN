@@ -104,14 +104,15 @@ def simulate_matter_21cmfast(param, redshift_list=None, IC=None, data_dir=None):
 
     if param.sim.dens_field  is None:
         print('We strongly advice to specify a path for param.sim.dens_field to write the densities.')
-        print('It should be of the form path+dir+name. For instance param.sim.dens_field = ./dir_density/dens_21cmFast_z')
+        print('It should be of the form path+dir+name. For instance param.sim.dens_field = ./data_dir/dens_21cmFast_z')
     else:
         print('We will store the density fields in', param.sim.dens_field)
+
     if param.sim.halo_catalogs is None:
-        print('We strongly advice to specify a path for param.sim.halo_catalogs to write the halo catalogues.') 
-        print('It should be of the form path+dir+name. For instance param.sim.dens_field = ./dir_density/dens_21cmFast_z')
+        print('We strongly advice to specify a path for param.sim.halo_catalogs to write the halo catalogues.')
+        print('It should be of the form path+dir+name. For instance param.sim.halo_catalogs = ./dir_halos/halos_21cmFast_z')
     else:
-        print('We will store halo catalogs in', param.sim.halo_catalogs) 
+        print('We will store halo catalogs in', param.sim.halo_catalogs)
     
     dens_dict = {}
     halo_catalog_dict = {}

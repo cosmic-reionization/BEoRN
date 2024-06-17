@@ -26,6 +26,8 @@ def load_halo(param, z_str):
     The halo catalogs should be in param.sim.halo_catalogs and end up with z_string
     z is the redshift of the snapshot (outupt of z_string_format)
     """
+    if not isinstance(z_str,str):
+        z_str = z_string_format(z_str)
     catalog_dir = param.sim.halo_catalogs
     catalog = catalog_dir + z_str
     halo_catalog = load_f(catalog)
