@@ -172,7 +172,7 @@ def expansion_terms_beorn_HO_reio(PS):
     return PS_rbb ,PS_rrb ,PS_rbrb
 
 
-def expansion_dTb_PS(PS,higher_order=False ,coef=1,coef_3th_order=0,coef_4th_order=0,remove_T_2nd_order = 1):
+def expansion_dTb_PS(PS,higher_order=False ,HO_r_b=False, coef=1,coef_3th_order=0,coef_4th_order=0,remove_T_2nd_order = 1):
     """
     Parameters
     ----------
@@ -211,6 +211,11 @@ def expansion_dTb_PS(PS,higher_order=False ,coef=1,coef_3th_order=0,coef_4th_ord
 
     PS_dTb_HM_style = PS_bb + PS_aa + PS_TT + PS_rr + 2 * (PS_ab + PS_Tb + PS_aT + PS_rb + PS_ra + PS_rT)
 
+    if HO_r_b:
+        PS_rrb = PS['PS_br_r'] * (2 * beta_r ** 2)[:, None]
+        PS_rbb = PS['PS_rb_b'] * (2 * beta_r)[:, None]
+        PS_rbrb = PS['PS_rb_rb'] * (beta_r ** 2)[:, None]
+        PS_dTb_HM_style += PS_rbb +PS_rrb +PS_rbrb
 
     if higher_order:
         print('computing PS to 3rd order in delta_r')

@@ -4,6 +4,7 @@ Scripts to plot lightcones.
 import tools21cm as t2c
 import os
 import numpy as np
+import matplotlib
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 import matplotlib.pyplot as plt
 import cmasher as cmr
@@ -73,15 +74,15 @@ class lightcone:
         if self.qty == 'Tk':
             norm, cmap, label = matplotlib.colors.LogNorm(), plt.get_cmap('plasma'), r'$T_{\mathrm{k}} [K]$'
         elif self.qty == 'lyal':
-            norm, cmap, label = matplotlib.colors.LogNorm(vmin=np.min(mean_dTb[mean_dTb > 0]), vmax=np.max(mean_dTb)), plt.get_cmap('cividis'), r'$x_{\mathrm{al}}$'
+            norm, cmap, label = matplotlib.colors.LogNorm(vmin=np.min(self.mean_array[self.mean_array > 0]), vmax=np.max(self.mean_array)), plt.get_cmap('cividis'), r'$x_{\mathrm{al}}$'
         elif self.qty == 'matter':
             norm, cmap, label = matplotlib.colors.Normalize(vmin=-1,vmax=5),plt.get_cmap('viridis'), r'$\delta_{\mathrm{m}}$'
         elif self.qty == 'bubbles':
             norm, cmap, label = matplotlib.colors.Normalize(vmin=0,vmax=1),plt.get_cmap('binary'), r'$x_{\mathrm{HII}}$'
         elif self.qty == 'dTb':
-            norm, cmap, label = TwoSlopeNorm(vmin=np.min(zj), vcenter=0, vmax=max(np.max(zj),0.001)),my_color_gradient_(),'$\overline{dT}_{\mathrm{b}}$ [mK]'
+            norm, cmap, label = TwoSlopeNorm(vmin=np.min(self.mean_array), vcenter=0, vmax=max(np.max(self.mean_array),0.001)),my_color_gradient_(),'$\overline{dT}_{\mathrm{b}}$ [mK]'
         else:
-            norm = matplotlib.colors.LogNorm(vmin=np.min(zj) + 1, vmax=np.max(zj) + 1)
+            norm = matplotlib.colors.LogNorm(vmin=np.min(self.mean_array) + 1, vmax=np.max(self.mean_array) + 1)
         return norm, cmap, label
 
 
@@ -91,7 +92,7 @@ class lightcone:
 
         print('Range for Lightcone plot is :', np.min(self.mean_array), np.max(self.mean_array))
 
-        norm, cmap, label = define_norm_cbar_label()
+        norm, cmap, label = self.define_norm_cbar_label()
 
         xi = np.array([self.zs_lc for i in range(self.xf_lc.shape[1])])
         yi = np.array([np.linspace(0, int(self.Lbox), self.xf_lc.shape[1]) for i in range(xi.shape[1])]).T

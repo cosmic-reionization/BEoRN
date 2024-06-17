@@ -464,30 +464,7 @@ def gather_GS_PS_files(param, remove=False):
     -------
     Nothing.
     """
-
-    from collections import defaultdict
-
-    dd = defaultdict(list)
-
-    z_arr = def_redshifts(param)
-    for ii, z in enumerate(z_arr):
-        z_str = z_string_format(z)
-        file = './physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str
-        if exists(file):
-            GS_PS = load_f(file)
-            for key, value in GS_PS.items():
-                dd[key].append(value)
-            if remove:
-                os.remove(file)
-
-    for key, value in dd.items():  # change lists to numpy arrays
-        dd[key] = np.array(value)
-
-    dd['k'] = GS_PS['k']
-
-    save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
-
-
+    gather_files(param, path='./physics/GS_PS_', z_arr=def_redshifts(param), Ncell=param.sim.Ncell, remove=remove)
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
