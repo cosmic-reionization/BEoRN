@@ -77,6 +77,10 @@ def simulate_matter_21cmfast(param, redshift_list=None, IC=None, data_dir=None):
         print('To use the density and halo catalogues from 21cmfast, install the python version of that code:')
         print('https://21cmfast.readthedocs.io/en/latest/installation.html')
         return None
+    
+    if data_dir is None:
+        print('You have not specified a data_dir to store the 21cmFAST data. By default it is ./21cmFAST_data.')
+        data_dir = './21cmFAST_data'
     create_data_dir(data_dir)
 
     start_time = time.time()

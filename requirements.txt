@@ -6,6 +6,7 @@ tqdm
 mpi4py
 
 tools21cm
+astropy
 
 matplotlib
 cmasher
