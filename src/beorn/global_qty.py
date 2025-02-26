@@ -4,7 +4,7 @@ Global quantity computed from the halo catalogs.
 
 import os.path
 import numpy as np
-import pkg_resources
+import importlib
 from .cosmo import Hubble, hubble, T_adiab, dTb_factor
 import pickle
 from .couplings import S_alpha, x_coll

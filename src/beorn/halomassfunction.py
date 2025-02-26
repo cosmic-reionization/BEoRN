@@ -5,6 +5,8 @@ Halo mass function from the Press-Schechter formalism
 
 import numpy as np
 from math import pi
+
+import scipy.differentiate
 from .cosmo import *
 import scipy
 from beorn.profiles_on_grid import log_binning,bin_edges_log
@@ -45,13 +47,13 @@ def W_tophat(x):
     return 3*(np.sin(x)-x*np.cos(x))/x**3
 
 def derivative_W_tophat(x):
-    return scipy.misc.derivative(W_tophat,x)
+    return scipy.differentiate.derivative(W_tophat,x).df
 
 #sharp-k filter
 def W_sharpk(x):
     return np.heaviside(1-x,0)
 def derivative_W_sharpk(x):
-    return scipy.misc.derivative(W_sharp,x)
+    return scipy.differentiate.derivative(W_sharp,x).df
 
 
 #smooth-k filter

@@ -3,7 +3,7 @@ Mass Accretion Model
 """
 from .cosmo import D, hubble
 from scipy.interpolate import splrep, splev, interp1d
-from scipy.integrate import cumtrapz, trapz, quad, odeint
+from scipy.integrate import odeint
 import numpy as np
 from .constants import *
 from .cosmo import comoving_distance, Hubble, hubble

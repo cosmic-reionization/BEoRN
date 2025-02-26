@@ -4,7 +4,6 @@ N-body simulations.
 """
 import numpy as np 
 from scipy.interpolate import splev, splrep
-import pandas as pd
 
 class ReaderPkdgrav3:
     def __init__(self, box_len, nGrid, 
@@ -156,8 +155,9 @@ class PowerSpectrumPkdgrav3(ReaderPkdgrav3):
             pp  = 10**splev(np.log10(ks), tck)
             kk  = ks
         if window_size is not None:
-            # Apply a simple moving average (adjust the window size as needed)
-            data = pd.DataFrame({'x': np.log10(kk), 'y': np.log10(pp)})
-            data['y_smoothed'] = data['y'].rolling(window=window_size, min_periods=1).mean()
-            pp = 10**data['y_smoothed']
+            print("Ooopsie")
+            # # Apply a simple moving average (adjust the window size as needed)
+            # data = pd.DataFrame({'x': np.log10(kk), 'y': np.log10(pp)})
+            # data['y_smoothed'] = data['y'].rolling(window=window_size, min_periods=1).mean()
+            # pp = 10**data['y_smoothed']
         return kk, pp

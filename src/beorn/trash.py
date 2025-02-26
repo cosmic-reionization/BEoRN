@@ -3,7 +3,7 @@ Some old functions that we store here before trashing them, one day.
 """
 import numpy as np
 
-
+from pathlib import Path
 
 
 
@@ -321,7 +321,7 @@ def J_alpha_n(zz, sfrd, param):
 
     # rec fraction
     names = 'n, f'
-    path_to_file = pkg_resources.resource_filename('radtrans', 'input_data/recfrac.dat')
+    path_to_file = Path(importlib.util.find_spec('beorn').origin).parent / 'files' / 'recfrac.dat'
     rec = np.genfromtxt(path_to_file, usecols=(0, 1), comments='#', dtype=float, names=names)
     rectrunc = 23
 

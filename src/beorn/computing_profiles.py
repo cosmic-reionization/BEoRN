@@ -2,17 +2,18 @@
 Computes the 1D profiles of Tk, xal, xHII. 
 """""""""
 
+import importlib.util
 from .constants import *
 from .astro import *
 from .cross_sections import sigma_HI, sigma_HeI
 import numpy as np
-from scipy.integrate import cumtrapz, trapz, odeint
+from scipy.integrate import cumulative_trapezoid, trapezoid, odeint
 from scipy.interpolate import splrep, splev, interp1d
 from .cosmo import comoving_distance, Hubble, hubble
 from .global_qty import *
 from .cross_sections import alpha_HII
 from .massaccretion import *
-import pkg_resources
+import importlib
 from beorn.astro import *
 from beorn.couplings import eps_lyal
 from .functions import *
@@ -262,7 +263,7 @@ def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
             pref_nu = ((nH0 / nb0) * sigma_HI(nu * h_eV_sec) * (nu * h_eV_sec - E_HI) + (nHe0 / nb0) * sigma_HeI(nu * h_eV_sec) * (nu * h_eV_sec - E_HeI))   # [cm^2 * eV] 4 * np.pi *
 
             heat_nu = pref_nu[:, None,None] * flux   # [cm^2*eV/s/Hz]
-            heat_of_r = trapz(heat_nu, nu, axis=0)  # [cm^2*eV/s]
+            heat_of_r = trapezoid(heat_nu, nu, axis=0)  # [cm^2*eV/s]
             rho_xray[i, :,:] = fXh * heat_of_r / (4 * np.pi * (rr/(1+zz[i])) ** 2)[:,None] / (cm_per_Mpc/h0) ** 2  # [eV/s]  1/(rr/(1 + zz[i]))**2
 
     return rho_xray
@@ -350,8 +351,8 @@ def Gamma_ion_xray(param,rr, M_accr, dMdt_accr, zz):
 
             pref_ion = (sigma_HI(h_eV_sec*nu)*nH0+sigma_HeI(h_eV_sec*nu)* nHe0)/ nb0
             pref_sec_ion = (sigma_HI(h_eV_sec*nu)*nH0*(h_eV_sec*nu-E_HI)/E_HI+sigma_HeI(h_eV_sec*nu)* nHe0*(h_eV_sec*nu-E_HeI)/E_HeI)/ nb0
-            integrated_flux         = trapz(flux * pref_ion[:,None,None], nu, axis=0)# [cm**2/s]
-            integrated_flux_sec_ion = trapz(flux*pref_sec_ion[:,None,None], nu, axis=0)# [cm**2/s]
+            integrated_flux         = trapezoid(flux * pref_ion[:,None,None], nu, axis=0)# [cm**2/s]
+            integrated_flux_sec_ion = trapezoid(flux*pref_sec_ion[:,None,None], nu, axis=0)# [cm**2/s]
 
 
             Gamma_ion[i, :,:] = integrated_flux / (4 * np.pi * (rr/(1+zz[i])) ** 2)[:,None] / (cm_per_Mpc/h0) ** 2  # [1/s] ionisation rate due to Xray
@@ -423,16 +424,16 @@ def Mean_Gamma_ion_xray(param, sfrd, zz):
                 eps_X = eps_xray(nu[j] * (1 + z_prime) / (1 + zz[i]), param)  * sfrd_interp(z_prime)  # [1/s/Hz/(Mpc/h)^3]
                 itd = c_km_s * h0 / hubble(z_prime, param) * eps_X * np.exp(-tau_prime)
 
-                J_X_nu_z[j] = (1 + zz[i]) ** 2 / (4 * np.pi) * trapz(itd, z_prime) * (h0/cm_per_Mpc)**2       # [1/s/Hz * (1/cm)^2]
+                J_X_nu_z[j] = (1 + zz[i]) ** 2 / (4 * np.pi) * trapezoid(itd, z_prime) * (h0/cm_per_Mpc)**2       # [1/s/Hz * (1/cm)^2]
 
 
         itlH = nH0 * sigma_HI(nu * h_eV_sec) * J_X_nu_z
         itlHe = nHe0 * sigma_HeI(nu * h_eV_sec) * J_X_nu_z
-        Gamma_ion[i] = 4*np.pi * trapz((itlH+itlHe),nu) / nb0  # s^-1
+        Gamma_ion[i] = 4*np.pi * trapezoid((itlH+itlHe),nu) / nb0  # s^-1
 
         itlH = itlH * (nu * h_eV_sec - E_HI) / E_HI
         itlHe = itlHe * (nu * h_eV_sec - E_HeI) / E_HeI
-        Gamma_sec_ion[i] = 4 * np.pi * trapz((itlH + itlHe), nu) / nb0  # [1/s]
+        Gamma_sec_ion[i] = 4 * np.pi * trapezoid((itlH + itlHe), nu) / nb0  # [1/s]
 
     return Gamma_ion, Gamma_sec_ion
 
@@ -623,9 +624,9 @@ def cum_optical_depth(zz,E,param):
     tau_int = dldz * (nHI*sHI + nHeI*sHeI)
 
     if type(E) == np.ndarray:
-        tau = cumtrapz(tau_int,x=zz,axis=1,initial=0.0)
+        tau = cumulative_trapezoid(tau_int,x=zz,axis=1,initial=0.0)
     else:
-        tau = cumtrapz(tau_int,x=zz,initial=0.0)
+        tau = cumulative_trapezoid(tau_int,x=zz,initial=0.0)
 
     return tau
 
@@ -647,7 +648,8 @@ def rho_alpha_profile(param,r_grid,MM, dMh_dt, z_arr):
 
     # rec fraction
     names = 'n, f'
-    path_to_file = pkg_resources.resource_filename('beorn', 'input_data/recfrac.dat')
+    from pathlib import Path
+    path_to_file = Path(importlib.util.find_spec('beorn').origin).parent / 'input_data' / 'recfrac.dat'
     rec = np.genfromtxt(path_to_file, usecols=(0, 1), comments='#', dtype=float, names=names)
 
     # line frequencies

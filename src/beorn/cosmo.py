@@ -5,7 +5,7 @@ FUNCTIONS RELATED TO COSMOLOGY
 """
 import os.path
 import numpy as np
-from scipy.integrate import cumtrapz, trapz, quad
+from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import splrep,splev
 from .constants import *
 import scipy.integrate as integrate
@@ -34,7 +34,7 @@ def comoving_distance(z,param):
     """
     Comoving distance between z[0] and z[-1]
     """
-    return cumtrapz(c_km_s/hubble(z,param),z,initial=0)  # [Mpc]
+    return cumulative_trapezoid(c_km_s/hubble(z,param),z,initial=0)  # [Mpc]
 
 
 def T_cmb(z):

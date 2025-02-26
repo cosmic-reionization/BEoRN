@@ -5,13 +5,12 @@ Here we compute the Lyman_alpha and collisional coupling coefficient (x_al and x
 import numpy as np
 from .constants import *
 from .cross_sections import sigma_HI
-import pkg_resources
+import importlib
 from .cosmo import comoving_distance, Hubble, hubble, T_cmb
 from .astro import f_star_Halo
 from scipy.interpolate import splrep,splev,interp1d
-from scipy.integrate import cumtrapz
 
-
+from pathlib import Path
 
 def kappa_coll():
     """
@@ -29,11 +28,11 @@ def kappa_coll():
     """
 
     names = 'T, kappa'
-    path_to_file = pkg_resources.resource_filename('beorn', "input_data/kappa_eH.dat")
+    path_to_file = Path(importlib.util.find_spec('beorn').origin).parent / 'input_data' / 'kappa_eH.dat'
     eH = np.genfromtxt(path_to_file, usecols=(0, 1), comments='#', dtype=float, names=names)
 
     names = 'T, kappa'
-    path_to_file = pkg_resources.resource_filename('beorn', 'input_data/kappa_HH.dat')
+    path_to_file = Path(importlib.util.find_spec('beorn').origin).parent / 'input_data' / 'kappa_HH.dat'
     HH = np.genfromtxt(path_to_file, usecols=(0, 1), comments='#', dtype=float, names=names)
 
     return HH, eH
