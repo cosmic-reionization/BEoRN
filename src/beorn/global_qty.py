@@ -29,11 +29,11 @@ def global_xhii_approx(param):
     return np.array((zz, xHII))
 
 
-def xHII_approx(param, halo_catalog):
+def xHII_approx(parameters: Parameters, halo_catalog):
     ## compute mean ion fraction from Rbubble values and halo catalog.  for the simple bubble solver
-    LBox = param.sim.Lbox  # Mpc/h
-    M_Bin = np.logspace(np.log10(param.sim.Mh_bin_min), np.log10(param.sim.Mh_bin_max), param.sim.binn, base=10)
-    model_name = param.sim.model_name
+    LBox = parameters.simulation.Lbox  # Mpc/h
+    M_Bin = np.logspace(np.log10(parameters.simulation.halo_mass_bin_min), np.log10(parameters.simulation.halo_mass_bin_min), parameters.simulation.halo_mass_bin_n, base=10)
+    model_name = parameters.simulation.model_name
     H_Masses = halo_catalog['M']
     z = halo_catalog['z']
 
@@ -42,7 +42,7 @@ def xHII_approx(param, halo_catalog):
     zgrid = grid_model.z_history[ind_z]
 
     H_Masses = np.delete(H_Masses,
-                         np.where(H_Masses < param.source.M_min))  ## remove element smaller than minimum SF halo mass.
+                         np.where(H_Masses < parameters.source.halo_mass_min))  ## remove element smaller than minimum SF halo mass.
 
     Mh_z_bin = grid_model.Mh_history[ind_z, :]  # M_Bin * np.exp(-param.source.alpha_MAR * (z - z_start))
     Mh_bin_array = np.concatenate(([Mh_z_bin[0] / 2], np.sqrt(Mh_z_bin[1:] * Mh_z_bin[:-1]),
@@ -65,15 +65,15 @@ def xHII_approx(param, halo_catalog):
     return zgrid, x_HII
 
 
-def compute_glob_qty(param):
+def compute_glob_qty(parameters: Parameters):
     print('Computing global quantities (sfrd, Tk, xHII, dTb, xal, xcoll) from 1D profiles and halo catalogs....')
-    LBox = param.sim.Lbox  # Mpc/h
-    model_name = param.sim.model_name
-    M_Bin = np.logspace(np.log10(param.sim.Mh_bin_min), np.log10(param.sim.Mh_bin_max), param.sim.binn, base=10)
+    LBox = parameters.simulation.Lbox  # Mpc/h
+    model_name = parameters.simulation.model_name
+    M_Bin = np.logspace(np.log10(parameters.simulation.halo_mass_bin_min), np.log10(parameters.simulation.halo_mass_bin_max), parameters.simulation.halo_mass_bin_n, base=10)
     grid_model = load_f('./profiles/' + model_name + '.pkl')
 
-    Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
-    factor = dTb_factor(param)
+    Om, Ob, h0 = parameters.cosmology.Om, parameters.cosmology.Ob, parameters.cosmology.h
+    factor = dTb_factor(parameters)
 
     zz = []
     xHII = []
@@ -84,13 +84,13 @@ def compute_glob_qty(param):
     dTb_arr = []
     xcoll_arr = []
 
-    z_arr = def_redshifts(param)
+    z_arr = def_redshifts(parameters)
     for ii, z in enumerate(z_arr):
         z_str = z_string_format(z)
-        halo_catalog = load_halo(param, z_str)
+        halo_catalog = load_halo(parameters, z_str)
         H_Masses = halo_catalog['M']
         H_Masses = np.delete(H_Masses, np.where(
-            H_Masses < param.source.M_min))  ## remove element smaller than minimum SF halo mass.
+            H_Masses < parameters.source.halo_mass_min))  ## remove element smaller than minimum SF halo mass.
         z = halo_catalog['z']
 
         ind_z = np.argmin(np.abs(grid_model.z_history - z))
@@ -130,10 +130,10 @@ def compute_glob_qty(param):
         x_al = xal_volume / (LBox / (1 + z)) ** 3
 
         ### SFRD
-        Temp = Temp + T_adiab(z, param)
-        dMstar_dt = grid_model.dMh_dt[ind_z, :] * f_star_Halo(param,
-                                                              Mh_z_bin) * param.cosmo.Ob / param.cosmo.Om  # param.source.alpha_MAR * Mh_z_bin * (z + 1) * Hubble(z, param) * f_star_Halo(param, Mh_z_bin)
-        dMstar_dt[np.where(Mh_z_bin < param.source.M_min)] = 0
+        Temp = Temp + T_adiab(z, parameters)
+        dMstar_dt = grid_model.dMh_dt[ind_z, :] * f_star_Halo(parameters,
+                                                              Mh_z_bin) * parameters.cosmology.Ob / parameters.cosmology.Om  # param.source.alpha_MAR * Mh_z_bin * (z + 1) * Hubble(z, param) * f_star_Halo(param, Mh_z_bin)
+        dMstar_dt[np.where(Mh_z_bin < parameters.source.halo_mass_min)] = 0
         SFRD = np.sum(number_per_bins * dMstar_dt[bins - 1])
         SFRD = SFRD / LBox ** 3  #### [(Msol/h) / yr /(cMpc/h)**3]
 

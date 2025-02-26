@@ -1,40 +1,39 @@
 """
 
 FUNCTIONS RELATED TO COSMOLOGY
-
+TODO Use astropy instead
 """
 import os.path
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import splrep,splev
 from .constants import *
-import scipy.integrate as integrate
 from astropy.cosmology import FlatLambdaCDM
+from .parameters import Parameters
 
-
-def hubble(z, param):
+def hubble(z, parameters: Parameters):
     """
     Hubble parameter [km.s-1.Mpc-1]
     """
-    Om = param.cosmo.Om
+    Om = parameters.cosmology.Om
     Ol = 1.0-Om
-    H0 = 100.0*param.cosmo.h
+    H0 = 100.0*parameters.cosmology.h
     return H0 * (Om*(1+z)**3 + (1.0 - Om - Ol)*(1+z)**2 + Ol)**0.5
 
 
-def Hubble(z,param):
+def Hubble(z, parameters: Parameters):
     """
     Hubble parameter [yr-1]
     """
-    Om, Ol = param.cosmo.Om, param.cosmo.Ol
-    return param.cosmo.h * 100.0 * sec_per_year / km_per_Mpc * np.sqrt(Om*(1+z)**3 + (1.0-Om-Ol)*(1+z)**2+Ol)
+    Om, Ol = parameters.cosmology.Om, parameters.cosmology.Ol
+    return parameters.cosmology.h * 100.0 * sec_per_year / km_per_Mpc * np.sqrt(Om*(1+z)**3 + (1.0-Om-Ol)*(1+z)**2+Ol)
 
 
-def comoving_distance(z,param):
+def comoving_distance(z, parameters: Parameters):
     """
     Comoving distance between z[0] and z[-1]
     """
-    return cumulative_trapezoid(c_km_s/hubble(z,param),z,initial=0)  # [Mpc]
+    return cumulative_trapezoid(c_km_s/hubble(z,parameters),z,initial=0)  # [Mpc]
 
 
 def T_cmb(z):
@@ -45,47 +44,47 @@ def T_cmb(z):
 
 
 
-def T_smooth_radio(z,param):
+def T_smooth_radio(z,parameters):
     """
     Smooth Background radiation temperature when a radio excess is present, i.e Ar is non zero
     """
-    Tcmb0 = param.cosmo.Tcmb
-    Ar = param.radio.Ar
+    Tcmb0 = parameters.cosmology.Tcmb
+    Ar = parameters.radio.Ar
     Ar = np.array(Ar) # this line is when you want a z-dependent Ar. (used it to reproduce fig 2 of 2008.04315)
-    Beta_Rad = param.radio.Beta_Rad
+    Beta_Rad = parameters.radio.Beta_Rad
     nu = 1420/(1+z) #### in MHz
     return Tcmb0*(1+z)*(Ar*(nu/78)**Beta_Rad)
 
 
-def read_powerspectrum(param):
+def read_powerspectrum(parameters: Parameters):
     """
     Linear power spectrum from file
     """
     names='k, P'
-    PS = np.genfromtxt(param.cosmo.ps,usecols=(0,1),comments='#',dtype=None, names=names)
+    PS = np.genfromtxt(parameters.cosmology.ps,usecols=(0,1),comments='#',dtype=None, names=names)
     return PS
 
 
-def T_adiab(z,param):
+def T_adiab(z, parameters: Parameters):
     """
-    Temperature of the gas assuming it decoupled from CMB at z = param.cosmo.z_decoupl and then cooled adiabatically.
+    Temperature of the gas assuming it decoupled from CMB at z = parameters.cosmology.z_decoupl and then cooled adiabatically.
     """
-    return Tcmb0 * (1 + z) ** 2 / (1 + param.cosmo.z_decoupl)
+    return Tcmb0 * (1 + z) ** 2 / (1 + parameters.cosmology.z_decoupling)
 
-def T_adiab_fluctu(z,param,delta_b):
+def T_adiab_fluctu(z, parameters: Parameters, delta_b):
     """
     Fluctuating adiabatic background.
     delta_b : matter overdensity
     """
-    return T_adiab(z,param) * (1 + delta_b) ** (2 / 3)
+    return T_adiab(z,parameters) * (1 + delta_b) ** (2 / 3)
 
 
 
 #define Hubble factor H=H0*E
-def E(x,param):
-    return np.sqrt(param.cosmo.Om*(x**(-3))+1-param.cosmo.Om)
+def E(x, parameters: Parameters):
+    return np.sqrt(parameters.cosmology.Om*(x**(-3))+1-parameters.cosmology.Om)
 
-def D_non_normalized(a,param):
+def D_non_normalized(a, parameters: Parameters):
     """
     a : input array 
     Integrate from a~0 (0.001) to a. We checked that it gives same results than integrate.quad for z=0 to 30
@@ -94,8 +93,8 @@ def D_non_normalized(a,param):
         print('Integration pb in Growth Factor.')
         exit()
     integrand = np.linspace(0.001, a, 100)
-    w = np.trapz(1 / (integrand * E(integrand,param)) ** 3, integrand, axis=0)
-    return (5*param.cosmo.Om * E(a,param)/2)*w
+    w = np.trapz(1 / (integrand * E(integrand,parameters)) ** 3, integrand, axis=0)
+    return (5 * parameters.cosmology.Om * E(a,parameters) / 2) * w
 
 #define D normalized
 def D(a,param):
@@ -105,14 +104,14 @@ def D(a,param):
     return D_non_normalized(a,param)/D_non_normalized(1, param)
 
 
-def rhoc_of_z(param,z):
+def rhoc_of_z(parameters: Parameters,z):
     """
     Redshift dependence of critical density
     (in comoving units)
     Outputs is in Msol/cMpc**3
     """
-    Om = param.cosmo.Om
-    rhoc = 2.775e11 * param.cosmo.h**2  ## in Msol/cMpc**3
+    Om = parameters.cosmology.Om
+    rhoc = 2.775e11 * parameters.cosmology.h**2  ## in Msol/cMpc**3
     return rhoc * (Om * (1.0 + z) ** 3.0 + (1.0 - Om)) / (1.0 + z) ** 3.0
 
 
@@ -171,19 +170,19 @@ def Tspin_fct(Tcmb,Tk,xtot):
     return ((1 / Tcmb + xtot / Tk ) / (1 + xtot)) ** -1
 
 
-def dTb_fct(z, Tk, xtot, delta_b,x_HII,param):
+def dTb_fct(z, Tk, xtot, delta_b,x_HII, parameters: Parameters):
     """
     nHI_norm : (1+delta_b)*(1-xHII) , or also rho_HI/rhob_mean
     Returns : Birghtness Temperature in mK.
     """
-    factor = dTb_factor(param)
+    factor = dTb_factor(parameters)
     return factor * np.sqrt(1 + z) * (1 - Tcmb0 * (1 + z) / Tk) * (1 - x_HII) * xtot / (1 + xtot) * (1+delta_b)
 
-def dTb_factor(param):
+def dTb_factor(parameters: Parameters):
     """
     Constant factor in dTb formula
     """
-    Om, h0, Ob = param.cosmo.Om, param.cosmo.h, param.cosmo.Ob
+    Om, h0, Ob = parameters.cosmology.Om, parameters.cosmology.h, parameters.cosmology.Ob
     return 27 * Ob * h0 ** 2 / 0.023 * np.sqrt(0.15 / Om / h0 ** 2 / 10)
 
 

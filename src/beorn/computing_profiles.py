@@ -17,8 +17,9 @@ import importlib
 from beorn.astro import *
 from beorn.couplings import eps_lyal
 from .functions import *
+from .parameters import Parameters
 
-class profiles:
+class RadiationProfiles:
     """
     Computes the 1D profiles. Similar to the HM for 21cm (Schneider et al 2021)
 
@@ -31,55 +32,53 @@ class profiles:
     Mhistory has shape [zz, Mass]
     """
 
-    def __init__(self, param):
-        self.z_initial = param.solver.z_max  # starting redshift
+    def __init__(self, parameters: Parameters):
+        self.z_initial = parameters.solver.z_max  # starting redshift
         if self.z_initial < 35:
-            print('WARNING : z_start (param.solver.zmax) should be larger than 35.  ')
-        self.z_end = param.solver.z_min  # ending redshift
-        self.alpha = param.source.alpha_MAR
+            print('WARNING : z_start (parameters.solver.zmax) should be larger than 35.  ')
+        self.z_end = parameters.solver.z_min  # ending redshift
+        self.alpha = parameters.source.mass_accretion_alpha
+        # TODO remove hardcoded values
         rmin = 1e-2
         rmax = 600
         Nr = 200
         rr = np.logspace(np.log10(rmin), np.log10(rmax), Nr)
         self.r_grid = rr  ##cMpc/h
 
-        self.z_arr = np.flip(np.sort(np.unique(np.concatenate((def_redshifts(param),np.arange(6,40,0.5))))))  ## we add up some redshifts to be converged
+        self.z_arr = np.flip(np.sort(np.unique(np.concatenate((def_redshifts(parameters),np.arange(6,40,0.5))))))  ## we add up some redshifts to be converged
+        
+        p = parameters.simulation
+        self.M_Bin = np.logspace(np.log10(p.halo_mass_bin_min), np.log10(p.halo_mass_bin_max), p.halo_mass_bin_n, base=10) ## array of masses at the final redshift
 
-        Mh_bin_min = param.sim.Mh_bin_min
-        Mh_bin_max = param.sim.Mh_bin_max
-        binn  = param.sim.binn
-        self.M_Bin = np.logspace(np.log10(Mh_bin_min), np.log10(Mh_bin_max), binn, base=10) ## array of masses at the final redshift
-
-
-        if param.sim.average_profiles_in_bin:
-            self.M_Bin_HR = np.logspace(np.log10(Mh_bin_min), np.log10(Mh_bin_max), param.sim.HR_binning, base=10)
+        if p.average_profiles_in_bin:
+            self.M_Bin_HR = np.logspace(np.log10(p.halo_mass_bin_min), np.log10(p.halo_mass_bin_max), p.HR_binning, base=10)
 
 
-    def solve(self, param):
+    def solve(self, parameters: Parameters) -> None:
 
-        Mh_history,dMh_dt = mass_accretion(self.z_arr, self.M_Bin, param) #shape is [zz, Mass]
+        Mh_history,dMh_dt = mass_accretion(self.z_arr, self.M_Bin, parameters) #shape is [zz, Mass]
 
         zz = self.z_arr
-        if param.solver.fXh == 'constant':
+        if parameters.solver.fXh == 'constant':
             print('param.solver.fXh is set to constant. We will assume f_X,h = 2e-4**0.225')
-            x_e = np.full(len(zz),2e-4)
-        else :
-            zz_, sfrd_ = compute_sfrd(param, zz, Mh_history, dMh_dt)
+            x_e = np.full(len(zz), 2e-4)
+        else:
+            zz_, sfrd_ = compute_sfrd(parameters, zz, Mh_history, dMh_dt)
             sfrd = np.interp(zz, zz_, sfrd_, right=0)
-            Gamma_ion, Gamma_sec_ion = Mean_Gamma_ion_xray(param, sfrd, zz)
+            Gamma_ion, Gamma_sec_ion = mean_gamma_ion_xray(parameters, sfrd, zz)
             self.Gamma_ion = Gamma_ion
             self.Gamma_sec_ion = Gamma_sec_ion
             self.sfrd = np.array((zz_,sfrd_))
-            x_e = solve_xe(param, Gamma_ion, Gamma_sec_ion, zz)
+            x_e = solve_xe(parameters, Gamma_ion, Gamma_sec_ion, zz)
             print('param.solver.fXh is not set to constant. We will compute the free e- fraction x_e and assume fXh = x_e**0.225.')
 
 
-        rho_xray_ = rho_xray(param,self.r_grid, Mh_history, dMh_dt,x_e, zz)
-        rho_heat_ = rho_heat(param,self.r_grid, rho_xray_, zz)
-        R_bubble_ = R_bubble(param, zz,Mh_history,dMh_dt).clip(min=0) # cMpc/h
+        rho_xray_ = rho_xray(parameters, self.r_grid, Mh_history, dMh_dt,x_e, zz)
+        rho_heat_ = rho_heat(parameters, self.r_grid, rho_xray_, zz)
+        R_bubble_ = R_bubble(parameters, zz,Mh_history,dMh_dt).clip(min=0) # cMpc/h
 
         r_lyal = np.logspace(-5, 2, 1000, base=10)  ##    physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
-        rho_alpha = rho_alpha_profile(param,r_lyal,Mh_history,dMh_dt, zz)
+        rho_alpha = rho_alpha_profile(parameters, r_lyal,Mh_history,dMh_dt, zz)
         self.r_lyal = r_lyal
         self.rho_alpha = rho_alpha
 
@@ -91,12 +90,12 @@ class profiles:
        #     T_history[str(zz[i])] = rho_heat_[i]
        #     rhox_history[str(zz[i])] =rho_xray_[i]
 
-        if param.sim.average_profiles_in_bin:
-            Mh_history_HR, dMh_dt_HR = mass_accretion(self.z_arr, self.M_Bin_HR, param)
-            self.rho_alpha_HR = rho_alpha_profile(param,r_lyal,Mh_history_HR, dMh_dt_HR, zz)
-            self.rho_xray_HR = rho_xray(param, self.r_grid,Mh_history_HR, dMh_dt_HR, x_e, zz)
-            self.rho_heat_HR = rho_heat(param, self.r_grid, self.rho_xray_HR, zz)
-            self.R_bubble_HR = R_bubble(param, zz, Mh_history_HR, dMh_dt_HR).clip(min=0)  # cMpc/h
+        if parameters.simulation.average_profiles_in_bin:
+            Mh_history_HR, dMh_dt_HR = mass_accretion(self.z_arr, self.M_Bin_HR, parameters)
+            self.rho_alpha_HR = rho_alpha_profile(parameters,r_lyal,Mh_history_HR, dMh_dt_HR, zz)
+            self.rho_xray_HR = rho_xray(parameters, self.r_grid,Mh_history_HR, dMh_dt_HR, x_e, zz)
+            self.rho_heat_HR = rho_heat(parameters, self.r_grid, self.rho_xray_HR, zz)
+            self.R_bubble_HR = R_bubble(parameters, zz, Mh_history_HR, dMh_dt_HR).clip(min=0)  # cMpc/h
             self.Mh_history_HR = Mh_history_HR
             self.dMh_dt_HR = dMh_dt_HR
 
@@ -108,12 +107,12 @@ class profiles:
         #self.T_history = T_history    # Kelvins
         self.rho_heat = rho_heat_           #shape (z,r,M)
         self.r_grid_cell = self.r_grid
-        self.Ngdot_ion = Ngdot_ion(param, zz[:,None], Mh_history,dMh_dt)
+        self.Ngdot_ion = Ngdot_ion(parameters, zz[:,None], Mh_history,dMh_dt)
 
 
 
 
-def Ngdot_ion(param, zz, Mh,dMh_dt):
+def Ngdot_ion(parameters: Parameters, zz, Mh,dMh_dt):
     """
     Parameters
     ----------
@@ -125,25 +124,25 @@ def Ngdot_ion(param, zz, Mh,dMh_dt):
     ----------
     Array. Number of ionizing photons emitted per sec [s**-1].
     """
-    Ob, Om, h0 = param.cosmo.Ob, param.cosmo.Om, param.cosmo.h
+    Ob, Om, h0 = parameters.cosmology.Ob, parameters.cosmology.Om, parameters.cosmology.h
 
-    if (param.source.type == 'SED'):
+    if (parameters.source.source_type == 'SED'):
        # dMh_dt = param.source.alpha_MAR * Mh * (zz + 1) * Hubble(zz, param)  ## [(Msol/h) / yr]
-        Ngam_dot_ion = dMh_dt / h0 * f_star_Halo(param, Mh) * Ob / Om * f_esc(param, Mh) * param.source.Nion / sec_per_year / m_H * M_sun
-        Ngam_dot_ion[np.where(Mh < param.source.M_min)] = 0
+        Ngam_dot_ion = dMh_dt / h0 * f_star_Halo(parameters, Mh) * Ob / Om * f_esc(parameters, Mh) * parameters.source.Nion / sec_per_year / m_H * M_sun
+        Ngam_dot_ion[np.where(Mh < parameters.source.halo_mass_min)] = 0
         return Ngam_dot_ion
-    elif param.source.type == 'Ghara':
+    elif parameters.source.source_type == 'Ghara':
         print('CAREFUL, Ghara source type is chosen, Nion becomes just a fine tuning multiplicative factor')
-        Mh = zz**0 * Mh * param.source.Nion # to make sure it has the correct shape
+        Mh = zz**0 * Mh * parameters.source.Nion # to make sure it has the correct shape
         Ngam_dot_ion = 1.33 * 1e43 * Mh/h0
-        Ngam_dot_ion[np.where(Mh < param.source.M_min)] = 0
+        Ngam_dot_ion[np.where(Mh < parameters.source.halo_mass_min)] = 0
         return Ngam_dot_ion  # eq (1) from 3D vs 1D RT schemes.
 
-    elif param.source.type == 'constant':
+    elif parameters.source.source_type == 'constant':
         print('constant number of ionising photons chosen. Param.source.Nion becomes Ngam_dot_ion.')
-        return np.full(len(zz),param.source.Nion)
+        return np.full(len(zz), parameters.source.Nion)
 
-    elif (param.source.type == 'Ross'):
+    elif (parameters.source.source_type == 'Ross'):
         return Mhalo / h0 * Ob / Om / (10 * 1e6 * sec_per_year) / m_p_in_Msun
     else:
         print('Source Type not available. Should be SED or Ross.')
@@ -151,11 +150,11 @@ def Ngdot_ion(param, zz, Mh,dMh_dt):
 
 
 
-def R_bubble(param, zz, M_accr,dMh_dt):
+def R_bubble(parameters: Parameters, zz, M_accr,dMh_dt):
     """
     Parameters
     ----------
-    param : dictionary containing all the input parameters
+    parameters : dictionary containing all the input parameters
     M_accr,dMh_dt : halo mass history, and growth rate as a function of redshift zz. 2d arrary of shape [zz, M_bin]
     zz : redshift. Matters for the mass accretion rate in Ngdot_ion!
 
@@ -164,18 +163,18 @@ def R_bubble(param, zz, M_accr,dMh_dt):
     Comoving size [cMpc/h] of the ionized bubble around the source, as a function of time. 2d array of size (zz,M_bin)
     """
 
-    Ngam_dot = Ngdot_ion(param, zz[:,None], M_accr,dMh_dt)  # s-1
-    Ob, Om, h0 = param.cosmo.Ob, param.cosmo.Om, param.cosmo.h
+    Ngam_dot = Ngdot_ion(parameters, zz[:,None], M_accr,dMh_dt)  # s-1
+    Ob, Om, h0 = parameters.cosmology.Ob, parameters.cosmology.Om, parameters.cosmology.h
     nb0 = (Ob * rhoc0) / (m_p_in_Msun * h0)  # comoving nbr density of baryons [Mpc/h]**-3
     aa = 1/(zz+1)
     nb0_z = nb0 * (1 + zz) ** 3 # physical baryon density
 
     nb0_interp  = interp1d(aa, nb0_z, fill_value='extrapolate')
     Ngam_interp = interp1d(aa, Ngam_dot, axis=0,fill_value='extrapolate')
-    C = param.cosmo.clumping #.0 #clumping factor
+    C = parameters.cosmology.clumping #.0 #clumping factor
     #source = lambda r, a: km_per_Mpc / (hubble(1 / a - 1, param) * a) * (Ngam_interp(a) / (4 * np.pi * r ** 2 * nb0) - alpha_HII( 1e4) / cm_per_Mpc ** 3 * a ** -3 * h0 ** 3 * nb0 * r / 3) # nb0 * a**-3 is physical baryon density
     #source = lambda V, t: Ngam_interp(t) / nb0 - alpha_HII(1e4) * C / cm_per_Mpc ** 3 * h0 ** 3 * nb0_interp(t) * V  # eq 65 from barkana and loeb
-    source = lambda V, a: km_per_Mpc / (hubble(1 / a - 1, param) * a) * (Ngam_interp(a) / nb0 - alpha_HII(1e4) * C / cm_per_Mpc ** 3 * h0 ** 3 * nb0_interp(a) * V)  # eq 65 from barkana and loeb
+    source = lambda V, a: km_per_Mpc / (hubble(1 / a - 1, parameters) * a) * (Ngam_interp(a) / nb0 - alpha_HII(1e4) * C / cm_per_Mpc ** 3 * h0 ** 3 * nb0_interp(a) * V)  # eq 65 from barkana and loeb
 
     bubble_vol = odeint(source, np.zeros(len(M_accr[0])), aa)
 
@@ -183,7 +182,7 @@ def R_bubble(param, zz, M_accr,dMh_dt):
 
 
 
-def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
+def rho_xray(parameters: Parameters, rr, M_accr, dMdt_accr,xe, zz):
     """
     Parameters
     ----------
@@ -198,12 +197,12 @@ def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
     X-ray profile, i.e. energy injected as heat by X-rays, in [eV/s], and of shape (zz,rr,M_bin) (M_accr, dMdt_accr all have same dimension :(zz,M_bin) )
     """
 
-    Om = param.cosmo.Om
-    Ob = param.cosmo.Ob
-    h0 = param.cosmo.h
+    Om = parameters.cosmology.Om
+    Ob = parameters.cosmology.Ob
+    h0 = parameters.cosmology.h
     zstar = 35
-    Emin = param.source.E_min_xray
-    Emax = param.source.E_max_xray
+    Emin = parameters.source.energy_cutoff_min_xray
+    Emax = parameters.source.energy_cutoff_max_xray
     NE = 50
 
     nb0 = rhoc0 * Ob / (m_p_in_Msun * h0)  # [h/Mpc]^3
@@ -217,15 +216,15 @@ def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
     N_mu = NE
     nu = np.logspace(np.log(nu_min), np.log(nu_max), N_mu, base=np.e)
 
-    f_He_bynumb = 1 - param.cosmo.HI_frac
+    f_He_bynumb = 1 - parameters.cosmology.HI_frac
     # hydrogen
     nH0 = (1-f_He_bynumb) * nb0
     # helium
     nHe0 = f_He_bynumb * nb0
 
     rho_xray = np.zeros((len(zz), len(rr),len(M_accr[0])))
-    M_star_dot = (Ob / Om) * f_star_Halo(param, M_accr) * dMdt_accr
-    M_star_dot[np.where(M_accr<param.source.M_min)]=0
+    M_star_dot = (Ob / Om) * f_star_Halo(parameters, M_accr) * dMdt_accr
+    M_star_dot[np.where(M_accr < parameters.source.halo_mass_min)] = 0
 
     for i in range(len(zz)):
 
@@ -240,7 +239,7 @@ def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
             if (N_prime < 4):
                 N_prime = 4
             z_prime = np.logspace(np.log(zz[i]), np.log(z_max), N_prime, base=np.e)
-            rcom_prime = comoving_distance(z_prime, param) * h0  # comoving distance
+            rcom_prime = comoving_distance(z_prime, parameters) * h0  # comoving distance
 
             if i == 0 : # if zz[0]<zstar, then concatenate two numbers..
                 dMdt_int = interp1d(np.concatenate((np.array((zstar,)),np.array(zz[:i+1],))),np.concatenate((np.zeros((1,len(M_accr[0]))),np.array(M_star_dot[:i+1,:],)),axis=0) ,axis=0, fill_value='extrapolate')
@@ -250,15 +249,15 @@ def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
             flux = np.zeros((len(nu), len(rr),len(M_accr[0])))
 
             for j in range(len(nu)):
-                tau_prime = cum_optical_depth(z_prime, nu[j] * h_eV_sec, param)
-                eps_X = eps_xray(nu[j] * (1 + z_prime) / (1 + zz[i]), param)[:,None] * np.exp(-tau_prime)[:,None] * dMdt_int(z_prime)  # [1/s/Hz]
+                tau_prime = cum_optical_depth(z_prime, nu[j] * h_eV_sec, parameters)
+                eps_X = eps_xray(nu[j] * (1 + z_prime) / (1 + zz[i]), parameters)[:,None] * np.exp(-tau_prime)[:,None] * dMdt_int(z_prime)  # [1/s/Hz]
                 eps_int = interp1d(rcom_prime, eps_X, axis=0, fill_value=0.0, bounds_error=False)
                 flux[j, :,:] = np.array(eps_int(rr))
 
 
             #fXh =  np.maximum((rho_xe[i]+2e-4)**0.225  ,0.11)    # 1.0 # 0.13 # 0.15 ---> 0.11 matches the f_heat we have in cross_sections.py, for T_neutral
             #fXh = xe[i]**0.225
-            fXh = f_Xh(param, xe[i])
+            fXh = f_Xh(parameters, xe[i])
 
             pref_nu = ((nH0 / nb0) * sigma_HI(nu * h_eV_sec) * (nu * h_eV_sec - E_HI) + (nHe0 / nb0) * sigma_HeI(nu * h_eV_sec) * (nu * h_eV_sec - E_HeI))   # [cm^2 * eV] 4 * np.pi *
 
@@ -271,7 +270,7 @@ def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
 
 
 
-
+# TODO : never called => delete
 def Gamma_ion_xray(param,rr, M_accr, dMdt_accr, zz):
     """
     Parameters
@@ -361,7 +360,7 @@ def Gamma_ion_xray(param,rr, M_accr, dMdt_accr, zz):
     return Gamma_ion, Gamma_sec_ion
 
 
-def Mean_Gamma_ion_xray(param, sfrd, zz):
+def mean_gamma_ion_xray(parameters: Parameters, sfrd, zz):
     """
     Parameters
     ----------
@@ -378,11 +377,11 @@ def Mean_Gamma_ion_xray(param, sfrd, zz):
     -Gamma_sec_ion : Secondary ionisation rate from xray. We assume fXion only depends on xe (astro-ph/0608032, Eq.69)
     """
 
-    Ob = param.cosmo.Ob
-    h0 = param.cosmo.h
+    Ob = parameters.cosmology.Ob
+    h0 = parameters.cosmology.h
     zstar = 35
-    Emin = param.source.E_min_xray
-    Emax = param.source.E_max_xray
+    Emin = parameters.source.energy_cutoff_min_xray
+    Emax = parameters.source.energy_cutoff_max_xray
     NE = 50
 
     nb0 = rhoc0 * Ob / (m_p_in_Msun * h0)  # [h/Mpc]^3
@@ -396,7 +395,7 @@ def Mean_Gamma_ion_xray(param, sfrd, zz):
     N_mu = NE
     nu = np.logspace(np.log(nu_min), np.log(nu_max), N_mu, base=np.e)
 
-    f_He_bynumb = 1 - param.cosmo.HI_frac
+    f_He_bynumb = 1 - parameters.cosmology.HI_frac
     # hydrogen
     nH0 = (1 - f_He_bynumb) * nb0
     # helium
@@ -420,9 +419,9 @@ def Mean_Gamma_ion_xray(param, sfrd, zz):
             z_prime = np.logspace(np.log(zz[i]), np.log(z_max), N_prime, base=np.e)
 
             for j in range(len(nu)):
-                tau_prime = cum_optical_depth(z_prime, nu[j] * h_eV_sec, param)
-                eps_X = eps_xray(nu[j] * (1 + z_prime) / (1 + zz[i]), param)  * sfrd_interp(z_prime)  # [1/s/Hz/(Mpc/h)^3]
-                itd = c_km_s * h0 / hubble(z_prime, param) * eps_X * np.exp(-tau_prime)
+                tau_prime = cum_optical_depth(z_prime, nu[j] * h_eV_sec, parameters)
+                eps_X = eps_xray(nu[j] * (1 + z_prime) / (1 + zz[i]), parameters)  * sfrd_interp(z_prime)  # [1/s/Hz/(Mpc/h)^3]
+                itd = c_km_s * h0 / hubble(z_prime, parameters) * eps_X * np.exp(-tau_prime)
 
                 J_X_nu_z[j] = (1 + zz[i]) ** 2 / (4 * np.pi) * trapezoid(itd, z_prime) * (h0/cm_per_Mpc)**2       # [1/s/Hz * (1/cm)^2]
 
@@ -449,7 +448,7 @@ def T_gas_fit(zz):
     Tgas = Tcmb0/a/(1.0+(a/a1)/(1.0+(a2/a)**(3.0/2.0)))
     return Tgas
 
-
+# TODO: never called
 def rho_x_e(param,rr,G_ion,G_sec_ion,zz):
     """
     Compute the profile of  x_e : free electron fraction of (largely) neutral IGM
@@ -499,7 +498,7 @@ def rho_x_e(param,rr,G_ion,G_sec_ion,zz):
     return x_e_profile
 
 
-def solve_xe(param,mean_G_ion,mean_Gsec_ion,zz):
+def solve_xe(parameters: Parameters, mean_G_ion, mean_Gsec_ion, zz):
     """
     Parameters
     ----------
@@ -512,9 +511,9 @@ def solve_xe(param,mean_G_ion,mean_Gsec_ion,zz):
     Mean free electron fraction in the neutral medium. We use it to compute the fraction of energy deposited as heat by e- originating from ionisation by xray: fXh = xe**0.225
     """
     print('Computing x_e(z) from the sfrd, including first and secondary ionisations....')
-    h0 = param.cosmo.h
-    Ob = param.cosmo.Ob
-    f_He_bynumb = 1 - param.cosmo.HI_frac
+    h0 = parameters.cosmology.h
+    Ob = parameters.cosmology.Ob
+    f_He_bynumb = 1 - parameters.cosmology.HI_frac
 
     xe0 = 2e-4
     aa = list((1 / (1 + zz)))
@@ -537,19 +536,19 @@ def solve_xe(param,mean_G_ion,mean_Gsec_ion,zz):
     nH = lambda a: (1 - f_He_bynumb) * nb0 / a ** 3
 
     # x_e
-    source = lambda xe, a: (np.interp(a, aa, mean_G_ion, right=0)  + gamma_HI(a, xe)) * (1 - xe) / (a * hubble(1 / a - 1, param) / km_per_Mpc) - \
-                           alphaB(a) * nH(a) * xe ** 2 / (a * hubble(1 / a - 1, param) / km_per_Mpc)
+    source = lambda xe, a: (np.interp(a, aa, mean_G_ion, right=0)  + gamma_HI(a, xe)) * (1 - xe) / (a * hubble(1 / a - 1, parameters) / km_per_Mpc) - \
+                           alphaB(a) * nH(a) * xe ** 2 / (a * hubble(1 / a - 1, parameters) / km_per_Mpc)
 
     x_e = odeint(source,xe0, aa)
     print('.....done computing x_e(z).')
     return x_e
 
 
-def rho_heat(param,rr, rho_xray, zz):
+def rho_heat(parameters: Parameters, rr, rho_xray, zz):
     """
     Parameters
     ----------
-    param : dictionary containing all the input parameters
+    parameters : dictionary containing all the input parameters
     rho_xray :  output of rho_xray.
     zz : redshift in decreasing order.
     rr : comoving distance from source center [cMpc/h]
@@ -562,7 +561,7 @@ def rho_heat(param,rr, rho_xray, zz):
     """
 
     # decoupling redshift as ic
-    z0 = param.cosmo.z_decoupl
+    z0 = parameters.cosmology.z_decoupling
     zz = np.concatenate((np.array([z0]),zz))
     aa = np.array(list((1 / (1 + zz)))) #scale factor
     zero = np.zeros((1,len(rho_xray[0,:,0]),len(rho_xray[0,0,:])))  #,len(rho_xray[0,0,:])))
@@ -573,7 +572,7 @@ def rho_heat(param,rr, rho_xray, zz):
     for j in range(len(rr)):
        # rho_intp = interp1d(aa, rho_xray[:, j,:],axis=0, fill_value="extrapolate")
         rho_intp = interp1d(aa,rho_xray[:, j,:],axis=0,fill_value="extrapolate")
-        Gamma_heat = lambda a: 2 * rho_intp(a)/ (3 * kb_eV_per_K * a * hubble(1 / a - 1, param)) * km_per_Mpc  #rho_intp(a)
+        Gamma_heat = lambda a: 2 * rho_intp(a)/ (3 * kb_eV_per_K * a * hubble(1 / a - 1, parameters)) * km_per_Mpc  #rho_intp(a)
         source = lambda T_h, a: Gamma_heat(a) - 2 * T_h / a
         T_h_j = odeint(source,np.zeros(len(rho_xray[0,0,:])), aa)
 
@@ -587,15 +586,15 @@ def rho_heat(param,rr, rho_xray, zz):
 
 
 
-def cum_optical_depth(zz,E,param):
+def cum_optical_depth(zz, E, parameters: Parameters):
     """
     Cumulative optical optical depth of array zz.
     See e.g. Eq. 6 of 1406.4120
 
     We use it for the xray heating and xray ion rate calculations.
     """
-    Ob = param.cosmo.Ob
-    h0 = param.cosmo.h
+    Ob = parameters.cosmology.Ob
+    h0 = parameters.cosmology.h
 
     # Energy of a photon observed at (zz[0], E) and emitted at zz
     if type(E) == np.ndarray:
@@ -611,14 +610,14 @@ def cum_optical_depth(zz,E,param):
 
     nb0   = rhoc0*Ob/(m_p_in_Msun*h0)                    # [h/Mpc]^3
 
-    f_He_bynumb = 1 - param.cosmo.HI_frac
+    f_He_bynumb = 1 - parameters.cosmology.HI_frac
 
     #H and He abundances
     nHI   = (1-f_He_bynumb)*nb0 *(1+zz)**3       # [h/Mpc]^3
     nHeI  = f_He_bynumb * nb0 *(1+zz)**3
 
     #proper line element
-    dldz = c_km_s*h0/hubble(zz,param)/(1+zz) # [Mpc/h]
+    dldz = c_km_s*h0/hubble(zz, parameters)/(1+zz) # [Mpc/h]
 
     #integrate
     tau_int = dldz * (nHI*sHI + nHeI*sHeI)
@@ -632,7 +631,7 @@ def cum_optical_depth(zz,E,param):
 
 
 
-def rho_alpha_profile(param,r_grid,MM, dMh_dt, z_arr):
+def rho_alpha_profile(parameters: Parameters, r_grid, MM, dMh_dt, z_arr):
     """
     Ly-al coupling profile
     of shape (r_grid)
@@ -643,7 +642,7 @@ def rho_alpha_profile(param,r_grid,MM, dMh_dt, z_arr):
     Return rho_alpha : shape is (zz,rr,MM). Units : [pcm-2.s-1.Hz-1]
     """
     zstar = 35
-    h0 = param.cosmo.h
+    h0 = parameters.cosmology.h
     rectrunc = 23
 
     # rec fraction
@@ -672,17 +671,17 @@ def rho_alpha_profile(param,r_grid,MM, dMh_dt, z_arr):
                     N_prime = 4
 
                 z_prime = np.logspace(np.log(zz), np.log(zmax), N_prime, base=np.e)
-                rcom_prime = comoving_distance(z_prime, param) * h0  # comoving distance in [cMpc/h]
+                rcom_prime = comoving_distance(z_prime, parameters) * h0  # comoving distance in [cMpc/h]
 
                 # What follows is the emissivity of the source at z_prime (such that at z the photon is at rcom_prime)
                 # We then interpolate to find the correct emissivity such that the photon is at r_grid*(1+z) (in comoving unit)
 
-                dMdt_star = dMh_dt[:i + 1, :] * f_star_Halo(param, MM[:i + 1, :]) * param.cosmo.Ob / param.cosmo.Om  # SFR Msol/h/yr
+                dMdt_star = dMh_dt[:i + 1, :] * f_star_Halo(parameters, MM[:i + 1, :]) * parameters.cosmology.Ob / parameters.cosmology.Om  # SFR Msol/h/yr
 
                 if len(dMdt_star == 1):
                     dMdt_star_int = interp1d(np.concatenate((np.array([zstar]), z_arr[:i + 1])), np.concatenate((np.zeros((1, len(dMdt_star[0]))), dMdt_star)), axis=0,fill_value='extrapolate')
 
-                eps_al = eps_lyal(nu_n[k] * (1 + z_prime) / (1 + zz), param)[:, None] * dMdt_star_int(z_prime)  # [photons.yr-1.Hz-1]
+                eps_al = eps_lyal(nu_n[k] * (1 + z_prime) / (1 + zz), parameters)[:, None] * dMdt_star_int(z_prime)  # [photons.yr-1.Hz-1]
                 eps_int = interp1d(rcom_prime, eps_al, axis=0, fill_value=0.0, bounds_error=False)
 
                 # print('zz',zz, 'rgrid',r_grid * (1 + zz))

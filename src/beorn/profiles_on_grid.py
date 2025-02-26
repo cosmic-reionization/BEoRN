@@ -9,7 +9,7 @@ from scipy.interpolate import splrep, splev, interp1d
 import time
 from .functions import print_time
 from .cloud_in_cell import CIC_coefficients
-
+from .parameters import Parameters
 
 def log_binning(array1, array2):
     """
@@ -43,7 +43,7 @@ def bin_edges_log(array):
 
 
 
-def average_profile(param, profile, Mh_, ind_z, i):
+def average_profile(parameters: Parameters, profile, Mh_, ind_z, i):
     """
      Inside a given halo mass bin, computes the average profile inside that bin (by calling the HR profiles with higher bin resolution)
      If param.sim.average_profiles_in_bin is False, we skip this step and just return the profile of the halo mass bin.
@@ -60,7 +60,7 @@ def average_profile(param, profile, Mh_, ind_z, i):
      mean R bubble (float), mean lyalpha (array of size r_lyal), mean Tk profiles (array of size radial_grid)
     """
     # i : indice of the coarse mass bin
-    if param.sim.average_profiles_in_bin:
+    if parameters.simulation.average_profiles_in_bin:
         Mh_history_HR = profile.Mh_history_HR
         R_bubble_HR = profile.R_bubble_HR[ind_z, :]
 
@@ -91,7 +91,7 @@ def average_profile(param, profile, Mh_, ind_z, i):
     return mean_R_bubble_in_bin, mean_rho_alpha_in_bin, mean_Tk_in_bin
 
 
-def cumulated_number_halos(param, H_X, H_Y, H_Z, cic=False):
+def cumulated_number_halos(parameters: Parameters, H_X, H_Y, H_Z, cic=False):
     """
      Returns the number of halo per grid pixel, for halos belonging to a mass bin.
      This function is called in paint_profile_single_snap, in run.py
@@ -106,8 +106,8 @@ def cumulated_number_halos(param, H_X, H_Y, H_Z, cic=False):
      unique_base_nGrid_poz : an array with all the cells occupied by halos, expressed in base nGrid
      nbr_of_halos : array of same size with the cumulated number of halos per pixel
     """
-    LBox = param.sim.Lbox  # Mpc/h
-    nGrid = param.sim.Ncell  # number of grid cells
+    LBox = parameters.simulation.Lbox  # Mpc/h
+    nGrid = parameters.simulation.Ncell  # number of grid cells
 
     if not cic:
         Pos_Halos = np.vstack((H_X, H_Y, H_Z)).T  # Halo positions.
@@ -118,7 +118,7 @@ def cumulated_number_halos(param, H_X, H_Y, H_Z, cic=False):
         unique_base_nGrid_poz, nbr_of_halos = np.unique(base_nGrid_position, return_counts=True)
 
     if cic:
-        pixel_coordinates_output, cic_coeff_output = CIC_coefficients(param, H_X, H_Y, H_Z)
+        pixel_coordinates_output, cic_coeff_output = CIC_coefficients(parameters, H_X, H_Y, H_Z)
         base_nGrid_cic_position = pixel_coordinates_output[0] + nGrid * pixel_coordinates_output[1] + nGrid ** 2 * \
                                   pixel_coordinates_output[2]
 
@@ -280,7 +280,7 @@ def Spreading_Excess(Grid_Storage):
     return Grid
 
 
-def Spreading_Excess_Fast(param, Grid_input, plot__=False):
+def spreading_excess_fast(parameters: Parameters, Grid_input, plot__=False):
     """
     Last and fastest version of the function.
     Input : Grid_Storage, the cosmological mesh grid (X,X,X) with the ionized fractions, with overlap (pixels where x_ion>1). (X can be 256, 512 ..)
@@ -295,10 +295,10 @@ def Spreading_Excess_Fast(param, Grid_input, plot__=False):
     nGrid = len(Grid_input[0])
     Grid = np.copy(Grid_input)
 
-    if param.sim.thresh_pixel is None:
+    if parameters.simulation.thresh_pixel is None:
         pix_thresh = 80 * (nGrid / 256) ** 3
     else:
-        pix_thresh = param.sim.thresh_pixel
+        pix_thresh = parameters.simulation.thresh_pixel
 
     Binary_Grid = np.copy(Grid)
     Binary_Grid[np.where(Grid < 0.9999999)] = 0
@@ -357,7 +357,7 @@ def Spreading_Excess_Fast(param, Grid_input, plot__=False):
               ' pixels. They contain a fraction ', round(excess_ion / x_ion_tot_i, 4),
               'of the total ionisation fraction.')
 
-        Grid = Spread_Single(param, Grid, small_regions, print_time=None)  # Do the spreading for the small regions
+        Grid = spread_single(parameters, Grid, small_regions, print_time=None)  # Do the spreading for the small regions
         if np.any(Grid[small_regions] > 1):
             print('small regions not correctly spread')
 
@@ -371,7 +371,7 @@ def Spreading_Excess_Fast(param, Grid_input, plot__=False):
                 if i % 100 == 0:
                     print('doing region ', i, 'over ', len(large_regions_labels), ' regions in total')
             connected_indices = np.where(label_image == ir)
-            Grid = Spread_Single(param, Grid, connected_indices, print_time=None)
+            Grid = spread_single(parameters, Grid, connected_indices, print_time=None)
 
         if np.any(Grid > 1.):
             print('Some grid pixels are still in excess.')
@@ -385,7 +385,7 @@ def Spreading_Excess_Fast(param, Grid_input, plot__=False):
     return Grid
 
 
-def Spread_Single(param, Grid, connected_indices, print_time=None):
+def spread_single(parameters: Parameters, Grid, connected_indices, print_time=None):
     """
     This spreads the excess ionizing photons for a given region.
     Input :
@@ -420,7 +420,7 @@ def Spread_Single(param, Grid, connected_indices, print_time=None):
         Delta_max = np.max((Max_X - Min_X + 0, Max_Y - Min_Y + 0, Max_Z - Min_Z + 0))
         Center_X, Center_Y, Center_Z = int((Min_X + Max_X) / 2), int((Min_Y + Max_Y) / 2), int((Min_Z + Max_Z) / 2)
 
-        if param.sim.approx:  # Is this flag is True, then you set the subgrid size
+        if parameters.simulation.subgrid_approximation:  # Is this flag is True, then you set the subgrid size
             N_subgrid = 2 * (Delta_max + 2 * Delta_pixel)  ## length of subgrid embedding the connected region
             if N_subgrid % 2 == 1:
                 N_subgrid += 1  ###Nsubgrid needs to be even to make things easier

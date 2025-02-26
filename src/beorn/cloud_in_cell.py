@@ -2,9 +2,9 @@
 Cloud in cell section, to put profiles on grid by accounting for the shift of halo position with respect to pixels centers.
 """
 import numpy as np
+from .parameters import Parameters
 
-
-def CIC_coefficients(param, H_X, H_Y, H_Z):
+def CIC_coefficients(parameters: Parameters, H_X, H_Y, H_Z):
     """
     The 27 CIC coefficients correspond to : (center), (xVol_left ,xVol_right,yVol_left ,yVol_right,zVol_left ,zVol_right),
     (xy_side11  ,xy_side_11 ,xy_side1_1 ,xy_side_1_1)
@@ -30,8 +30,8 @@ def CIC_coefficients(param, H_X, H_Y, H_Z):
 
     """
 
-    LBox = param.sim.Lbox  # Mpc/h
-    nGrid = param.sim.Ncell  # number of grid cells
+    LBox = parameters.simulation.Lbox  # Mpc/h
+    nGrid = parameters.simulation.Ncell  # number of grid cells
     pix = LBox / nGrid  # pixel real size
 
     ### shift the positions of the halos to the closest point among the 27 edges, vertices and center of the voxel.

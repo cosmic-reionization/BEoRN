@@ -45,7 +45,7 @@ def S_fct(Mh, Mt, g3, g4):
     return (1 + (Mt / Mh) ** g3) ** g4
 
 
-def f_star_Halo(param,Mh):
+def f_star_Halo(parameters: Parameters, Mh):
     """
     Parameters
     ----------
@@ -60,15 +60,15 @@ def f_star_Halo(param,Mh):
     Double power law + either boost or cutoff at small scales (S_fct)
     """
 
-    f_st = param.source.f_st
-    Mp = param.source.Mp
-    g1 = param.source.g1
-    g2 = param.source.g2
-    Mt = param.source.Mt
-    g3 = param.source.g3
-    g4 = param.source.g4
+    f_st = parameters.source.f_st
+    Mp = parameters.source.Mp
+    g1 = parameters.source.g1
+    g2 = parameters.source.g2
+    Mt = parameters.source.Mt
+    g3 = parameters.source.g3
+    g4 = parameters.source.g4
     fstar = np.minimum(2 * f_st / ((Mh / Mp) ** g1 + (Mh / Mp) ** g2) * S_fct(Mh, Mt, g3, g4),1)
-    fstar[np.where(Mh < param.source.M_min)] = 0
+    fstar[np.where(Mh < parameters.source.halo_mass_min)] = 0
     return fstar
 
 
@@ -111,11 +111,12 @@ def f_Xh(param,x_e):
 
 
 
-def eps_xray(nu_,param):
+def eps_xray(nu_, parameters: Parameters):
     """
     Parameters
     ----------
     nu_ : float. Photon frequency in [Hz]
+    TODO: rename
     param : Bunch
 
     Returns
@@ -127,11 +128,11 @@ def eps_xray(nu_,param):
 
     # param.source.cX  is in [erg / s /SFR]
 
-    sed_xray = param.source.alS_xray
-    norm_xray = (1 - sed_xray) / ((param.source.E_max_sed_xray / h_eV_sec) ** (1 - sed_xray) - (param.source.E_min_sed_xray / h_eV_sec) ** ( 1 - sed_xray)) ## [Hz**al-1]
+    sed_xray = parameters.source.alS_xray
+    norm_xray = (1 - sed_xray) / ((parameters.source.energy_max_sed_xray / h_eV_sec) ** (1 - sed_xray) - (parameters.source.energy_min_sed_xray / h_eV_sec) ** ( 1 - sed_xray)) ## [Hz**al-1]
     # param.source.cX * eV_per_erg * norm_xray * nu_ ** (-sed_xray) * Hz_per_eV   # [eV/eV/s/SFR]
 
-    return param.source.cX/param.cosmo.h * eV_per_erg * norm_xray * nu_ ** (-sed_xray) /(nu_*h_eV_sec)   # [photons/Hz/s/SFR]
+    return parameters.source.xray_normalisation / parameters.cosmology.h * eV_per_erg * norm_xray * nu_ ** (-sed_xray) /(nu_*h_eV_sec)   # [photons/Hz/s/SFR]
 
 
 def Ng_dot_Snapshot(param,rock_catalog, type ='xray'):

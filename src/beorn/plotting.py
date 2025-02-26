@@ -9,7 +9,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 from .constants import *
 from .functions import Beta, find_nearest
-from beorn.cosmo import dTb_fct
+from .cosmo import dTb_fct
+from .parameters import Parameters
+
 
 def Delta_21cm_PS_fixed_k(k,PS,plot=True):
     kk, zz = PS['k'], PS['z']
@@ -323,8 +325,8 @@ def expansion_dTb_globalsignal(param,PS,corr_fct):
     ----------
     The mean dTb including cross correlation, to second order
     """
-    from beorn.functions import Beta
-    from beorn.cosmo import dTb_fct
+    from .functions import Beta
+    from .cosmo import dTb_fct
     kk,zz = PS['k'],PS['z']
     beta_r,beta_T,beta_a = Beta(zz,PS,qty='reio'),Beta(zz,PS,qty='Tk'),Beta(zz,PS,qty='lyal')
 
@@ -518,10 +520,10 @@ Mh_z_3 = np.array([172274291.4769941, 218063348.75063255, 368917395.4438236, 775
                    343109759067.9875])
 
 
-def plot_1D_profiles(param, profile, ind_M, z_liste):
+def plot_1D_profiles(parameters: Parameters, profile, ind_M, z_liste):
     import warnings
     import matplotlib.pyplot as plt
-    from beorn.cosmo import T_adiab
+    from .cosmo import T_adiab
 
     warnings.filterwarnings('ignore')
     plt.subplots(1, 4, figsize=(17, 5))
@@ -537,7 +539,7 @@ def plot_1D_profiles(param, profile, ind_M, z_liste):
         Mh_i = profile.Mh_history[ind_z, ind_M]
         print('z, Mh = ', zzi, ', {:.2e}'.format(Mh_i / 0.68))
         Mh_liste.append(Mh_i / 0.68)
-        T_adiab_z = T_adiab(zzi, param)
+        T_adiab_z = T_adiab(zzi, parameters)
 
         x_HII_profile = np.zeros((len(co_radial_grid)))
         x_HII_profile[np.where(co_radial_grid < profile.R_bubble[ind_z, ind_M])] = 1

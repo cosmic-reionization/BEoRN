@@ -8,7 +8,7 @@ from .constants import rhoc0, Tcmb0
 import tools21cm as t2c
 import os
 from os.path import exists
-
+from .parameters import Parameters
 def load_f(file):
     import pickle
     prof = pickle.load(open(file, 'rb'))
@@ -20,7 +20,7 @@ def save_f(file, obj):
     pickle.dump(file=open(file, 'wb'), obj=obj)
 
 
-def load_halo(param, z_str):
+def load_halo(parameters: Parameters, z_str):
     """
     Load a halo catalog. Should be a pickle dictionnary. With 'M', 'X', 'Y', 'Z', and redshift 'z'.
     The halo catalogs should be in param.sim.halo_catalogs and end up with z_string
@@ -28,14 +28,14 @@ def load_halo(param, z_str):
     """
     if not isinstance(z_str,str):
         z_str = z_string_format(z_str)
-    catalog_dir = param.sim.halo_catalogs
+    catalog_dir = parameters.simulation.halo_catalogs
     catalog = catalog_dir + z_str
     halo_catalog = load_f(catalog)
-    indices = np.intersect1d(np.where(halo_catalog['M'] > param.source.M_min),np.where(halo_catalog['M'] < param.source.M_max))
+    indices = np.intersect1d(np.where(halo_catalog['M'] > parameters.source.halo_mass_min),np.where(halo_catalog['M'] < parameters.source.halo_mass_max))
 
     for dim in ['X','Y','Z']:
-        # in case you want to do High rez on a sub box of your Nbody sim
-        indices = np.intersect1d(indices,np.where(halo_catalog[dim] < param.sim.Lbox))
+        # in case you want to do High rez on a sub box of your Nbody simulation
+        indices = np.intersect1d(indices,np.where(halo_catalog[dim] < parameters.simulation.Lbox))
 
     # remove halos not forming stars
     halo_catalog['M'] = halo_catalog['M'][indices]
@@ -46,7 +46,7 @@ def load_halo(param, z_str):
     return halo_catalog
 
 
-def format_file_name(param, dir_name, z, qty):
+def format_file_name(parameters: Parameters, dir_name, z, qty):
     """
     Parameters
     ----------
@@ -59,21 +59,21 @@ def format_file_name(param, dir_name, z, qty):
     ----------
     The name of the pickle file containing the 3D maps of quantity qty.
     """
-    out_name = param.sim.model_name
+    out_name = parameters.simulation.model_name
     z_str = z_string_format(z)
-    nGrid: str = str(param.sim.Ncell)
+    nGrid: str = str(parameters.simulation.Ncell)
     return dir_name + qty + '_' + nGrid + '_' + out_name + '_z' + z_str
 
-def def_k_bins(param):
+def def_k_bins(parameters: Parameters):
     """
     The k-bins used to measure the power spectrum.
     If param.sim.kbin is given as an int, you need to specify kmin and kmax.
     If given as a string, it will read in the boundary of the kbins.
     """
-    if isinstance(param.sim.kbin, int):
-        kbins = np.logspace(np.log10(param.sim.kmin), np.log10(param.sim.kmax), param.sim.kbin, base=10)  # h/Mpc
-    elif isinstance(param.sim.kbin, str):
-        kbins = np.loadtxt(param.sim.kbin)
+    if isinstance(parameters.simulation.kbin, int):
+        kbins = np.logspace(np.log10(parameters.simulation.kmin), np.log10(parameters.simulation.kmax), parameters.simulation.kbin, base=10)  # h/Mpc
+    elif isinstance(parameters.simulation.kbin, str):
+        kbins = np.loadtxt(parameters.simulation.kbin)
     else:
         print(
             'param.sim.kbin should be either a path to a text files containing kbins edges values or it should be an int.')
@@ -83,7 +83,7 @@ def def_k_bins(param):
 
 
 
-def load_delta_b(param, zz):
+def load_delta_b(parameters: Parameters, zz):
     """
     Parameters
     ----------
@@ -95,11 +95,11 @@ def load_delta_b(param, zz):
     3D meshgrid of delta_b = rho/mean_rho-1
     """
 
-    LBox = param.sim.Lbox
-    nGrid = param.sim.Ncell
-    dens_field = param.sim.dens_field
+    LBox = parameters.simulation.Lbox
+    nGrid = parameters.simulation.Ncell
+    dens_field = parameters.simulation.dens_field
 
-    if param.sim.dens_field_type == 'pkdgrav':
+    if parameters.simulation.dens_field_type == 'pkdgrav':
         if dens_field is not None:
             print('reading pkdgrav density field....')
             delta_b = load_pkdgrav_density_field(dens_field + zz, LBox)
@@ -107,9 +107,9 @@ def load_delta_b(param, zz):
             print('no density field provided. Return 0 for delta_b.')
             delta_b = np.array([0])  # rho/rhomean-1 (usual delta here..)
 
-    elif param.sim.dens_field_type == '21cmFAST':
+    elif parameters.simulation.dens_field_type == '21cmFAST':
         delta_b = load_f(dens_field + zz + '.0')
-    elif param.sim.dens_field_type == 'array':
+    elif parameters.simulation.dens_field_type == 'array':
         delta_b = np.loadtxt(dens_field + zz)
     else:
         print('param.sim.dens_field_type should be either 21cmFAST or pkdgrav.')
@@ -155,7 +155,7 @@ def reshape_grid(grid, N):
 
     return  arr2
 
-def load_grid(param, z, type=None):
+def load_grid(parameters: Parameters, z, type=None):
     """
     Parameters
     ----------
@@ -168,10 +168,10 @@ def load_grid(param, z, type=None):
     3D map of the desired "type", at redshift z
     """
 
-    out_name = param.sim.model_name
+    out_name = parameters.simulation.model_name
     dir_name = './grid_output/'
     z_str = z_string_format(z)
-    nGrid: str = str(param.sim.Ncell)
+    nGrid: str = str(parameters.simulation.Ncell)
 
     if type == 'dTb':
         grid = load_f(dir_name + 'dTb_' + nGrid + '_' + out_name + '_z' + z_str)
@@ -186,19 +186,19 @@ def load_grid(param, z, type=None):
     elif type == 'bubbles':
         grid = load_f(dir_name + 'xHII_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type=='matter':
-        grid = load_delta_b(param, z_str)
+        grid = load_delta_b(parameters, z_str)
     else:
         print('grid type should be dTb, lyal, Tk, matter, exc_set, sem_num, or bubbles. Abort')
         exit()
 
     if grid.shape == (1,):
-        Ncell = param.sim.Ncell
+        Ncell = parameters.simulation.Ncell
         grid =  np.full((Ncell, Ncell, Ncell),grid[0])
 
     return grid
 
 
-def save_grid(param, z, grid, type=None):
+def save_grid(parameters: Parameters, z, grid, type=None):
     """
     Parameters
     ----------
@@ -212,9 +212,9 @@ def save_grid(param, z, grid, type=None):
     Nothing. Save the grid in pickle file with the relevant name (corresponding to "type")
     """
     dir_name = './grid_output/'
-    out_name = param.sim.model_name
+    out_name = parameters.simulation.model_name
     z_str = z_string_format(z)
-    nGrid: str = str(param.sim.Ncell)
+    nGrid: str = str(parameters.simulation.Ncell)
 
     if type == 'dTb':
         save_f(file=dir_name + 'dTb_' + nGrid + '_' + out_name + '_z' + z_str, obj=grid)
@@ -253,7 +253,7 @@ def z_string_format(zz):
     return txt.zfill(5)
 
 
-def def_redshifts(param):
+def def_redshifts(parameters: Parameters):
     """
     Parameters
     ----------
@@ -263,19 +263,20 @@ def def_redshifts(param):
     ----------
     The input redshifts where profiles will be computed. It should correspond to some input density fields and halo catalogs.
     """
-    if isinstance(param.solver.Nz, int):
-        print('param.solver.Nz is given as an integer. We define z values in linspace from ', param.solver.z_max, 'to ',
-              param.solver.z_min)
-        z_arr = np.linspace(param.solver.z_max, param.solver.z_min, param.solver.Nz)
-    elif isinstance(param.solver.Nz, list):
+    # TODO implement as init of the data class directly
+    if isinstance(parameters.solver.Nz, int):
+        print('param.solver.Nz is given as an integer. We define z values in linspace from ', parameters.solver.z_max, 'to ',
+              parameters.solver.z_min)
+        z_arr = np.linspace(parameters.solver.z_max, parameters.solver.z_min, parameters.solver.Nz)
+    elif isinstance(parameters.solver.Nz, list):
         print('param.solver.Nz is given as a list.')
-        z_arr = np.array(param.solver.Nz)
-    elif isinstance(param.solver.Nz, np.ndarray):
+        z_arr = np.array(parameters.solver.Nz)
+    elif isinstance(parameters.solver.Nz, np.ndarray):
         print('param.solver.Nz is given as a np array.')
-        z_arr = param.solver.Nz
-    elif isinstance(param.solver.Nz, str):
-        z_arr = np.loadtxt(param.solver.Nz)
-        print('param.solver.Nz is given as a string. We read z values from ', param.solver.Nz)
+        z_arr = parameters.solver.Nz
+    elif isinstance(parameters.solver.Nz, str):
+        z_arr = np.loadtxt(parameters.solver.Nz)
+        print('param.solver.Nz is given as a string. We read z values from ', parameters.solver.Nz)
     else:
         print('param.solver.Nz should be a string, list, np array, or an int.')
     return z_arr
@@ -427,7 +428,7 @@ def print_halo_distribution(M_bin,nbr_halos):
 
 
 
-def initialise_mpi4py(param):
+def initialise_mpi4py(parameters: Parameters):
     """
     Parameters
     ----------
@@ -438,7 +439,7 @@ def initialise_mpi4py(param):
     Initialise the mpi4py parallelisation. Returns the rank, size, and com.
     """
 
-    if param.sim.cores > 1:
+    if parameters.simulation.cores > 1:
         from mpi4py import MPI
         comm = MPI.COMM_WORLD
         import mpi4py.MPI
@@ -493,7 +494,7 @@ def format_grid_for_PS_measurement(Grid_Temp,Grid_xHII,Grid_xal,nGrid) :
 
 
 
-def gather_files(param, path, z_arr, Ncell, remove=True):
+def gather_files(parameters: Parameters, path, z_arr, Ncell, remove=True):
     """
     Parameters
     ----------
@@ -511,7 +512,7 @@ def gather_files(param, path, z_arr, Ncell, remove=True):
 
     for ii, z in enumerate(z_arr):
         z_str = z_string_format(z)
-        file  = path + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
+        file  = path + str(Ncell) + '_' + parameters.simulation.model_name + '_' + z_str + '.pkl'
         if exists(file):
             data_z = load_f(file)
             for key, value in data_z.items():
@@ -525,7 +526,7 @@ def gather_files(param, path, z_arr, Ncell, remove=True):
     if 'k' in dd:
         dd['k'] = data_z['k']
 
-    save_f(file= path + str(Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
+    save_f(file= path + str(Ncell) + '_' + parameters.simulation.model_name + '.pkl', obj=dd)
 
 
 

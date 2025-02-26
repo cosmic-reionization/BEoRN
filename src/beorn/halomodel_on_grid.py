@@ -9,7 +9,7 @@ import time
 from .constants import cm_per_Mpc, M_sun, m_H, sec_per_year
 from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct, T_cmb
 import os
-from .profiles_on_grid import profile_to_3Dkernel, Spreading_Excess_Fast, put_profiles_group, stacked_lyal_kernel, \
+from .profiles_on_grid import profile_to_3Dkernel, spreading_excess_fast, put_profiles_group, stacked_lyal_kernel, \
     stacked_T_kernel, cumulated_number_halos, average_profile, log_binning, bin_edges_log
 from .couplings import x_coll, S_alpha
 from .global_qty import xHII_approx, compute_glob_qty
@@ -215,7 +215,7 @@ def paint_profile_single_snap_HM_input(z_str, param,HM_PS, temp=True, lyal=True,
                 # Grid_Storage = np.copy(Grid_xHII_i)
                 t_start_spreading = time.time()
                 if np.sum(Grid_xHII_i) < nGrid ** 3 and ion:
-                    Grid_xHII = Spreading_Excess_Fast(param, Grid_xHII_i)
+                    Grid_xHII = spreading_excess_fast(param, Grid_xHII_i)
                 else:
                     Grid_xHII = np.array([1])
 
