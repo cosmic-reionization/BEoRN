@@ -3,8 +3,8 @@ Contains various functions related to astrophysical sources.
 """
 
 import numpy as np
+
 from .constants import *
-import pickle
 from .cosmo import Hubble
 from .functions import *
 

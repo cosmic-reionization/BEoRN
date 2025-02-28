@@ -4,13 +4,11 @@ Global quantity computed from the halo catalogs.
 
 import os.path
 import numpy as np
-import importlib
-from .cosmo import Hubble, hubble, T_adiab, dTb_factor
-import pickle
+
+from .cosmo import T_adiab, dTb_factor
 from .couplings import S_alpha, x_coll
-from scipy.interpolate import splrep, splev, interp1d
 from .constants import *
-from .astro import f_star_Halo, f_esc
+from .astro import f_star_Halo
 from .functions import *
 
 

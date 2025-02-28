@@ -3,9 +3,9 @@ External N-body / 2LPT solver that can be used to generate halos and density fie
 The first one is 21cmFAST.
 """
 import os
+import time
 from .cosmo import *
 from .functions import *
-import time
 from .parameters import Parameters
 
 def initialise_21cmfast(parameters: Parameters, data_dir=None):

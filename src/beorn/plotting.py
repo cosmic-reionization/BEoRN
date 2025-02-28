@@ -2,11 +2,9 @@
 Bunch of python functions useful to plot, load, read in...
 """
 import numpy as np
-import scipy
-import sys
 import matplotlib
-import numpy as np
 from matplotlib import pyplot as plt
+
 from .constants import *
 from .functions import Beta, find_nearest
 from .cosmo import dTb_fct

@@ -1,14 +1,16 @@
 """
 Mass Accretion Model
 """
-from .cosmo import D, hubble
+import numpy as np
 from scipy.interpolate import splrep, splev, interp1d
 from scipy.integrate import odeint
-import numpy as np
+
+from .cosmo import D, hubble
 from .constants import *
-from .cosmo import comoving_distance, Hubble, hubble
+from .cosmo import Hubble, hubble
 from .halomassfunction import HaloMassFunction
 from .parameters import Parameters
+
 
 def mass_accretion(zz, mm, parameters: Parameters):
     if parameters.source.mass_accretion_model == 'EXP':

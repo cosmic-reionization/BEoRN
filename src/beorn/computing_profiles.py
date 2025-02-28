@@ -2,21 +2,21 @@
 Computes the 1D profiles of Tk, xal, xHII. 
 """""""""
 
-import importlib.util
-from .constants import *
-from .astro import *
-from .cross_sections import sigma_HI, sigma_HeI
+import importlib
 import numpy as np
 from scipy.integrate import cumulative_trapezoid, trapezoid, odeint
 from scipy.interpolate import splrep, splev, interp1d
-from .cosmo import comoving_distance, Hubble, hubble
+
+from .cosmo import comoving_distance, hubble
 from .global_qty import *
 from .cross_sections import alpha_HII
 from .massaccretion import *
-import importlib
-from beorn.astro import *
-from beorn.couplings import eps_lyal
+from .astro import *
+from .couplings import eps_lyal
 from .functions import *
+from .constants import *
+from .astro import *
+from .cross_sections import sigma_HI, sigma_HeI
 from .parameters import Parameters
 
 class RadiationProfiles:

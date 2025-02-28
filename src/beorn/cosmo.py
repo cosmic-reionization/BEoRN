@@ -6,9 +6,9 @@ TODO Use astropy instead
 import os.path
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
-from scipy.interpolate import splrep,splev
-from .constants import *
 from astropy.cosmology import FlatLambdaCDM
+
+from .constants import *
 from .parameters import Parameters
 
 def hubble(z, parameters: Parameters):

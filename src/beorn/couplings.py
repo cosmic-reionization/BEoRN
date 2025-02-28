@@ -3,14 +3,14 @@ Here we compute the Lyman_alpha and collisional coupling coefficient (x_al and x
 """
 
 import numpy as np
-from .constants import *
-from .cross_sections import sigma_HI
 import importlib
-from .cosmo import comoving_distance, Hubble, hubble, T_cmb
-from .astro import f_star_Halo
-from scipy.interpolate import splrep,splev,interp1d
-from .parameters import Parameters
 from pathlib import Path
+
+from scipy.interpolate import splrep,splev
+from .constants import *
+from .cosmo import T_cmb
+from .parameters import Parameters
+
 
 def kappa_coll():
     """

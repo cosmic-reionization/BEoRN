@@ -2,18 +2,18 @@
 Generate the xHII field from the non linear density field using the excursion set formalism.  See 1403.0941 (2.3.2), 21cmFAST original paper, Zahn et al..
 """
 import copy
-
+import datetime
+import os.path
 import numpy as np
-from .constants import *;
-from .cosmo import *
 from astropy.convolution import convolve_fft
+import warnings
+
 from .halomassfunction import HaloMassFunction
 from .run import load_delta_b
-import datetime
-from os.path import exists
 from .astro import f_esc, f_star_Halo
-import warnings
 from .computing_profiles import Ngdot_ion
+from .constants import *
+from .cosmo import *
 from .functions import *
 
 
@@ -52,7 +52,7 @@ def run_excursion_set(param):
     for ii, filename in enumerate(os.listdir(catalog_dir)):
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of snap', filename[4:-5])
-            if exists('./grid_output/xHII_exc_set_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
+            if os.path.exists('./grid_output/xHII_exc_set_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
                 print('xHII map for snapshot ', filename[4:-5], 'already painted. Skiping.')
             else:
                 print('----- Excursion set for snapshot nbr :', filename[4:-5], '-------')
@@ -323,7 +323,7 @@ def f_coll_PS(param, Mmin, z):
     par.hmf.p = 0
     par.hmf.q = 1
     par.hmf.A = 0.5
-    HMF = halomassfct(par)
+    HMF = HaloMassFunction(par)
     HMF.generate_HMF(par)
     ind_min = np.argmin(np.abs(HMF.tab_M - Mmin))
     fcoll_PS = np.trapz(
@@ -517,7 +517,7 @@ def run_Sem_Num(param):
     for ii, filename in enumerate(os.listdir(catalog_dir)):
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of snap', filename[4:-5])
-            if exists('./grid_output/xHII_Sem_Num_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
+            if os.path.exists('./grid_output/xHII_Sem_Num_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
                 print('xHII map for snapshot ', filename[4:-5], 'already painted. Skiping.')
             else:
                 print('----- SemNum for snapshot nbr :', filename[4:-5], '-------')

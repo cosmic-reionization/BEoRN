@@ -1,16 +1,12 @@
-
 """
 Halo mass function from the Press-Schechter formalism
 """
 
 import numpy as np
-from math import pi
-# TODO use np.pi instead
 
 import scipy.differentiate
+from .profiles_on_grid import log_binning,bin_edges_log
 from .cosmo import *
-import scipy
-from beorn.profiles_on_grid import log_binning,bin_edges_log
 from .parameters import Parameters
 
 class HaloMassFunction:
@@ -19,19 +15,19 @@ class HaloMassFunction:
         self.k_lin = data[:, 0]
         self.P_lin = data[:, 1]
         self.tab_M = np.logspace(np.log10(parameters.halo_mass_function.m_min), np.log10(parameters.halo_mass_function.m_max), parameters.halo_mass_function.Mbin, base=10)   # [Msol/h]
-        self.tab_R = ((3 * self.tab_M / (4 * rhoc0 * parameters.cosmology.Om * pi)) ** (1. / 3)) / parameters.halo_mass_function.c     # [Mpc/h]
+        self.tab_R = ((3 * self.tab_M / (4 * rhoc0 * parameters.cosmology.Om * np.pi)) ** (1. / 3)) / parameters.halo_mass_function.c     # [Mpc/h]
         self.z = np.array(parameters.halo_mass_function.z)
 
     def sigma_square(self, parameters: Parameters):
         if parameters.halo_mass_function.filter == 'tophat':
-            self.sigma2 = np.trapz(self.k_lin ** 2 * self.P_lin * W_tophat(self.k_lin * self.tab_R[:,None]) ** 2 / (2 * pi ** 2) , self.k_lin, axis = 1)
-            self.dlnsigmdlnR = np.trapz(self.k_lin ** 3 * self.tab_R[:,None] * self.P_lin * W_tophat(self.k_lin * self.tab_R[:, None]) * derivative_W_tophat(self.k_lin * self.tab_R[:, None])/(2 *self.sigma2[:,None] * pi ** 2), self.k_lin, axis=1)
+            self.sigma2 = np.trapz(self.k_lin ** 2 * self.P_lin * W_tophat(self.k_lin * self.tab_R[:,None]) ** 2 / (2 * np.pi ** 2) , self.k_lin, axis = 1)
+            self.dlnsigmdlnR = np.trapz(self.k_lin ** 3 * self.tab_R[:,None] * self.P_lin * W_tophat(self.k_lin * self.tab_R[:, None]) * derivative_W_tophat(self.k_lin * self.tab_R[:, None])/(2 *self.sigma2[:,None] * np.pi ** 2), self.k_lin, axis=1)
         elif parameters.halo_mass_function.filter == 'sharpk':
-            self.sigma2 = np.trapz(self.k_lin ** 2 * self.P_lin * W_sharpk(self.k_lin * self.tab_R[:, None]) ** 2 / (2 * pi ** 2), self.k_lin, axis=1)
+            self.sigma2 = np.trapz(self.k_lin ** 2 * self.P_lin * W_sharpk(self.k_lin * self.tab_R[:, None]) ** 2 / (2 * np.pi ** 2), self.k_lin, axis=1)
             self.dlnsigmdlnR = np.interp(1/self.tab_R, self.k_lin, self.P_lin) /4 /np.pi**2 / self.tab_R**3 / self.sigma2
         elif parameters.halo_mass_function.filter == 'smoothk':
-            self.sigma2 = np.trapz(self.k_lin ** 2 * self.P_lin * W_smooth_k(self.k_lin * self.tab_R[:, None], parameters) ** 2 / (2 * pi ** 2), self.k_lin, axis=1)
-            self.dlnsigmdlnR = np.trapz(self.k_lin ** 3 * self.tab_R[:,None] * self.P_lin * W_smooth_k(self.k_lin * self.tab_R[:, None],parameters) * derivative_W_smooth(self.k_lin * self.tab_R[:, None],parameters)/(2 * self.sigma2[:,None] * pi ** 2), self.k_lin, axis=1)
+            self.sigma2 = np.trapz(self.k_lin ** 2 * self.P_lin * W_smooth_k(self.k_lin * self.tab_R[:, None], parameters) ** 2 / (2 * np.pi ** 2), self.k_lin, axis=1)
+            self.dlnsigmdlnR = np.trapz(self.k_lin ** 3 * self.tab_R[:,None] * self.P_lin * W_smooth_k(self.k_lin * self.tab_R[:, None],parameters) * derivative_W_smooth(self.k_lin * self.tab_R[:, None],parameters)/(2 * self.sigma2[:,None] * np.pi ** 2), self.k_lin, axis=1)
         else :
             print('filter should be tophat, sharpk or smoothk')
 

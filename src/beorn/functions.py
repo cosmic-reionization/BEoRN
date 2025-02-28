@@ -2,21 +2,21 @@
 Basic functions to load and save profiles, 3D maps etc...
 """
 
-import pickle
 import numpy as np
-from .constants import rhoc0, Tcmb0
-import tools21cm as t2c
 import os
-from os.path import exists
+import tools21cm as t2c
+import pickle
+
+from .constants import rhoc0, Tcmb0
 from .parameters import Parameters
+
+
 def load_f(file):
-    import pickle
     prof = pickle.load(open(file, 'rb'))
     return prof
 
 
 def save_f(file, obj):
-    import pickle
     pickle.dump(file=open(file, 'wb'), obj=obj)
 
 
@@ -513,7 +513,7 @@ def gather_files(parameters: Parameters, path, z_arr, Ncell, remove=True):
     for ii, z in enumerate(z_arr):
         z_str = z_string_format(z)
         file  = path + str(Ncell) + '_' + parameters.simulation.model_name + '_' + z_str + '.pkl'
-        if exists(file):
+        if os.path.exists(file):
             data_z = load_f(file)
             for key, value in data_z.items():
                 dd[key].append(value)

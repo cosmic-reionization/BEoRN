@@ -2,11 +2,11 @@
 Global parameters for this simulation. They encompass the astrophysical parameters of the source, the cosmological parameters, the simulation parameters, the solver parameters, the excursion set parameters, and the halo mass function parameters.
 """
 
-import importlib
 from pathlib import Path
+import importlib
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Literal, Union
-import numpy as np
 
 
 @dataclass

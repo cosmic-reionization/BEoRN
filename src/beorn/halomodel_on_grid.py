@@ -1,21 +1,16 @@
 """
 We take as input the HM pprofiles, mass bining etc... and paint them on a grid
-
 """
-import beorn as rad
-from scipy.interpolate import splrep, splev, interp1d
+
 import numpy as np
-import time
-from .constants import cm_per_Mpc, M_sun, m_H, sec_per_year
-from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct, T_cmb
 import os
-from .profiles_on_grid import profile_to_3Dkernel, spreading_excess_fast, put_profiles_group, stacked_lyal_kernel, \
-    stacked_T_kernel, cumulated_number_halos, average_profile, log_binning, bin_edges_log
+import time
+from scipy.interpolate import interp1d
+
+from .constants import cm_per_Mpc, M_sun, m_H, sec_per_year
+from .cosmo import T_adiab_fluctu, dTb_fct
+from .profiles_on_grid import profile_to_3Dkernel, spreading_excess_fast, put_profiles_group, stacked_lyal_kernel, stacked_T_kernel, cumulated_number_halos, log_binning, bin_edges_log
 from .couplings import x_coll, S_alpha
-from .global_qty import xHII_approx, compute_glob_qty
-from os.path import exists
-import tools21cm as t2c
-import scipy
 from .cosmo import dTb_factor
 from .functions import *
 from .run import *
@@ -374,7 +369,7 @@ def paint_boxes_HM(param, PS_HM, temp=True, lyal=True, ion=True, dTb=True, read_
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
             if check_exists:
-                if exists('./grid_output/xHII_' + str(nGrid) + '_' + model_name + '_z' + z_str):
+                if os.path.exists('./grid_output/xHII_' + str(nGrid) + '_' + model_name + '_z' + z_str):
                     print('xHII map for z = ', z, 'already painted. Skipping.')
                 else:
                     print('----- Painting 3D map for z =', z, '-------')

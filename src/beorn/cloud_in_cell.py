@@ -2,6 +2,7 @@
 Cloud in cell section, to put profiles on grid by accounting for the shift of halo position with respect to pixels centers.
 """
 import numpy as np
+from astropy.convolution import convolve_fft
 from .parameters import Parameters
 
 def CIC_coefficients(parameters: Parameters, H_X, H_Y, H_Z):

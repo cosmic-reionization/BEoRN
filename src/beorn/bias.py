@@ -1,15 +1,16 @@
-
+import os
 import math
 import numpy as np
-from scipy.interpolate import splrep,splev,interp1d
-from .constants import *
-from .cosmo import D, rhoc_of_z
-import os
-from .functions import *
-from .profiles_on_grid import log_binning,bin_edges_log, cumulated_number_halos
 import time
-from scipy.optimize import curve_fit
 
+from scipy.interpolate import splrep,splev
+from scipy.optimize import curve_fit
+from .cosmo import D, rhoc_of_z
+from .profiles_on_grid import log_binning,bin_edges_log, cumulated_number_halos
+from .constants import *
+from .functions import *
+
+# TODO don't hardcode this
 delta_c = 1.686
 
 def delt_c(z,param):

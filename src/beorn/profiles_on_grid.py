@@ -1,15 +1,13 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import pickle
-from skimage.measure import label
-from scipy.ndimage import distance_transform_edt
-from astropy.convolution import convolve_fft
 import datetime
-from scipy.interpolate import splrep, splev, interp1d
-import time
-from .functions import print_time
+import numpy as np
+from scipy.ndimage import distance_transform_edt
+from scipy.interpolate import interp1d
+from skimage.measure import label
+from astropy.convolution import convolve_fft
+
 from .cloud_in_cell import CIC_coefficients
 from .parameters import Parameters
+
 
 def log_binning(array1, array2):
     """

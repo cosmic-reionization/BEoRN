@@ -1,13 +1,12 @@
 """
 Scripts to plot lightcones.
 """
-import tools21cm as t2c
-import os
 import numpy as np
 import matplotlib
-from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 import matplotlib.pyplot as plt
-import cmasher as cmr
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+import tools21cm as t2c
+
 from .functions import *
 
 

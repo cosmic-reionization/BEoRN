@@ -1,20 +1,13 @@
 """
-
 Global quantity computed directly from halo catalog
 """
 
 import os.path
 import numpy as np
-import importlib
-from .cosmo import Hubble, hubble, T_adiab
-import pickle
-from .couplings import eps_lyal, x_coll
-from scipy.interpolate import splrep,splev,interp1d
+from .cosmo import Hubble
+
 from .constants import *
 from .astro import f_star_Halo
-#from .couplings import J_xray_with_redshifting, J_xray_no_redshifting,S_alpha
-from .cross_sections import sigma_HI
-import scipy.integrate as integrate
 from .functions import *
 
 

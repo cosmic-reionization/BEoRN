@@ -3,21 +3,20 @@ In this script we define functions that can be called to :
 1. run the RT solver and compute the evolution of the T, x_HI profiles, and store them
 2. paint the profiles on a grid.
 """
-import beorn as rad
-from scipy.interpolate import splrep, splev, interp1d
-import numpy as np
+import os
 import time
+import numpy as np
+from scipy.interpolate import interp1d
+import scipy
+import tools21cm as t2c
+
 from .constants import cm_per_Mpc, M_sun, m_H
 from .cosmo import D, hubble, T_adiab_fluctu, dTb_fct, T_cmb
-import os
-from .profiles_on_grid import profile_to_3Dkernel, spreading_excess_fast, put_profiles_group, stacked_lyal_kernel, \
-    stacked_T_kernel, cumulated_number_halos, average_profile, log_binning, bin_edges_log
+from .profiles_on_grid import profile_to_3Dkernel, spreading_excess_fast, put_profiles_group, stacked_lyal_kernel, stacked_T_kernel, cumulated_number_halos, average_profile, log_binning, bin_edges_log
 from .couplings import x_coll, S_alpha, x_coll_coef
 from .global_qty import xHII_approx, compute_glob_qty
-from os.path import exists
-import tools21cm as t2c
-import scipy
 from .cosmo import dTb_factor, Tspin_fct
+from .computing_profiles import RadiationProfiles
 from .functions import *
 from .parameters import Parameters
 
@@ -116,7 +115,7 @@ def compute_profiles(parameters: Parameters) -> None:
 
     model_name = parameters.simulation.model_name
     pkl_name = './profiles/' + model_name + '.pkl'
-    grid_model = rad.RadiationProfiles(parameters)
+    grid_model = RadiationProfiles(parameters)
     grid_model.solve(parameters)
     pickle.dump(file=open(pkl_name, 'wb'), obj=grid_model)
     print('...  Profiles stored in dir ./profiles.')
@@ -501,7 +500,7 @@ def paint_boxes(parameters: Parameters, temp=True, lyal=True, ion=True, dTb=True
         z = np.round(z, 2)
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
-            if check_exists and exists('./grid_output/dTb_' + str(nGrid) + '_' + model_name + '_z' + z_str):
+            if check_exists and os.path.exists('./grid_output/dTb_' + str(nGrid) + '_' + model_name + '_z' + z_str):
                     print('dTb map for z = ', z, 'already painted. Skipping.')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
@@ -1228,7 +1227,7 @@ def compute_variance(parameters: Parameters, k_bins, temp=True, lyal=True, rho_b
             nGrid = parameters.simulation.Ncell
             z_str = z_string_format(z)
             file = './variances/var_z' + str(nGrid) + '_' + parameters.simulation.model_name + '_' + z_str + '.pkl'
-            if not exists(file):
+            if not os.path.exists(file):
                 print('Core nbr', rank, 'is taking care of z = ', z)
                 print('----- Computing variance for z =', z, '-------')
                 if temp :
