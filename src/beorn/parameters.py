@@ -1,5 +1,6 @@
 """
 Global parameters for this simulation. They encompass the astrophysical parameters of the source, the cosmological parameters, the simulation parameters, the solver parameters, the excursion set parameters, and the halo mass function parameters.
+Slots are used to prevent the creation of new attributes. This is useful to avoid typos and to have a clear overview of the parameters.
 """
 
 from pathlib import Path
@@ -9,7 +10,8 @@ from dataclasses import dataclass, field
 from typing import Literal, Union
 
 
-@dataclass
+
+@dataclass(slots = True)
 class SourceParameters:
     """
     Parameters for the sources of radiation. Sensible defaults are provided.
@@ -69,8 +71,7 @@ class SourceParameters:
     min_xHII_value: int = 0
 
 
-
-@dataclass
+@dataclass(slots = True)
 class SolverParameters:
     """
     Solver parameters for the simulation.
@@ -88,8 +89,7 @@ class SolverParameters:
     fXh: Literal['constant', 'variable'] = 'constant'
 
 
-
-@dataclass
+@dataclass(slots = True)
 class SimulationParameters:
     """
     Attributes:
@@ -145,8 +145,7 @@ class SimulationParameters:
     reio: bool = True
 
 
-
-@dataclass
+@dataclass(slots = True)
 class CosmologyParameters:
     """
     Cosmological parameters for the simulation.
@@ -180,9 +179,7 @@ class CosmologyParameters:
     z_decoupling: int = 135
 
 
-
-
-@dataclass
+@dataclass(slots = True)
 class ExcursionSetParameters:
     """
     SemiNumerical Parameters
@@ -197,7 +194,7 @@ class ExcursionSetParameters:
     stepping: float = 1.1
 
 
-@dataclass
+@dataclass(slots = True)
 class HaloMassFunctionParameters:
     """
     Parameters related to analytical halo mass function (PS formalism. Used to compute variance in EPS_MAR, and for subhalo MF in excursion set).
@@ -227,9 +224,7 @@ class HaloMassFunctionParameters:
 
 
 
-
-
-@dataclass
+@dataclass(slots = True)
 class Parameters:
     """
     Group all the parameters for the simulation.
@@ -242,9 +237,9 @@ class Parameters:
         excursion_set: ExcursionSetParameters
         halo_mass_function: HaloMassFunctionParameters
     """
-    source: SourceParameters = field(default_factory = lambda: SourceParameters())
-    solver: SolverParameters = field(default_factory = lambda: SolverParameters())
-    cosmology: CosmologyParameters = field(default_factory = lambda: CosmologyParameters)
-    simulation: SimulationParameters = field(default_factory = lambda: SimulationParameters())
-    excursion_set: ExcursionSetParameters = field(default_factory = lambda: ExcursionSetParameters())
-    halo_mass_function: HaloMassFunctionParameters = field(default_factory = lambda: HaloMassFunctionParameters())
+    source: SourceParameters = field(default_factory = SourceParameters)
+    solver: SolverParameters = field(default_factory = SolverParameters)
+    cosmology: CosmologyParameters = field(default_factory = CosmologyParameters)
+    simulation: SimulationParameters = field(default_factory = SimulationParameters)
+    excursion_set: ExcursionSetParameters = field(default_factory = ExcursionSetParameters)
+    halo_mass_function: HaloMassFunctionParameters = field(default_factory = HaloMassFunctionParameters)

@@ -8,19 +8,20 @@ from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 import tools21cm as t2c
 
 from .functions import *
+from .parameters import Parameters
 
 
-class lightcone:
-    def __init__(self, param, qty='dTb',slice_nbr = None,path='./grid_output/'):
+class Lightcone:
+    def __init__(self, parameters: Parameters, qty='dTb',slice_nbr = None,path='./grid_output/'):
         self.path = path
         self.mean_array = []
         self.coeval_set = {}
         self.zs_set = []
-        self.nGrid = param.sim.Ncell
+        self.nGrid = parameters.simulation.Ncell
         self.qty = qty  # the quantity you want to plot
-        self.Lbox = param.sim.Lbox
-        self.z_liste = def_redshifts(param)
-        self.param = param
+        self.Lbox = parameters.simulation.Lbox
+        self.z_liste = def_redshifts(parameters)
+        self.param = parameters
         if slice_nbr is None: self.slice_nbr = int(self.nGrid/2)
         else :  self.slice_nbr = slice_nbr
 
