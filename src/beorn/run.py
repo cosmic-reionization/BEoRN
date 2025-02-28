@@ -17,14 +17,14 @@ from .global_qty import xHII_approx, compute_glob_qty
 from os.path import exists
 import tools21cm as t2c
 import scipy
-from .cosmo import dTb_factor
+from .cosmo import dTb_factor, Tspin_fct
 from .functions import *
 
 
 def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False,
              read_lyal=False,
              check_exists=True, RSD=True, xcoll=True, S_al=True, cross_corr=False, third_order=False, cic=False,
-             variance=False, compute_corr_fct_=False,Rsmoothing=0
+             variance=False, compute_corr_fct_=False,Rsmoothing=0, GS = False
              ):
     """
     Function to run the code. Several options are available.
@@ -46,33 +46,34 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
         if variance:
             if not os.path.isdir('./variances'):
                 os.mkdir('./variances')
-    comm.Barrier()
+    Barrier(comm)
 
     if compute_profile:
         if rank == 0:
             compute_profiles(param)
-        comm.Barrier()
+        Barrier(comm)
 
     if rank == 0:
         print(' ------------ PAINTING BOXES ------------ ')
-    comm.Barrier()
+    Barrier(comm)
 
     paint_boxes(param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp, check_exists=check_exists,
                 read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
                 cross_corr=cross_corr, third_order=third_order, cic=cic, variance=variance,Rsmoothing=Rsmoothing)
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         print(' ------------ MERGING PS FILES  ------------ ')
-        gather_GS_PS_files(param, remove=True)
+        gather_files(param, path='./physics/GS_PS_', z_arr = def_redshifts(param), Ncell=param.sim.Ncell,remove=True)
+        #gather_GS_PS_files(param, remove=True)
 
     if variance:
         if rank == 1 % size:
             print(' ------------ COMPUTING VARIANCES OF SMOOTHED FIELDS LYA, T, XHII  ------------ ')
             gather_variances(param)
 
-    if rank == 2 % size:
+    if GS and rank == 2 % size:
         print(' ------------ COMPUTING GLOBAL QUANTITIES FROM PROFILES AND HALO CATALOGS  ------------ ')
         GS = compute_glob_qty(param)
         save_f(file='./physics/GS_approx' + '_' + param.sim.model_name + '.pkl', obj=GS)
@@ -81,6 +82,10 @@ def run_code(param, compute_profile=True, temp=True, lyal=True, ion=True, dTb=Tr
         if rank == 3 % size:
             print(' ------------ COMPUTING CORRELATION FUNCTIONS AT R=0  ------------ ')
             compute_corr_fct(param)
+
+    Barrier(comm)
+    if rank == 0:
+        print(' ------------ DONE ------------ ')
 
     return None
 
@@ -195,6 +200,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         Grid_dTb_RSD = np.array([0])
         Grid_dTb_T_sat = factor * np.sqrt(1 + z) * (1 - Grid_xHII) * (delta_b + 1) * Grid_xcoll / (1 + Grid_xcoll)
         xcoll_mean = np.mean(Grid_xcoll)
+        T_spin = np.mean(Tspin_fct(Tcmb0 * (1 + z), Grid_Temp, Grid_xcoll))
         del Grid_xcoll
 
     else:
@@ -339,19 +345,13 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                     print('universe is fully inoinzed. Return [1] for Grid_xHII.')
                     Grid_xHII = np.array([1])
 
-
                 Grid_Temp += T_adiab_fluctu(z, param, delta_b)
-
 
             if read_temp:
                 Grid_Temp = load_grid(param, z=z, type='Tk')
-            if param.sim.T_saturated :
-                Grid_Temp = np.array([1e50])
 
             if read_ion:
                 Grid_xHII = load_grid(param, z=z, type='bubbles')
-            if not param.sim.reio :
-                Grid_xHII = np.array([0])
 
             if read_lyal:
                 Grid_xal = load_grid(param, z=z, type='lyal')
@@ -389,14 +389,14 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
                 Grid_dTb = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=Grid_xHII, param=param)
                 Grid_dTb_no_reio = dTb_fct(z=z, Tk=Grid_Temp, xtot=Grid_xtot, delta_b=delta_b, x_HII=np.array([0]),param=param)
 
-                Grid_xcoll_sat =  x_coll(z=z, Tk=1e50, xHI=(1 - Grid_xHII), rho_b=(delta_b + 1) * coef)
-                Grid_dTb_T_sat = dTb_fct(z=z, Tk=1e50, xtot = Grid_xal + Grid_xcoll_sat, delta_b=delta_b, x_HII=Grid_xHII, param=param)
-                del Grid_xcoll_sat
+                Grid_dTb_T_sat = dTb_fct(z=z, Tk=1e50, xtot = 1e50, delta_b=delta_b, x_HII=Grid_xHII, param=param)
 
             else :
                 Grid_dTb = np.array([0])
                 Grid_dTb_no_reio = np.array([0])
                 Grid_dTb_T_sat = np.array([0])
+
+        T_spin = np.mean(Tspin_fct(Tcmb0 * (1 + z), Grid_Temp, Grid_xtot))
 
     PS_dTb, k_bins = auto_PS(delta_fct(Grid_dTb), box_dims=LBox,
                              kbins=def_k_bins(param))
@@ -409,6 +409,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
     if not RSD:
         dTb_RSD_mean = 0
         PS_dTb_RSD = 0
+        Grid_dTb_RSD = Grid_dTb
     else:
         print('Computing RSD for snapshot...')
         Grid_dTb_RSD = dTb_RSD(param, z, delta_b, Grid_dTb)
@@ -422,7 +423,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
         ##
 
     GS_PS_dict = {'z': z, 'dTb': np.mean(Grid_dTb), 'Tk': np.mean(Grid_Temp), 'x_HII': np.mean(Grid_xHII),
-                  'PS_dTb': PS_dTb, 'k': k_bins,
+                  'PS_dTb': PS_dTb, 'k': k_bins, 'Tspin':T_spin,
                   'PS_dTb_RSD': PS_dTb_RSD, 'dTb_RSD': dTb_RSD_mean, 'x_al': np.mean(Grid_xal),
                   'x_coll': xcoll_mean,'PS_dTb_no_reio':PS_dTb_no_reio,'dTb_no_reio': np.mean(Grid_dTb_no_reio),
                   'PS_dTb_T_sat':PS_dTb_T_sat,'dTb_T_sat': np.mean(Grid_dTb_T_sat)}
@@ -432,7 +433,7 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
 
 
 
-    save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str, obj=GS_PS_dict)
+    save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str+ '.pkl', obj=GS_PS_dict)
 
     if variance:
         import copy
@@ -440,19 +441,15 @@ def paint_profile_single_snap(z_str, param, temp=True, lyal=True, ion=True, dTb=
             param)  # we do this since in compute_var we change the kbins to go to smaller scales.
         compute_var_single_z(param_copy, z, Grid_xal, Grid_xHII, Grid_Temp, k_bins)
 
-    if param.sim.store_grids:
-        if temp:
+    if param.sim.store_grids is not False:
+        if 'Tk' in param.sim.store_grids:
             save_grid(param, z=z, grid=Grid_Temp, type='Tk')
-        if ion:
+        if 'bubbles' in param.sim.store_grids:
             save_grid(param, z=z, grid=Grid_xHII, type='bubbles')
-        if lyal:
+        if 'lyal' in param.sim.store_grids:
             save_grid(param, z=z, grid=Grid_xal, type='lyal')
-        if dTb:
-            if not RSD:
-                save_grid(param, z=z, grid=Grid_dTb, type='dTb')
-                # save_f(file='./grid_output/dTb_Grid' + str(nGrid) + model_name + '_snap' + z_str, obj=Grid_dTb)
-            else:
-                save_grid(param, z=z, grid=Grid_dTb_RSD, type='dTb')
+        if 'dTb' in param.sim.store_grids:
+            save_grid(param, z=z, grid=Grid_dTb_RSD, type='dTb')
 
 
 def gather_GS_PS_files(param, remove=False):
@@ -467,30 +464,7 @@ def gather_GS_PS_files(param, remove=False):
     -------
     Nothing.
     """
-
-    from collections import defaultdict
-
-    dd = defaultdict(list)
-
-    z_arr = def_redshifts(param)
-    for ii, z in enumerate(z_arr):
-        z_str = z_string_format(z)
-        file = './physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_z' + z_str
-        if exists(file):
-            GS_PS = load_f(file)
-            for key, value in GS_PS.items():
-                dd[key].append(value)
-            if remove:
-                os.remove(file)
-
-    for key, value in dd.items():  # change lists to numpy arrays
-        dd[key] = np.array(value)
-
-    dd['k'] = GS_PS['k']
-
-    save_f(file='./physics/GS_PS_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
-
-
+    gather_files(param, path='./physics/GS_PS_', z_arr=def_redshifts(param), Ncell=param.sim.Ncell, remove=remove)
 
 
 def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False, read_ion=False, read_lyal=False,
@@ -527,17 +501,8 @@ def paint_boxes(param, temp=True, lyal=True, ion=True, dTb=True, read_temp=False
         z = np.round(z, 2)
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of z = ', z)
-            if check_exists:
-                if exists('./grid_output/xHII_' + str(nGrid) + '_' + model_name + '_z' + z_str):
-                    print('xHII map for z = ', z, 'already painted. Skipping.')
-                else:
-                    print('----- Painting 3D map for z =', z, '-------')
-                    paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
-                                              read_ion=read_ion, read_lyal=read_lyal, RSD=RSD, xcoll=xcoll, S_al=S_al,
-                                              cross_corr=cross_corr, third_order=third_order,fourth_order=fourth_order, cic=cic,
-                                              variance=variance,Rsmoothing=Rsmoothing,truncate=truncate)
-                    print('----- Snapshot at z = ', z, ' is done -------')
-                    print(' ')
+            if check_exists and exists('./grid_output/dTb_' + str(nGrid) + '_' + model_name + '_z' + z_str):
+                    print('dTb map for z = ', z, 'already painted. Skipping.')
             else:
                 print('----- Painting 3D map for z =', z, '-------')
                 paint_profile_single_snap(z_str, param, temp=temp, lyal=lyal, ion=ion, dTb=dTb, read_temp=read_temp,
@@ -1105,7 +1070,7 @@ def saturated_Tspin(param, ion='bubbles'):
     model_name = param.sim.model_name
     nGrid = param.sim.Ncell
     Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
-    factor = 27 * Ob * h0 ** 2 / 0.023 * np.sqrt(0.15 / Om / h0 ** 2 / 10)  # factor used in dTb calculation
+    factor = dTb_factor(param)  # factor used in dTb calculation
 
     Lbox = param.sim.Lbox  # Mpc/h
     if isinstance(param.sim.kbin, int):
@@ -1135,17 +1100,7 @@ def saturated_Tspin(param, ion='bubbles'):
             delta_b = 0
         zz.append(zz_)
 
-        if ion == 'exc_set':
-            Grid_xHII = pickle.load(
-                file=open('./grid_output/xHII_exc_set_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5],
-                          'rb'))
-        elif ion == 'Sem_Num':
-            Grid_xHII = pickle.load(
-                file=open('./grid_output/xHII_Sem_Num_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5],
-                          'rb'))
-        else:
-            Grid_xHII = pickle.load(
-                file=open('./grid_output/xHII_Grid' + str(nGrid) + model_name + '_snap' + filename[4:-5], 'rb'))
+        Grid_xHII = load_grid(param, z, type=ion)
 
         Grid_dTb = factor * np.sqrt(1 + zz_) * (1 - Grid_xHII) * (delta_b + 1)
 
@@ -1298,7 +1253,7 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
             else :
                 continue
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         gather_files(param, path='./variances/var_z', z_arr=z_arr, Ncell=param.sim.Ncell)
@@ -1307,43 +1262,6 @@ def compute_variance(param,k_bins,temp=True,lyal=True,rho_b = True, ion = True):
         print('Finished computing variances. It took in total: ',
               end_time - start_time)
         print('  ')
-
-
-
-def gather_variances(param):
-    """
-    gather all variances files at different z into a single file
-
-    Parametersdata_UV_default
-    ----------
-    param : dictionnary
-
-    Returns
-    ---------
-    Store in a single file all the var with shape (zz,kk)
-    """
-    from collections import defaultdict
-
-    dd = defaultdict(list)
-
-    z_arr = def_redshifts(param)
-    for ii, z in enumerate(z_arr):
-        z_str = z_string_format(z)
-        file = './variances/var_z' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl'
-        if exists(file):
-            var_z = load_f(file)
-            for key, value in var_z.items():
-                dd[key].append(value)
-            os.remove(file)
-
-    for key, value in dd.items():  # change lists to numpy arrays
-        dd[key] = np.array(value)
-
-    dd['k'] = var_z['k']
-    dd['R'] = var_z['R']
-
-    save_f(file='./variances/var_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '.pkl', obj=dd)
-
 
 def compute_var_single_z(param, z, Grid_xal, Grid_xHII, Grid_Temp,delta_b,k_bins):
     # k_bins : extra kbins to measure the variance at same k values as PS
@@ -1496,7 +1414,7 @@ def compute_corr_fct(param):
 
             save_f(file='./variances/Xi_corr_fct_' + str(param.sim.Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl', obj=Dict)
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         gather_files(param, path='./variances/Xi_corr_fct_', z_arr=z_arr, Ncell=param.sim.Ncell)
@@ -1609,7 +1527,7 @@ def investigate_xal(param,HO = False):
             save_f(file='./physics/xal_data_' + str(Ncell) + '_' + param.sim.model_name + '_' + z_str + '.pkl',
                    obj=Dict)
 
-    comm.Barrier()
+    Barrier(comm)
     if rank == 0:
         gather_files(param, path = './physics/xal_data_', z_arr = z_arr, Ncell = Ncell)
 
@@ -1840,7 +1758,7 @@ def investigate_expansion(param):
                    obj=Dict)
             print('----- Done for z =', z, '-------')
 
-    comm.Barrier()
+    Barrier(comm)
 
     if rank == 0:
         gather_files(param, path = './physics/data_expansion_U_V_', z_arr = z_arr, Ncell = Ncell)

@@ -23,7 +23,7 @@ def source_par():
 
         "E_min_xray": 500,
         "E_max_xray": 2000,              # energy cutoff for the xray band.
-        "alS_xray": 2.5,                 ##PL sed Xray part N ~ nu**-alS [nbr of photons/s/Hz]
+        "alS_xray": 1.00001,                 ##PL sed Xray part N ~ nu**-alS [nbr of photons/s/Hz]
         "cX":  3.4e40,                   # Xray normalization [(erg/s) * (yr/Msun)] (astro-ph/0607234 eq22)
 
 
@@ -31,22 +31,24 @@ def source_par():
         "E_max_sed_xray": 2000,  # minimum energy of normalization of xrays in eV
 
         "N_al"    : 9690,                # nbr of lyal photons per baryons in stars
-        "alS_lyal": 1.001,               ## PL for lyal
+        "alS_lyal": 0.0,               ## PL for lyal
 
-        "M_min" : 1e5,                   # Minimum mass of star forming halo. Mdark in HM
+        "M_min" : 1e8,                   # Minimum mass of star forming halo. Mdark in HM
         "M_max" : 1e16,                   # Maximum mass of star forming halo
         'f_st': 0.05,
-        'Mp': 1e11,
+        'Mp': 2.8e11 * 0.68,
         'g1': 0.49,
         'g2': -0.61,
-        'Mt': 1e7,
+        'Mt': 1e8,
         'g3': 4,
         'g4': -1,
 
-        'Nion'  : 2665,
-        "f0_esc": 0.15,                   # photon escape fraction f_esc = f0_esc * (M/Mp)^pl_esc
+        'Nion'  : 5000,
+        "f0_esc": 0.2,                   # photon escape fraction f_esc = f0_esc * (M/Mp)^pl_esc
         "Mp_esc": 1e10,
         "pl_esc": 0.0,
+
+        "min_xHII": 0,  ## set all pixels where xHII=0 to this value
     }
 
     return Bunch(par)
@@ -71,7 +73,7 @@ def sim_par(): ## used when computing and painting profiles on a grid
         "Ncell" : 128,              # nbr of pixels of the final grid.
         "Lbox" : 100,               # Box lenght, in [Mpc/h]
         "halo_catalogs": None,      # path to the directory containing all the halo catalogs.
-        "store_grids": True,        # whether or not to store the grids. If not, will just store the power spectra.
+        "store_grids": ['Tk','bubbles','lyal' ,'dTb'],        # whether or not to store the grids. If not, will just store the power spectra.
         "dens_field": None,         # path and name of the input density field on a grid. Used in run.py to compute dTb maps.
         "dens_field_type": 'pkdgrav',  # Options: 21cmFAST, pkdgrav3. It adapts the format and normalization of the density field.
         "Nh_part_min":50,           # Halo with less than Mh_part_min are excluded.

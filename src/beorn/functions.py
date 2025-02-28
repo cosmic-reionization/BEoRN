@@ -26,6 +26,8 @@ def load_halo(param, z_str):
     The halo catalogs should be in param.sim.halo_catalogs and end up with z_string
     z is the redshift of the snapshot (outupt of z_string_format)
     """
+    if not isinstance(z_str,str):
+        z_str = z_string_format(z_str)
     catalog_dir = param.sim.halo_catalogs
     catalog = catalog_dir + z_str
     halo_catalog = load_f(catalog)
@@ -172,28 +174,28 @@ def load_grid(param, z, type=None):
     nGrid: str = str(param.sim.Ncell)
 
     if type == 'dTb':
-        return load_f(dir_name + 'dTb_' + nGrid + '_' + out_name + '_z' + z_str)
+        grid = load_f(dir_name + 'dTb_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'lyal':
-        return load_f(dir_name + 'xal_' + nGrid + '_' + out_name + '_z' + z_str)
+        grid = load_f(dir_name + 'xal_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'Tk':
-        return load_f(dir_name + 'Tk_' + nGrid + '_' + out_name + '_z' + z_str)
+        grid = load_f(dir_name + 'Tk_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'exc_set':
-        return load_f(dir_name + 'xHII_exc_set_' + nGrid + '_' + out_name + '_z' + z_str)
+        grid = load_f(dir_name + 'xHII_exc_set_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'sem_num':
-        return load_f(dir_name + 'xHII_Sem_Num_' + nGrid + '_' + out_name + '_z' + z_str)
+        grid = load_f(dir_name + 'xHII_Sem_Num_' + nGrid + '_' + out_name + '_z' + z_str)
     elif type == 'bubbles':
         grid = load_f(dir_name + 'xHII_' + nGrid + '_' + out_name + '_z' + z_str)
-        if np.all(grid == 0):
-            Ncell = param.sim.Ncell
-            return np.zeros((Ncell, Ncell, Ncell))
-        elif np.all(grid == 1):
-            Ncell = param.sim.Ncell
-            return np.zeros((Ncell, Ncell, Ncell)) + 1
-        else:
-            return grid
+    elif type=='matter':
+        grid = load_delta_b(param, z_str)
     else:
-        print('grid type should be dTb, lyal, Tk, exc_set, sem_num, or bubbles. Abort')
+        print('grid type should be dTb, lyal, Tk, matter, exc_set, sem_num, or bubbles. Abort')
         exit()
+
+    if grid.shape == (1,):
+        Ncell = param.sim.Ncell
+        grid =  np.full((Ncell, Ncell, Ncell),grid[0])
+
+    return grid
 
 
 def save_grid(param, z, grid, type=None):
@@ -294,7 +296,7 @@ def Beta(zz, PS, qty='Tk'):
         print('qty should be either Tk, lyal, or reio.')
 
 
-def cross_PS(arr1, arr2, box_dims, kbinload_grids):
+def cross_PS(arr1, arr2, box_dims, kbins):
     return t2c.power_spectrum.cross_power_spectrum_1d(arr1, arr2, box_dims=box_dims, kbins=kbins)
 
 

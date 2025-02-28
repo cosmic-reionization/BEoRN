@@ -8,12 +8,11 @@ import numpy as np
 import pkg_resources
 from .cosmo import Hubble, hubble, T_adiab
 import pickle
-from .couplings import eps_lyal, S_alpha, rho_alpha, x_coll
+from .couplings import eps_lyal, x_coll
 from scipy.interpolate import splrep,splev,interp1d
 from .constants import *
-from .astro import Read_Rockstar, f_star_Halo
-from .couplings import J_xray_with_redshifting, J_xray_no_redshifting,S_alpha
-from .bias import bar_density_2h
+from .astro import f_star_Halo
+#from .couplings import J_xray_with_redshifting, J_xray_no_redshifting,S_alpha
 from .cross_sections import sigma_HI
 import scipy.integrate as integrate
 from .functions import *

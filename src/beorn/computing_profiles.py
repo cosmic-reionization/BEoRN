@@ -128,7 +128,7 @@ def Ngdot_ion(param, zz, Mh,dMh_dt):
 
     if (param.source.type == 'SED'):
        # dMh_dt = param.source.alpha_MAR * Mh * (zz + 1) * Hubble(zz, param)  ## [(Msol/h) / yr]
-        Ngam_dot_ion = dMh_dt / h0 * f_star_Halo(param, Mh) * Ob / Om * f_esc(param, Mh,zz) * param.source.Nion / sec_per_year / m_H * M_sun
+        Ngam_dot_ion = dMh_dt / h0 * f_star_Halo(param, Mh) * Ob / Om * f_esc(param, Mh) * param.source.Nion / sec_per_year / m_H * M_sun
         Ngam_dot_ion[np.where(Mh < param.source.M_min)] = 0
         return Ngam_dot_ion
     elif param.source.type == 'Ghara':
@@ -256,7 +256,8 @@ def rho_xray(param,rr, M_accr, dMdt_accr,xe, zz):
 
 
             #fXh =  np.maximum((rho_xe[i]+2e-4)**0.225  ,0.11)    # 1.0 # 0.13 # 0.15 ---> 0.11 matches the f_heat we have in cross_sections.py, for T_neutral
-            fXh = xe[i]**0.225
+            #fXh = xe[i]**0.225
+            fXh = f_Xh(param, xe[i])
 
             pref_nu = ((nH0 / nb0) * sigma_HI(nu * h_eV_sec) * (nu * h_eV_sec - E_HI) + (nHe0 / nb0) * sigma_HeI(nu * h_eV_sec) * (nu * h_eV_sec - E_HeI))   # [cm^2 * eV] 4 * np.pi *
 

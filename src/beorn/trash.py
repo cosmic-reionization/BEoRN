@@ -1,7 +1,7 @@
 """
 Some old functions that we store here before trashing them, one day.
 """
-
+import numpy as np
 
 
 
@@ -363,39 +363,6 @@ def J_alpha_n(zz, sfrd, param):
     return J_al
 
 
-def Thomson_optical_depth(zz, xHII, param):
-    """
-    Cumulative optical optical depth of array zz.
-    xHII : global ionisation fraction history
-    See e.g. Eq. 6 of 1406.4120 or eq. 12 from 2101.01712, or eq. 84 from Planck_2018_results_L06.
-    """
-    z0 = zz[0]
-    if z0 > 0:  ## the integral has to be done starting from z=0
-        low_z = np.arange(0, z0, 0.5)
-        zz = np.concatenate((low_z, zz))
-        xHII = np.concatenate((np.full(len(low_z), xHII[0]), xHII))
-
-    if xHII[0] < 1:
-        xHII[0] = 1
-        print(
-            'Warning: reionisation is not complete at the lower redshift available!! The CMB otpical depth calculation will be wrong.')
-
-    from scipy.integrate import cumtrapz, trapz, odeint
-    Ob = param.cosmo.Ob
-    h0 = param.cosmo.h
-
-    # hydrogen and helium cross sections
-    sHII = sigma_T * 1e4 * (h0 / cm_per_Mpc) ** 2  # [Mpc/h]^2
-    nb0 = rhoc0 * Ob / (m_p_in_Msun * h0)  # [h/Mpc]^3
-    # H abundances
-    nHII = xHII * nb0 * (1 + zz) ** 3  # [h/Mpc]^3
-    # proper line element
-    dldz = c_km_s * h0 / hubble(zz, param) / (1 + zz)  # [Mpc/h]
-    # integrate
-    tau_int = dldz * (nHII * sHII)  # + nHeI*sHeI + nHeII*sHeII)
-    tau = cumtrapz(tau_int, x=zz, axis=0, initial=0.0)
-
-    return zz, tau  # [np.where(zz>=z0)]
 
 
 def mean_J_xray_nu_approx(param, halo_catalog, simple_model, density_normalization=1, redshifting='yes'):

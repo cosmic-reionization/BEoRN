@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.spatial import cKDTree
 from collections import deque
-from mpi4py import MPI
+#from mpi4py import MPI
 from time import time
 
 class FoFHaloFinder:

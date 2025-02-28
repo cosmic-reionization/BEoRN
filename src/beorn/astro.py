@@ -12,9 +12,16 @@ from .functions import *
 
 def BB_Planck(nu, T):
     """
-    Input : nu in [Hz], T in [K]
-    Returns : BB Spectrum [J.s-1.m−2.Hz−1]
+    Parameters
+    ----------
+    nu : float. Photon frequency in [Hz]
+    T : float. Black-Body temperature in [K]
+
+    Returns
+    ----------
+    Black-Body spectrum (Planck's law) in [J.s-1.m−2.Hz−1]
     """
+
     a_ = 2.0 * h__ * nu**3 / c__**2
     intensity = 4 * np.pi * a_ / ( np.exp(h__*nu/(k__*T)) - 1.0)
     return intensity
@@ -23,18 +30,36 @@ def BB_Planck(nu, T):
 
 def S_fct(Mh, Mt, g3, g4):
     """
-    Suppression function in f_star. See eq.6 in arXiv:2305.15466.
+    Parameters
+    ----------
+    Mh : float. Halo mass in [Msol/h]
+    Mt : float. Cutoff mass in [Msol/h]
+    g3,g4 : floats. Control the power-law behavior of the fct.
+
+    Returns
+    ----------
+    Small-scale part of the stellar-to-halo function f_star. See eq.6 in arXiv:2305.15466.
+    (g3,g4) = (1,1),(0,0),(4,-4) gives a boost, power-law, cutoff of SFE at small scales, respectively.
     """
+
     return (1 + (Mt / Mh) ** g3) ** g4
 
 
 def f_star_Halo(param,Mh):
     """
+    Parameters
+    ----------
+    Mh : float. Halo mass in [Msol/h]
+    param : Bunch
+
+    Returns
+    ----------
     fstar * Mh_dot * Ob/Om = Mstar_dot.
     fstar is therefore the conversion from baryon accretion rate  to star formation rate.
     See eq.(5) in arXiv:2305.15466.
-    Double power law.
+    Double power law + either boost or cutoff at small scales (S_fct)
     """
+
     f_st = param.source.f_st
     Mp = param.source.Mp
     g1 = param.source.g1
@@ -48,6 +73,17 @@ def f_star_Halo(param,Mh):
 
 
 def f_esc(param,Mh):
+    """
+    Parameters
+    ----------
+    Mh : float. Halo mass in [Msol/h]
+    param : Bunch
+
+    Returns
+    ----------
+    Escape fraction of ionising photons
+    """
+
     f0  = param.source.f0_esc
     Mp  = param.source.Mp_esc
     pl  = param.source.pl_esc
@@ -55,19 +91,45 @@ def f_esc(param,Mh):
     return np.minimum(fesc,1)
 
 
+def f_Xh(param,x_e):
+    """
+     Parameters
+     ----------
+     x_e : Free electron fraction in the neutral medium
+
+     Returns
+     ----------
+     Fraction of X-ray energy deposited as heat in the IGM.
+     Dimensionless. Various fitting functions exist in the literature
+    """
+    # Schull 1985 fit.
+    # C,a,b = 0.9971, 0.2663, 1.3163
+    # fXh = C * (1-(1-x_e**a)**b)
+    
+    fXh = x_e ** 0.225
+    return fXh
+
+
 
 def eps_xray(nu_,param):
     """
-    Spectral distribution function of x-ray emission.
-    In  [1/s/Hz*(yr*h/Msun)]
-    Note : we include fX in cX in this code.
+    Parameters
+    ----------
+    nu_ : float. Photon frequency in [Hz]
+    param : Bunch
+
+    Returns
+    ----------
+    Spectral distribution function of x-ray emission in [1/s/Hz*(yr*h/Msun)]
     See Eq.2 in arXiv:1406.4120
+    Note : fX is included in cX in this code.
     """
-    # param.source.cX  ## [erg / s /SFR]
+
+    # param.source.cX  is in [erg / s /SFR]
 
     sed_xray = param.source.alS_xray
     norm_xray = (1 - sed_xray) / ((param.source.E_max_sed_xray / h_eV_sec) ** (1 - sed_xray) - (param.source.E_min_sed_xray / h_eV_sec) ** ( 1 - sed_xray)) ## [Hz**al-1]
-   # param.source.cX * eV_per_erg * norm_xray * nu_ ** (-sed_xray) * Hz_per_eV   # [eV/eV/s/SFR]
+    # param.source.cX * eV_per_erg * norm_xray * nu_ ** (-sed_xray) * Hz_per_eV   # [eV/eV/s/SFR]
 
     return param.source.cX/param.cosmo.h * eV_per_erg * norm_xray * nu_ ** (-sed_xray) /(nu_*h_eV_sec)   # [photons/Hz/s/SFR]
 

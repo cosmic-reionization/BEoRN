@@ -72,7 +72,7 @@ def x_coll(z, Tk, xHI, rho_b):
 
 def x_coll_coef(z,param):
     """
-    Coefficient to turn rho/rho_mean into a baryon density in nbr of [H atoms /phys-cm**3]
+    Coefficient to turn rho/rho_mean into a baryon density in nbr of H atoms per physical cm**3 [1/pcm**3]
     """
     Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
     coef = rhoc0 * h0 ** 2 * Ob * (1 + z) ** 3 * M_sun / cm_per_Mpc ** 3 / m_H
