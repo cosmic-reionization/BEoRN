@@ -3,14 +3,13 @@ Here we compute the Lyman_alpha and collisional coupling coefficient (x_al and x
 """
 
 import numpy as np
-from .constants import *
-from .cross_sections import sigma_HI
-import pkg_resources
-from .cosmo import comoving_distance, Hubble, hubble, T_cmb
-from .astro import f_star_Halo
-from scipy.interpolate import splrep,splev,interp1d
-from scipy.integrate import cumtrapz
+import importlib
+from pathlib import Path
 
+from scipy.interpolate import splrep,splev
+from .constants import *
+from .cosmo import T_cmb
+from .parameters import Parameters
 
 
 def kappa_coll():
@@ -29,11 +28,11 @@ def kappa_coll():
     """
 
     names = 'T, kappa'
-    path_to_file = pkg_resources.resource_filename('beorn', "input_data/kappa_eH.dat")
+    path_to_file = Path(importlib.util.find_spec('beorn').origin).parent / 'input_data' / 'kappa_eH.dat'
     eH = np.genfromtxt(path_to_file, usecols=(0, 1), comments='#', dtype=float, names=names)
 
     names = 'T, kappa'
-    path_to_file = pkg_resources.resource_filename('beorn', 'input_data/kappa_HH.dat')
+    path_to_file = Path(importlib.util.find_spec('beorn').origin).parent / 'input_data' / 'kappa_HH.dat'
     HH = np.genfromtxt(path_to_file, usecols=(0, 1), comments='#', dtype=float, names=names)
 
     return HH, eH
@@ -102,7 +101,7 @@ def S_alpha(z, Tk, xHI):
     return S_al
 
 
-def eps_lyal(nu,param):
+def eps_lyal(nu, parameters: Parameters):
     """
     Lyman-a spectral energy distribution (power-law). See eq.8 in BEoRN paper.
 
@@ -116,9 +115,9 @@ def eps_lyal(nu,param):
     float. [photons.yr-1.Hz-1.SFR-1], SFR being the Star Formation Rate in Msol/h/yr
     """
 
-    h0    = param.cosmo.h
-    N_al  = param.source.N_al  #9690 number of lya photons per protons (baryons) in stars
-    alS = param.source.alS_lyal
+    h0    = parameters.cosmology.h
+    N_al  = parameters.source.n_lyman_alpha_photons  #9690 number of lya photons per protons (baryons) in stars
+    alS = parameters.source.lyman_alpha_power_law
 
     nu_min_norm  = nu_al
     nu_max_norm  = nu_LL
