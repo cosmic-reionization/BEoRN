@@ -2,18 +2,18 @@
 Generate the xHII field from the non linear density field using the excursion set formalism.  See 1403.0941 (2.3.2), 21cmFAST original paper, Zahn et al..
 """
 import copy
-
-import numpy as np
-from .constants import *;
-from .cosmo import *
-from astropy.convolution import convolve_fft
-from .halomassfunction import HMF as halomassfct
-from .run import load_delta_b
 import datetime
-from os.path import exists
-from .astro import f_esc, f_star_Halo
+import os.path
+import numpy as np
+from astropy.convolution import convolve_fft
 import warnings
+
+from .halomassfunction import HaloMassFunction
+from .run import load_delta_b
+from .astro import f_esc, f_star_Halo
 from .computing_profiles import Ngdot_ion
+from .constants import *
+from .cosmo import *
 from .functions import *
 
 
@@ -52,7 +52,7 @@ def run_excursion_set(param):
     for ii, filename in enumerate(os.listdir(catalog_dir)):
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of snap', filename[4:-5])
-            if exists('./grid_output/xHII_exc_set_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
+            if os.path.exists('./grid_output/xHII_exc_set_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
                 print('xHII map for snapshot ', filename[4:-5], 'already painted. Skiping.')
             else:
                 print('----- Excursion set for snapshot nbr :', filename[4:-5], '-------')
@@ -291,22 +291,22 @@ def profile_kern_sharpk(r, size):
     return W_tophat(np.abs(r / size))
 
 
-def f_coll_norm(param, Mmin, z):
+def f_coll_norm(parameters: Parameters, Mmin, z):
     """
     param : beorn param file
     Fraction of total matter that "collapsed" into ionising photons.
     We use this to normalize the exc set results to the Sheth Tormen HMF (or the HMF that fits the halo catalog given by the user).
     """
-    par = HMF_par(param)
+    par = HMF_par(parameters)
     par.code.z = [z]
     par.PS.A = 0.322
-    HMF = halomassfct(par)
+    HMF = HaloMassFunction(par)
     HMF.generate_HMF(par)
     ind_min = np.argmin(np.abs(HMF.tab_M - Mmin))
     # fcoll_ST = np.trapz(f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0  # integral of dndlnM dM
     fcoll_ion_ST = np.trapz(
-        f_esc(param, HMF.tab_M[ind_min:]) * f_star_Halo(param, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],
-        HMF.tab_M[ind_min:]) / param.cosmo.Om / rhoc0
+        f_esc(parameters, HMF.tab_M[ind_min:]) * f_star_Halo(parameters, HMF.tab_M[ind_min:]) * HMF.HMF[0][ind_min:],
+        HMF.tab_M[ind_min:]) / parameters.cosmo.Om / rhoc0
 
     return fcoll_ion_ST
 
@@ -323,7 +323,7 @@ def f_coll_PS(param, Mmin, z):
     par.hmf.p = 0
     par.hmf.q = 1
     par.hmf.A = 0.5
-    HMF = halomassfct(par)
+    HMF = HaloMassFunction(par)
     HMF.generate_HMF(par)
     ind_min = np.argmin(np.abs(HMF.tab_M - Mmin))
     fcoll_PS = np.trapz(
@@ -517,7 +517,7 @@ def run_Sem_Num(param):
     for ii, filename in enumerate(os.listdir(catalog_dir)):
         if rank == ii % size:
             print('Core nbr', rank, 'is taking care of snap', filename[4:-5])
-            if exists('./grid_output/xHII_Sem_Num_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
+            if os.path.exists('./grid_output/xHII_Sem_Num_' + str(nGrid) + '_' + model_name + '_snap' + filename[4:-5]):
                 print('xHII map for snapshot ', filename[4:-5], 'already painted. Skiping.')
             else:
                 print('----- SemNum for snapshot nbr :', filename[4:-5], '-------')
