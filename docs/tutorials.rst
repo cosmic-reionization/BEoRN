@@ -9,6 +9,7 @@ The following examples will help you get started with ``beorn``:
    :maxdepth: 2
    :caption: Examples:
 
-   examples/Test_case_with_N_halos.ipynb
-   examples/post_process_Nbody.ipynb
-   examples/beorn_example1.ipynb
+   examples/artificial_halos.ipynb
+   examples/21cmfast_halos.ipynb
+   examples/nbody_simulation_halos.ipynb
+   examples/full_run.py
