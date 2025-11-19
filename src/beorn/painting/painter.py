@@ -20,7 +20,7 @@ from ..structs.parameters import Parameters
 from ..structs.snapshot_profiles import GridData
 from ..structs.global_profiles import GridDataMultiZ
 from ..structs.halo_catalog import HaloCatalog
-from .spread import spread_excess_ionization
+# from .spread import spread_excess_ionization
 from .spread  import spreading_excess_fast
 from ..load_input_data.base import BaseLoader
 
@@ -259,7 +259,7 @@ class Painter:
 
         ## Excess spreading
         start_time = time.time()
-        # spread_excess_ionization(self.parameters, Grid_xHII)
+        spread_excess_ionization(self.parameters, Grid_xHII)
         Grid_xHII = spreading_excess_fast(self.parameters, Grid_xHII)
 
         self.logger.info(f'Redistributing excess photons from the overlapping regions took {timedelta(seconds=time.time() - start_time)}.')

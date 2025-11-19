@@ -9,7 +9,7 @@ from scipy.integrate import cumulative_trapezoid
 from astropy.cosmology import FlatLambdaCDM
 
 from .constants import *
-from .parameters import Parameters
+from .structs import Parameters
 
 def hubble(z, parameters: Parameters):
     """
@@ -86,7 +86,7 @@ def E(x, parameters: Parameters):
 
 def D_non_normalized(a, parameters: Parameters):
     """
-    a : input array 
+    a : input array
     Integrate from a~0 (0.001) to a. We checked that it gives same results than integrate.quad for z=0 to 30
     """
     if np.any(a<0.001):

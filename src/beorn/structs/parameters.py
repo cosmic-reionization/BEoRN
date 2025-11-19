@@ -250,19 +250,15 @@ class CosmologyParameters:
 class Parameters:
     """
     Group all the parameters for the simulation.
-
-    Attributes:
-        source: SourceParameters
-        solver: SolverParameters
-        cosmology: CosmologyParameters
-        simulation: SimulationParameters
-        excursion_set: ExcursionSetParameters
-        halo_mass_function: HaloMassFunctionParameters
     """
     source: SourceParameters = field(default_factory = SourceParameters)
+    """source parameters"""
     solver: SolverParameters = field(default_factory = SolverParameters)
+    """solver parameters"""
     cosmology: CosmologyParameters = field(default_factory = CosmologyParameters)
+    """cosmological parameters"""
     simulation: SimulationParameters = field(default_factory = SimulationParameters)
+    """simulation parameters"""
 
 
     def unique_hash(self) -> str:

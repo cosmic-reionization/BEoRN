@@ -18,7 +18,6 @@ from ..structs.radiation_profiles import RadiationProfiles
 from .. import constants
 # TODO: replace these unit conversions by astropy units
 from ..constants import m_p_in_Msun, km_per_Mpc, h_eV_sec, cm_per_Mpc, E_HI, E_HeI, kb_eV_per_K, rhoc0
-from .. import global_qty
 from ..astro import f_Xh, f_star_Halo, eps_xray
 from .helpers import Ngdot_ion, mean_gamma_ion_xray, solve_xe, rho_alpha_profile, cum_optical_depth
 from .massaccretion import mass_accretion

@@ -19,7 +19,7 @@ class ArtificialHaloLoader(BaseLoader):
         self.Y = rng.random(halo_count) * self.parameters.simulation.Lbox
         self.Z = rng.random(halo_count) * self.parameters.simulation.Lbox
 
-        self.mass_at_z6 = np.full(halo_count, final_mass)
+        self.mass_at_z0 = np.full(halo_count, final_mass)
         self.alpha = alpha
 
     @property
@@ -35,7 +35,7 @@ class ArtificialHaloLoader(BaseLoader):
 
     def load_halo_catalog(self, redshift_index):
         z = self.redshifts[redshift_index]
-        masses = exponential_mass_accretion(z, M0 = self.mass_at_z6, z0=self.redshifts.min(), alpha=self.alpha)
+        masses = exponential_mass_accretion(z, M0 = self.mass_at_z0, z0=self.redshifts.min(), alpha=self.alpha)
         positions = np.stack([self.X, self.Y, self.Z], axis=-1)
         return HaloCatalog(
             positions, masses, self.parameters, redshift_index

@@ -1,6 +1,8 @@
 from .parameters import Parameters
-from .radiation_profiles import *
-from .snapshot_profiles import *
-from .global_profiles import *
-from .halo_catalog import *
-from .lightcone import *
+
+from .base_struct import BaseStruct
+from .radiation_profiles import RadiationProfiles
+from .snapshot_profiles import GridData
+from .global_profiles import GridDataMultiZ
+from .halo_catalog import HaloCatalog
+from .lightcone import Lightcone

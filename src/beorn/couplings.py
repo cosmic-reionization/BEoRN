@@ -9,7 +9,7 @@ from pathlib import Path
 from scipy.interpolate import splrep,splev
 from .constants import *
 from .cosmo import T_cmb
-from .parameters import Parameters
+from .structs import Parameters
 
 
 def kappa_coll():
@@ -128,40 +128,3 @@ def eps_lyal(nu, parameters: Parameters):
     eps_alpha = Inu(nu)*N_al/(m_p_in_Msun * h0)
 
     return eps_alpha
-
-
-
-
-
-
-####### Not used below this line
-
-def phi_alpha(x,E):
-    """
-    Fraction of the absorbed photon energy that goes into excitation. [Dimensionless]
-    From Dijkstra, Haiman, Loeb. Apj 2004.
-
-    Parameters
-    ----------
-    x : ionized hydrogen fraction at location
-    E : energy in eV
-
-    Returns
-    -------
-    float
-    """
-    return 0.39*(1-x**(0.4092*a_alpha(x,E)))**1.7592
-
-def a_alpha(x,E):
-    """
-    Used in phi_alpha.
-    """
-    return 2/np.pi * np.arctan(E/120 * (0.03/x**1.5 + 1)**0.25)
-
-
-
-
-
-
-
-
