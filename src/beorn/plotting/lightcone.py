@@ -3,8 +3,6 @@ from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm, LogNorm, No
 import numpy as np
 import logging
 logger = logging.getLogger(__name__)
-
-
 from ..structs.lightcone import Lightcone
 
 # Edit this gradient at https://eltos.github.io/gradient/#0:78E4FF-20:006DC2-49:001250-50:000000-51:562500-71.9:CF8400-100:FFEC33

@@ -2,7 +2,6 @@ import numpy as np
 import logging
 logger = logging.getLogger(__name__)
 
-import matplotlib.pyplot as plt
 
 def vectorized_alpha_fit(redshifts: np.ndarray, mass_history: np.ndarray) -> np.ndarray:
     """

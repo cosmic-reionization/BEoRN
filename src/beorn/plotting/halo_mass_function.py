@@ -1,6 +1,7 @@
-from ..structs import HaloCatalog
 import numpy as np
 import matplotlib.pyplot as plt
+
+from ..structs import HaloCatalog
 
 def plot_halo_mass_function(ax: plt.Axes, halo_catalog: HaloCatalog, bin_count: int = None, label: str = None, color: str = None) -> None:
     """
