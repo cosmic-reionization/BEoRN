@@ -2,17 +2,17 @@
 Contributing
 ============
 
-Thank you so much for using ``beorn``. Contributions are welcome and are greatly appreciated. 
+Thank you so much for using ``beorn``. Contributions are welcome and are greatly appreciated.
 
 Bug reports/Feedback/Questions
 ===============================================
-It is very helpful to us when users report bugs or unexpected behaviour in the code. Please feel free to open an issue at the repository's `issue <https://github.com/sambit-giri/beorn/issues>`_ page. It is also the best place to seek any help or would like to give us any feedback. 
+It is very helpful to us when users report bugs or unexpected behaviour in the code. Please feel free to open an issue at the repository's `issue <https://github.com/cosmic-reionization/beorn/issues>`_ page. It is also the best place to seek any help or would like to give us any feedback.
 
 If you report an issue, please give the necessary details (python environment, code version, the unexpected output or error message) and a "Working Example" to reproduce the problem.
 
 Adding new features
 ===================
-If you feel that there are some features missing, we welcome you to open an issue and discuss it. We can plan how this missing feature can be included in the code. 
+If you feel that there are some features missing, we welcome you to open an issue and discuss it. We can plan how this missing feature can be included in the code.
 
 Setting up your development environment
 ---------------------------------------

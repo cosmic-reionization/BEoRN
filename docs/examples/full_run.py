@@ -31,19 +31,14 @@ output_handler = beorn.io.Handler(file_root=OUTPUT_ROOT)
 # redirect logs to a file under the OUTPUT_ROOT directory - this can be useful for cases where you want to retrace many parallel runs later on.
 output_handler.save_logs(parameters)
 
-
-### Step 1: radion profiles
-try:
-    profiles = cache_handler.load_file(parameters, beorn.structs.RadiationProfiles)
-except FileNotFoundError:
-    solver = beorn.precomputation.RadiationProfileSolver(parameters, cache_handler, loader.redshifts)
-    profiles = solver.solve()
-
-    # since we want to skip recalculating the profiles, we save them
-    cache_handler.write_file(parameters, profiles)
+### In a first step, we compute the radiation profiles around sources at all redshifts of interest
+solver = beorn.precomputation.RadiationProfileSolver(parameters, loader.redshifts)
+# the computation does not depend on the spatial information, so the profiles are reusable
+# instead of recomputing them every time, we can reuse a cached version if available
+profiles = solver.get_or_compute_profiles(cache_handler)
 
 
-### Step 2 : paint the profiles onto the grid
+### In a second step, we use the precomputed profiles to paint the desired quantities onto the simulation grids
 painter = beorn.painting.PaintingCoordinator(
     parameters,
     loader = loader,

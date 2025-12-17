@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+# Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+permissions:
+  pages: write
+  id-token: write
+
 jobs:
   build-docs:
     name: Build and Deploy Documentation
@@ -30,7 +35,7 @@ jobs:
         sphinx-build -b html docs/ build/
 
     - name: Store built docs as artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-pages-artifact@v3
       with:
         name: built-docs
         path: build/

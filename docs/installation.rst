@@ -20,7 +20,7 @@ Finally, to install Beorn, run the following command::
 
 A local, editable installation is also possible using pip (or equivalent). This is useful if you want to modify the code and test your changes without having to reinstall the package each time.
 
-1. Download or clone the `Repository on GitHub <https://github.com/sambit-giri/beorn>`_
+1. Download or clone the `Repository on GitHub <https://github.com/cosmic-reionization/beorn>`_
 
 2. Install in editable mode by running the following command::
 

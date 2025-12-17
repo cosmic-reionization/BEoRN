@@ -56,6 +56,7 @@ class RadiationProfileSolver:
 
     def get_or_compute_profiles(self, handler: Handler) -> RadiationProfiles:
         """
+        Tries to load the radiation profiles using the handler (i.e. from a user-specified cache). If not found, computes them and saves them to cache.
         Args:
             handler: IO handler to use for caching/loading the profiles
 
