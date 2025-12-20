@@ -3,18 +3,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 def bin_centers(bins: np.ndarray) -> np.ndarray:
-    """
-    Compute the bin centers from the bin edges. Automatically detects whether bins are linear or logarithmic.
+    """Compute bin centers from bin edges.
 
-    Parameters
-    ----------
-    bins : np.ndarray
-        1D array of bin edges.
+    Automatically detects whether the provided ``bins`` are linear or
+    logarithmic and returns the appropriate center values.
 
-    Returns
-    -------
-    np.ndarray
-        1D array of bin centers with n-1 elements, where n is the number of bin edges.
+    Args:
+        bins (numpy.ndarray): 1D array of bin edges.
+
+    Returns:
+        numpy.ndarray: 1D array of bin centers with length ``len(bins)-1``.
     """
     if np.all(np.diff(bins) == bins[1] - bins[0]):
         # Linear bins

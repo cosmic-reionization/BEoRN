@@ -5,58 +5,83 @@ import logging
 from ..structs import Parameters, HaloCatalog
 
 class BaseLoader(ABC):
-    """
-    Base class for data loaders. This class provides a common interface for loading data and ensures that derived classes implement the required methods.
-    Beorn requires the following input data:
-    - a halo catalog containing the halo properties (position, mass)
-    - a grid containing the associated baryonic density field
-    - a grid containing the RSD density field
+    """Abstract base class for data loaders.
 
-    The simulation can be run without some of this information but some refined properties will not be available.
+    Subclasses must implement methods to provide the following data:
+    - halo catalogs containing all relevant halo properties,
+    - baryonic density fields,
+    - redshift-space-distortion (RSD) (optional)
+
+    Implementations are expected to expose a ``redshifts`` property describing available snapshots.
     """
     logger = logging.getLogger(__name__)
 
     def __init__(self, parameters: Parameters):
-        """
-        Initialize the loader with the given parameters.
+        """Initialize the loader with simulation ``parameters``.
 
-        :param parameters: Parameters object containing simulation settings.
+        Args:
+            parameters (Parameters): Parameters object containing simulation settings.
         """
         self.parameters = parameters
 
     @abstractmethod
     def load_halo_catalog(self, redshift_index: int) -> HaloCatalog:
-        """
-        Load the halo catalog for the redshift index.
+        """Load the halo catalog for a given snapshot index.
+
+        Args:
+            redshift_index (int): Snapshot index to load.
+
+        Returns:
+            HaloCatalog: Loaded halo catalog for the snapshot.
         """
         pass
 
     @abstractmethod
     def load_density_field(self, redshift_index: int) -> np.ndarray:
-        """
-        Load the baryonic density field for the redshift index.
+        """Load the baryonic density field for a given snapshot.
+
+        Args:
+            redshift_index (int): Snapshot index to load.
+
+        Returns:
+            numpy.ndarray: 3D density field array (shape ``Ncell^3``).
         """
         pass
 
     @abstractmethod
     def load_rsd_fields(self, redshift_index: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Load the RSD density field for the redshift index. A separate field is loaded for each of the three velocity components (x, y, z).
+        """Load the three RSD (velocity-weighted) fields for the snapshot.
+
+        Args:
+            redshift_index (int): Snapshot index to load.
+
+        Returns:
+            tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]: The three
+            velocity-component meshes (vx, vy, vz) mapped to the grid.
         """
         pass
 
     @property
     @abstractmethod
     def redshifts(self) -> np.ndarray:
-        """
-        Loads the redshifts available to the loader.
+        """Array of available redshifts for this loader.
+
+        Returns:
+            numpy.ndarray: 1D array of redshift values (ascending order: current->past).
         """
         pass
 
     def redshift_index(self, redshift: float) -> int:
-        """
-        Returns the index of the given redshift in the loader's redshifts array.
-        If the redshift is not found, raises a ValueError.
+        """Return the index of ``redshift`` in the loader's grid.
+
+        Args:
+            redshift (float): Redshift value to look up.
+
+        Returns:
+            int: Index into :pyattr:`redshifts` corresponding to ``redshift``.
+
+        Raises:
+            ValueError: If the requested redshift is not available.
         """
         indices = np.where(self.redshifts == redshift)[0]
         if indices.size == 0:

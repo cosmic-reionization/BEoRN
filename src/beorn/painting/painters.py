@@ -1,3 +1,11 @@
+"""Painting utilities: convert 1D radiation profiles to 3D grids.
+
+This module provides functions that take radial radiation or
+temperature profiles and 'paint' them onto a 3D grid of halo positions
+using FFT-based convolution kernels. The functions modify the
+provided ``output_grid`` in-place.
+"""
+
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.integrate import trapezoid
@@ -9,11 +17,29 @@ def paint_ionization_profile(
     output_grid: np.ndarray,
     radial_grid,
     x_HII_profile,
-    nGrid, LBox,
-    z,
+    nGrid: int,
+    LBox: float,
+    z: float,
     halo_grid: np.ndarray
 ) -> None:
-    # TODO - describe how this modifies the output_grid in place
+    """Paint an ionization fraction profile onto a 3D grid.
+
+    The function converts a 1D ionization profile described on
+    ``radial_grid`` into a 3D convolution kernel and adds the result to
+    ``output_grid`` weighted by ``halo_grid`` (halo number density).
+
+    Args:
+        output_grid (np.ndarray): 3D array modified in-place.
+        radial_grid (array): Radial coordinates of the profile (comoving).
+        x_HII_profile (array): Ionization fraction profile as a function of radius.
+        nGrid (int): Number of grid cells per axis.
+        LBox (float): Box size (Mpc/h).
+        z (float): Redshift — used to convert between comoving/physical.
+        halo_grid (np.ndarray): 3D halo count mesh (same shape as ``output_grid``).
+
+    Returns:
+        None: ``output_grid`` is modified in-place.
+    """
     profile_xHII = interp1d(
         x = radial_grid * (1 + z),
         y = x_HII_profile,
@@ -52,8 +78,30 @@ def paint_alpha_profile(
     truncate,
     halo_grid: np.ndarray
 ) -> None:
+    """Paint a Lyman-alpha coupling profile onto a 3D grid.
 
-    ### We use this stacked_kernel functions to impose periodic boundary conditions when the lyal or T profiles extend outside the box size. Very important for Lyman-a.
+    The function converts a 1D Lyman-alpha coupling profile into a
+    3D kernel that accounts for periodic stacking (via
+    :func:`stacked_lyal_kernel`) and adds the convolved result to
+    ``output_grid`` weighted by ``halo_grid``. Modifies
+    ``output_grid`` in-place.
+
+    Args:
+        output_grid (np.ndarray): 3D array modified in-place.
+        r_lyal (array): Radial coordinates for the Lyman-alpha profile (comoving).
+        x_alpha_prof (array): Lyman-alpha coupling profile as a function of radius.
+        nGrid (int): Number of grid cells per axis.
+        LBox (float): Box size (Mpc/h).
+        minimum_grid_size_lyal (int): Minimum grid size used when stacking kernels.
+        z (float): Snapshot redshift.
+        truncate (bool|float): If float, values below this physical radius are truncated.
+        halo_grid (np.ndarray): 3D halo count mesh (same shape as ``output_grid``).
+
+    Returns:
+        None: ``output_grid`` is modified in-place.
+    """
+    # TODO - truncation should not be handled by the PAINT function
+
     if isinstance(truncate, float):
         # truncate below a certain radius
         x_alpha_prof[r_lyal * (1 + z) < truncate] = x_alpha_prof[r_lyal * (1 + z) < truncate][-1]
@@ -74,7 +122,7 @@ def paint_alpha_profile(
             kernel = kernel_xal * 1e-7 / np.sum(kernel_xal),
             **CONVOLVE_FFT_KWARGS
         ) * renorm * np.sum(kernel_xal) / 1e-7
-        # we do this trick to avoid error from the fft when np.sum(kernel) is too close to zero.
+        # Avoid numerical issues when np.sum(kernel) ~ 0
 
 
 def paint_temperature_profile(
@@ -88,10 +136,31 @@ def paint_temperature_profile(
     truncate,
     halo_grid: np.ndarray
 ) -> None:
+    """Paint a temperature profile onto a 3D grid.
+
+    Converts a 1D temperature profile into a 3D kernel (using
+    :func:`stacked_T_kernel`) and applies it to the halo mesh. The
+    function writes the temperature contribution into ``output_grid``
+    in-place.
+
+    Args:
+        output_grid (np.ndarray): 3D array modified in-place.
+        radial_grid (array): Radial coordinates of the temperature profile (comoving).
+        Temp_profile (array): Temperature profile as a function of radius.
+        nGrid (int): Number of grid cells per axis.
+        LBox (float): Box size (Mpc/h).
+        minimum_grid_size_heat (int): Minimum grid size used when stacking kernels for temperature.
+        z (float): Snapshot redshift.
+        truncate (bool|float): If float, values below this physical radius are truncated.
+        halo_grid (np.ndarray): 3D halo count mesh (same shape as ``output_grid``).
+
+    Returns:
+        None: ``output_grid`` is modified in-place.
+    """
 
     # TODO - truncation should not be handled by the PAINT function
     if isinstance(truncate, float):
-        # truncate below a certain radius
+        # Truncate below a certain physical radius
         Temp_profile[radial_grid * (1 + z) < truncate] = Temp_profile[radial_grid * (1 + z) < truncate][-1]
 
     kernel_T = stacked_T_kernel(

@@ -1,5 +1,9 @@
-"""
-This module contains helper functions for computing various radiation profiles and related quantities.
+"""Helper routines for precomputation of radiation profiles.
+
+This module provides utilities used by the 1D radiation-profile
+solver, including photon production rates, mean X-ray ionisation
+quantities, temperature fits and cumulative optical depth
+calculations.
 """
 import importlib.util
 from pathlib import Path
@@ -19,17 +23,21 @@ from ..cosmo import comoving_distance, hubble
 
 
 def Ngdot_ion(parameters: Parameters, zz: np.ndarray, Mh: np.ndarray, dMh_dt: np.ndarray) -> np.ndarray:
-    """
-    Parameters
-    ----------
-    parameters: Parameters object containing cosmological parameters and source properties.
-    zz: array of redshifts. It enters in the mass accretion rate.
-    Mh: array. halo mass evolution in Msol/h. Shape is len(zz)
-    dMh_dt : array. MAR (Msol/h/yr)
+    """Compute the ionizing photon production rate Ngamma_dot.
 
-    Returns
-    ----------
-    Array. Number of ionizing photons emitted per sec [s**-1].
+    The routine computes the number of ionizing photons emitted per
+    second for a given halo mass evolution and mass-accretion rate,
+    taking into account the chosen source model in ``parameters``.
+
+    Args:
+        parameters (Parameters): Simulation and source parameters.
+        zz (numpy.ndarray): Redshift grid used for the mass-accretion.
+        Mh (numpy.ndarray): Halo mass evolution array (M_sun/h).
+        dMh_dt (numpy.ndarray): Mass accretion rate array.
+
+    Returns:
+        numpy.ndarray: Photon production rate in s^-1 with the same
+        broadcastable shape as the inputs.
     """
     Ob, Om, h0 = parameters.cosmology.Ob, parameters.cosmology.Om, parameters.cosmology.h
 
@@ -57,20 +65,21 @@ def Ngdot_ion(parameters: Parameters, zz: np.ndarray, Mh: np.ndarray, dMh_dt: np
 
 
 def mean_gamma_ion_xray(parameters: Parameters, sfrd, zz):
-    """
-    Parameters
-    ----------
-    param : dictionary containing all the input parameters
-    sfrd : Star formation rate density, in Msol/h/yr/(Mpc/h)^3. Shape is len(zz)
-    zz : redshift in decreasing order.
+    """Compute mean X-ray primary and secondary ionisation rates.
 
-    Returns
-    ----------
-    Mean X ray ionisation rate (primary and secondary). Used to compute the mean x_e, to then compute f_Xh, the fraction of energy deposited as heat by electrons in the neutral medium.
-    Shape is (2,zz)
+    This routine integrates the cosmological X-ray background to
+    estimate the mean primary and secondary ionisation rates used to
+    evolve the global free-electron fraction.
 
-    -Gamma_ion : Primary ionisation rate from Xray (arXiv:1406.4120, Eq.9,10) -- similar to Gamma_ion in HM code.
-    -Gamma_sec_ion : Secondary ionisation rate from xray. We assume fXion only depends on xe (astro-ph/0608032, Eq.69)
+    Args:
+        parameters (Parameters): Cosmology and source parameters.
+        sfrd (array): Star-formation-rate density (M_sun/h/yr/(Mpc/h)^3).
+        zz (array): Redshift grid (decreasing order recommended).
+
+    Returns:
+        tuple[numpy.ndarray, numpy.ndarray]: ``(Gamma_ion, Gamma_sec_ion)``
+        arrays containing the primary and secondary X-ray ionisation
+        rates (s^-1) evaluated on ``zz``.
     """
 
     Ob = parameters.cosmology.Ob
@@ -134,9 +143,16 @@ def mean_gamma_ion_xray(parameters: Parameters, sfrd, zz):
 
 
 def T_gas_fit(zz):
-    """
-    Aproximative fit for gas temperature
-    (see Eq.2 in arXiv:1005.2416)
+    """Approximate fit for the gas temperature.
+
+    The fit follows Eq. 2 in arXiv:1005.2416 and is used for quick
+    estimates of the gas temperature as a function of redshift.
+
+    Args:
+        zz (array): Redshift values.
+
+    Returns:
+        numpy.ndarray: Approximate gas temperature in Kelvin.
     """
     a = 1/(1+zz)
     a1 = 1.0/119.0
@@ -264,11 +280,21 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
 
 
 def cum_optical_depth(zz, E, parameters: Parameters):
-    """
-    Cumulative optical optical depth of array zz.
-    See e.g. Eq. 6 of 1406.4120
+    """Compute the cumulative optical depth for photons traveling from emitters.
 
-    We use it for the xray heating and xray ion rate calculations.
+    The function computes the optical depth tau(z) for a photon observed
+    at the first redshift in ``zz`` with energy ``E`` and integrated
+    over the provided redshift range. It is used by the X-ray heating
+    and ionisation calculations.
+
+    Args:
+        zz (array): Redshift array over which to integrate (increasing or decreasing order accepted).
+        E (float|array): Observed photon energy at ``zz[0]`` in eV, or an
+            array of energies.
+        parameters (Parameters): Cosmology and composition parameters.
+
+    Returns:
+        numpy.ndarray: Optical depth array evaluated along ``zz``.
     """
     Ob = parameters.cosmology.Ob
     h0 = parameters.cosmology.h

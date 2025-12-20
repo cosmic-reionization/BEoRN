@@ -10,16 +10,24 @@ from ..structs.parameters import Parameters
 
 
 def mass_accretion(parameters: Parameters, z_bins: np.ndarray, m_bins: np.ndarray, alpha_bins: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Computes the halo mass and its derivative with respect to time using an exponential mass accretion model. A range of initial halo masses and alpha values is computed.
+    """Compute halo mass evolution and its time derivative.
+
+    Uses an exponential accretion model where the mass grows as
+    M(z) = M0 * exp(alpha * (z_initial - z)). The function returns
+    both the halo mass evolution and the mass accretion rate dM/dt for
+    the provided grid of initial masses and alpha values.
+
     Args:
-        param : dictionary containing all the input parameters
-        z_bins  : arr of redshifts
+        parameters (Parameters): Simulation parameters used for cosmology.
+        z_bins (np.ndarray): Redshift grid (decreasing order preferred).
+        m_bins (np.ndarray): Initial halo masses (bin edges or centers).
+        alpha_bins (np.ndarray): Exponential growth parameters for each alpha bin.
 
     Returns:
-        halo_mass and halo_mass_derivative
-        These are two 3d arrays of shape (m_bins, alpha_bins, z_bins)
-        halo_mass_derivative is in [Msol/h/yr]
+        tuple[numpy.ndarray, numpy.ndarray]: ``(halo_mass, halo_mass_derivative)``
+        where both arrays have shape ``(m_bins, alpha_bins, len(z_bins))``.
+        The derivative is given in physical units consistent with the
+        rest of the code (approximately M_sun/h per time unit).
     """
     z_initial = z_bins.min()
     logger.debug(f"Computing mass accretion for a parameter space consisting of: {m_bins.size=}, {alpha_bins.size=} and {z_bins.size=}")
@@ -31,16 +39,21 @@ def mass_accretion(parameters: Parameters, z_bins: np.ndarray, m_bins: np.ndarra
 
 
 def mass_accretion_derivative(parameters: Parameters, halo_mass: np.ndarray, z_bins: np.ndarray, m_bins: np.ndarray, alpha_bins: np.ndarray) -> np.ndarray:
-    """
-    Parameters
-    ----------
-    param : dictionary containing all the input parameters
-    Mh : arr. Halo masss
-    z  : arr of redshifts, shape(Mh).
+    """Compute the time derivative dM/dt of the halo mass evolution.
 
-    Returns
-    ----------
-    Halo mass accretion rate, i.e. time derivative of halo mass (dMh/dt in [Msol/h/yr])
+    The derivative follows analytically from the exponential model
+    used in :func:`mass_accretion` and includes the Hubble-factor
+    conversion via :func:`Hubble`.
+
+    Args:
+        parameters (Parameters): Simulation cosmology parameters.
+        halo_mass (numpy.ndarray): Halo mass array as returned by :func:`mass_accretion`.
+        z_bins (numpy.ndarray): Redshift grid.
+        m_bins (numpy.ndarray): Initial mass grid (not directly used but provided for clarity).
+        alpha_bins (numpy.ndarray): Alpha growth parameters.
+
+    Returns:
+        numpy.ndarray: dM/dt array with same shape as ``halo_mass``.
     """
     # by construction halo_mass has an alpha dependence and an initial mass dependence
     # using the function from above we can formulate an analytical expression for the derivative:

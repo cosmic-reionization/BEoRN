@@ -27,8 +27,17 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
 
     @classmethod
     def create_empty(cls, parameters: Parameters, directory: Path, snapshot_number: int = None, **kwargs) -> "TemporalCube":
-        """
-        Creates an empty HDF5 file with the given file path. If the file already exists, it is not overwritten. In order to create an object of the correct size (to be used by parallel implementations), the snapshot_number must be provided. If not provided, an empty object is created without pre-allocated arrays but this cannot be used in parallel implementations.
+        """Create an empty :class:`TemporalCube` and corresponding HDF5 file.
+
+        Args:
+            parameters (Parameters): Simulation parameters used to build file name.
+            directory (Path): Directory where the HDF5 file will be created.
+            snapshot_number (int|None): If provided, preallocate space for
+                ``snapshot_number`` redshift slices (required for parallel runs).
+            **kwargs: Additional name components used when generating the file path.
+
+        Returns:
+            TemporalCube: New instance with an on-disk HDF5 file created.
         """
         path = cls.get_file_path(directory, parameters, **kwargs)
         if snapshot_number is None:
@@ -61,8 +70,13 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
 
 
     def append(self, grid_snapshot: CoevalCube, index: int) -> None:
-        """
-        Append a new GridData (for another redshift snapshot) to the collection of grid data.
+        """Append a :class:`CoevalCube` snapshot into the HDF5-backed collection.
+
+        The method writes arrays from ``grid_snapshot`` into the HDF5
+        datasets at position ``index``.
+        Args:
+            grid_snapshot (CoevalCube): Snapshot to append.
+            index (int): Index/slot in the temporal dataset where the snapshot will be written.
         """
         if not isinstance(grid_snapshot, CoevalCube):
             raise TypeError("grid_snapshot must be an instance of GridData")
@@ -101,8 +115,15 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
 
 
     def power_spectrum(self, quantity: np.ndarray, parameters: Parameters) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Compute the power spectrum of the given quantity over all redshifts.
+        """Compute 1D power spectra for a given grid quantity over all z.
+
+        Args:
+            quantity (np.ndarray): Array shaped (z, nx, ny, nz) to analyse.
+            parameters (Parameters): Simulation parameters providing `kbins` and `Lbox`.
+
+        Returns:
+            tuple: ``(power_spectrum, bins)`` where ``power_spectrum`` has shape
+            (n_z, n_k) and ``bins`` are the k-bin edges.
         """
         bin_number = parameters.simulation.kbins.size
         box_dims = parameters.simulation.Lbox
@@ -117,16 +138,13 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
 
 
     def redshift_of_reionization(self, ionization_fraction: float = 0.5) -> int:
-        """
-        Compute the redshift of reionization, defined as the redshift at which the volume-averaged ionization fraction crosses the given threshold.
-        Parameters
-        ----------
-        ionization_fraction : float
-            The ionization fraction threshold to define the redshift of reionization. Default is 0.5.
-        Returns
-        -------
-        int
-            The index of the redshift at which the volume-averaged ionization fraction crosses the threshold.
+        """Return the redshift index where the volume-averaged ionization crosses a threshold.
+
+        Args:
+            ionization_fraction (float): Threshold volume-averaged ionization fraction. Default 0.5.
+
+        Returns:
+            int: Index in the time/redshift array corresponding to the crossing.
         """
         if self.Grid_xHII is None:
             raise ValueError("Grid_xHII is not available.")

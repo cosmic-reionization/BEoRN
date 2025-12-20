@@ -1,3 +1,11 @@
+"""Convenience logging helpers that play nicely with progress bars.
+
+The module silences overly verbose loggers commonly produced by plotting
+and HDF5 libraries and installs a :class:`TqdmLoggingHandler` that
+writes log messages using ``tqdm.write`` so logs do not corrupt
+progress-bar output.
+"""
+
 import logging
 from tqdm.auto import tqdm
 
@@ -13,8 +21,10 @@ logging.getLogger("h5py._utils").setLevel(logging.WARNING)
 
 # setup more friendly progress bar logging
 class TqdmLoggingHandler(logging.Handler):
-    """
-    A logging handler that uses tqdm to display log messages in the console. This way, logs written using this handler do not interfere with the tqdm progress bar output.
+    """Logging handler that writes messages via :func:`tqdm.write`.
+
+    Using this handler prevents logging messages from overwriting or
+    corrupting tqdm progress bar output in interactive consoles.
     """
     def emit(self, record):
         try:

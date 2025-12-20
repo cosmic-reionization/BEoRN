@@ -1,3 +1,4 @@
+"""Halo catalog data structure."""
 from dataclasses import dataclass
 import numpy as np
 import logging
@@ -9,8 +10,10 @@ from ..particle_mapping.pylians import map_particles_to_mesh
 
 @dataclass
 class HaloCatalog:
-    """
-    Halo catalog that stores the halo positions and masses at a given redshift snapshot.
+    """Container for halo positions, masses and associated properties.
+
+    Instances represent all halos at a single given redshift and provide
+    filtering and utility methods used by the painting stage.
     """
 
     positions: np.ndarray
@@ -56,10 +59,15 @@ class HaloCatalog:
         return self.masses.size
 
 
-    def get_halo_indices(self, alpha_range: list[int], mass_range: list[int]) -> np.ndarray:
-        """
-        Computes which halos from the current snapshot lie within the mass and alpha range that are specified.
-        Returns their indices.
+    def get_halo_indices(self, alpha_range: list[float], mass_range: list[float]) -> np.ndarray:
+        """Return indices of halos within provided alpha and mass ranges.
+
+        Args:
+            alpha_range (list[float]): [alpha_min, alpha_max).
+            mass_range (list[float]): [mass_min, mass_max).
+
+        Returns:
+            numpy.ndarray: Integer indices of matching halos (may be empty).
         """
         if self.masses.size == 0:
             return []
@@ -80,13 +88,13 @@ class HaloCatalog:
 
 
     def to_mesh(self) -> np.ndarray:
-        """
-        Converts the halo catalog to a 3D mesh of halo counts using nearest neighbor interpolation. Attention this representation does not take into account the halo masses. The returned quantity should be interpreted as number density! It is meant to be used when creating a map of halos that lie within a predefined mass bin.
+        """Rasterize halo positions into a 3D number-count mesh.
 
-        Returns
-        -------
-        np.ndarray
-            3D numpy array representing the halo count mesh.
+        The mesh uses the nearest-neighbor mass-assignment scheme. The returned array represents halo counts
+        (number density), not mass.
+
+        Returns:
+            numpy.ndarray: 3D float32 array with shape (Ncell, Ncell, Ncell).
         """
         physical_size = self.parameters.simulation.Lbox
         grid_size = self.parameters.simulation.Ncell
@@ -98,9 +106,13 @@ class HaloCatalog:
 
     ### methods that create new halo catalogs
     def at_indices(self, indices) -> "HaloCatalog":
-        """
-        Returns a new HaloCatalog (copy) containing only a subset of the halos.
-        Usually this will be used to select halos that have the same mass / accretion profile
+        """Return a new :class:`HaloCatalog` restricted to the given indices.
+
+        Args:
+            indices (array-like): Indices selecting a subset of halos.
+
+        Returns:
+            HaloCatalog: New instance containing only the selected halos.
         """
         if indices.size == 0:
             indices = []
@@ -116,16 +128,15 @@ class HaloCatalog:
 
 
     def halo_mass_function(self, bin_count: int = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Computes the halo mass function (HMF) from the catalog.
+        """Compute the halo mass function (dn/dlnM) and Poisson errors.
 
-        Returns
-        -------
-        tuple[np.ndarray, np.ndarray, np.ndarray]
-            A tuple containing:
-            - The mass bins (in solar masses)
-            - The halo mass function values (Mpc/h)^-3 in each bin
-            - The Poisson error in each bin
+        Args:
+            bin_count (int|None): Number of mass bins. If ``None`` a
+                default value proportional to the mass dynamic range is used.
+
+        Returns:
+            tuple: ``(bin_edges, hmf, error)`` where ``hmf`` is in
+            units of (Mpc/h)^-3 and ``error`` is the Poisson uncertainty.
         """
         Lbox = self.parameters.simulation.Lbox
 

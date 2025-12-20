@@ -1,5 +1,9 @@
+"""Plotting helpers for halo mass evolution.
+
+This module contains utilities to visualize halo mass growth and its
+time derivative from a :class:`~beorn.structs.RadiationProfiles`.
+"""
 import matplotlib.pyplot as plt
-import numpy as np
 import logging
 logger = logging.getLogger(__name__)
 
@@ -12,6 +16,12 @@ def plot_halo_mass_evolution(
         profiles: RadiationProfiles,
         mass_bin: int = None,
     ):
+    """Plot halo mass evolution and its derivative for a mass bin.
+
+    Args:
+        profiles (RadiationProfiles): RadiationProfiles which also contains halo mass evolution arrays and parameters.
+        mass_bin (int, optional): Index of the mass bin to plot. If None, the central mass bin is used.
+    """
 
 
     if mass_bin is None:

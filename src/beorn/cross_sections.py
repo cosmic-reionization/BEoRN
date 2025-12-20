@@ -1,5 +1,4 @@
-"""
-Here we write all the functions needed for the solver describing interactions, such as cross sections, cooling and collisional coupling coefficients etc...
+"""Cross sections and microphysics helper functions.
 """
 
 import numpy as np
@@ -7,15 +6,15 @@ from .constants import *
 
 
 def sigma_HI(E):
-    """
-    Parameters
-    ----------
-    E : Photon energy, in [eV]
+    """Photo-ionization cross section of neutral Hydrogen (HI).
 
-    Returns
-    ----------
-    Photo-ionization cross section for Hydrogen,  [cm ** 2]
-    Taken from  Verner et al. arXiv:astro-ph/9601009
+    The fit is taken from Verner et al. (astro-ph/9601009).
+
+    Args:
+        E (float or array): Photon energy in eV.
+
+    Returns:
+        float or array: Cross section in cm^2.
     """
     sigma_0 = 5.475 * 10 ** 4 * 10 ** -18 ## cm**2 1Mbarn = 1e-18 cm**2
     E_01 = 4.298 * 10 ** -1
@@ -29,15 +28,16 @@ def sigma_HI(E):
     return sigma
 
 def sigma_HeI(E):
-    """
-    Parameters
-    ----------
-    E : Photon energy, in [eV]
+    """Photo-ionization cross section of neutral Helium (He I).
 
-    Returns
-    ----------
-    Photo-ionization cross section for Helium HeI,  [cm ** 2]
-    Taken from  Verner et al. arXiv:astro-ph/9601009
+    The fit is taken from Verner et al. (astro-ph/9601009).
+
+
+    Args:
+        E (float or array): Photon energy in eV.
+
+    Returns:
+        float or array: Cross section in cm^2.
     """
     sigma_0 = 9.492 * 10 ** 2 * 10 ** -18
     E_01 = 1.361 * 10 ** 1
@@ -53,15 +53,15 @@ def sigma_HeI(E):
     return sigma
 
 def sigma_HeII(E):
-    """
-    Parameters
-    ----------
-    E : Photon energy, in [eV]
+    """Photo-ionization cross section of singly-ionized Helium (He II).
 
-    Returns
-    ----------
-    Photo-ionization cross section for singly ionized Helium HeII,  [cm ** 2]
-    Taken from  Verner et al. arXiv:astro-ph/9601009
+    The fit is taken from Verner et al. (astro-ph/9601009).
+
+    Args:
+        E (float or array): Photon energy in eV.
+
+    Returns:
+        float or array: Cross section in cm^2.
     """
     sigma_0 = 1.369 * 10 ** 4 * 10 ** -18  # cm**2
     E_01 = 1.72
@@ -78,14 +78,15 @@ def sigma_HeII(E):
 
 
 def alpha_HII(T):
-    """
-    Parameters
-    ----------
-    T : temperature in K
+    """Case B recombination coefficient for ionised Hydrogen (H II).
 
-    Returns
-    ----------
-    Case B recombination coefficient for Hydrogen :  [cm3.s-1]
-    Taken from Fukugita and Kawasaki 1994
+    This temperature-dependent fit is taken from Fukugita & Kawasaki
+    (1994) and returns the recombination rate in cm^3 s^-1.
+
+    Args:
+        T (float or array): Temperature in Kelvin.
+
+    Returns:
+        float or array: Recombination coefficient in cm^3 s^-1.
     """
     return 2.6 * 10 ** -13 * (T / 10 ** 4) ** -0.85

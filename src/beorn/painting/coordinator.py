@@ -1,4 +1,4 @@
-"""The process of converting the 1D radiation profiles into 3D maps"""
+"""Painting coordinator: orchestrate conversion of 1D profiles into 3D maps."""
 import time
 from datetime import timedelta
 import logging
@@ -30,12 +30,18 @@ from ..load_input_data.base import BaseLoader
 
 
 class PaintingCoordinator:
-    """
-    Main painting class responsible for the orchestration of 'painting' - the translation of 1D profiles to 3D maps using halo catalogs and density fields to add the spatial information.
-    In the halo model, three quantities are explicitly modelled and painted. They are already defined in the RadiationProfiles object:
-    - Ionization profiles (xHII)
-    - Lyman-alpha coupling profiles (x_alpha)
-    - Temperature profiles (T)
+    """Orchestrate painting of 1D radiation profiles to 3D grids.
+
+    The coordinator handles loading halo catalogs / density fields,
+    dispatching painting work across processes (or MPI ranks), and
+    writing the resulting :class:`CoevalCube` / :class:`TemporalCube`
+    outputs.
+
+    Attributes:
+        parameters (Parameters): Simulation parameters.
+        loader (BaseLoader): Loader class providing halo catalogs and density fields for each redshift.
+        output_handler (Handler): IO handler used to save results.
+        cache_handler (Handler|None): Optional cache for intermediate painted outputs.
     """
     logger = logging.getLogger(__name__)
 
@@ -63,8 +69,15 @@ class PaintingCoordinator:
 
 
     def paint_full(self, radiation_profiles: RadiationProfiles) -> TemporalCube:
-        """
-        Starts the painting process for the full redshift range and saves the output to a file. We encourage to save intermediate results such as RadiationProfiles to avoid recomputation. If the radiation profiles have not been saved before, they will be saved now (in order to be passed to the individual painting processes).
+        """Paint all redshift snapshots and return a :class:`TemporalCube`.
+
+        The method chooses an MPI-enabled execution path when MPI is available; otherwise it runs a local loop.
+
+        Args:
+            radiation_profiles (RadiationProfiles): Precomputed 1D profiles.
+
+        Returns:
+            TemporalCube: HDF5-backed collection of painted 3D snapshots.
         """
 
         # if MPI is being used, use a central dispatcher to assign redshift indices to different processes
@@ -75,7 +88,17 @@ class PaintingCoordinator:
             return self.paint_simple_loop(radiation_profiles)
 
 
-    def paint_mpi(self, radiation_profiles: RadiationProfiles) -> TemporalCube:
+    def paint_mpi(self, radiation_profiles: RadiationProfiles) -> TemporalCube|None:
+        """MPI-enabled painting: distribute redshift snapshots across ranks.
+
+        Only the master rank writes and returns the final HDF5 dataset; worker ranks perform painting and send partial results to be appended by the master. This function assumes an MPI communicator is available.
+
+        Args:
+            radiation_profiles (RadiationProfiles): Precomputed profiles.
+
+        Returns:
+            TemporalCube: The assembled temporal cube (returned only on master).
+        """
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
 
@@ -102,8 +125,7 @@ class PaintingCoordinator:
 
         with MPICommExecutor(comm) as executor:
             if executor is not None:
-                # we wrap the actual painting function to only take the index as argument. Then we can use mpi to automatically assign it to workers
-
+                # use mpi to automatically assign it to workers
                 futures = {executor.submit(self.paint_single, index, profiles_path = radiation_profiles._file_path): index for index in range(self.snapshot_count)}
 
                 if rank == 0:
@@ -114,12 +136,26 @@ class PaintingCoordinator:
 
                     self.logger.info(f"Painting of {self.snapshot_count} snapshots done.")
 
-                    # reinitialize the grid data to create the attributes that are mapped from the hdf5 fields
+                    # reinitialize the grid data to correctly create the attributes that are mapped from the hdf5 fields
                     cube = self.output_handler.load_file(self.parameters, TemporalCube)
                     return cube
 
+        return None
+
 
     def paint_simple_loop(self, radiation_profiles: RadiationProfiles) -> TemporalCube:
+        """Paint snapshots in a single (possibly multi-process) loop.
+
+        This routine creates an empty :class:`TemporalCube` and iterates
+        over the redshift snapshots, calling :meth:`paint_single` for
+        each index and appending the resulting :class:`CoevalCube`.
+
+        Args:
+            radiation_profiles (RadiationProfiles): Precomputed profiles.
+
+        Returns:
+            TemporalCube: The assembled temporal cube.
+        """
         cube = TemporalCube.create_empty(
             self.parameters,
             self.output_handler.file_root,
@@ -142,14 +178,22 @@ class PaintingCoordinator:
 
 
     def paint_single(self, z_index: int, profiles: RadiationProfiles = None, profiles_path: Path = None) -> CoevalCube:
-        """
-        Paints the halo properties for a single redshift.
+        """Paint a single redshift snapshot into a :class:`CoevalCube`.
+
+        The method loads (or receives) the radiation profiles, dispatches per-mass-bin
+        painting tasks and performs post-processing (excess spreading,
+        background addition, and derived-field computation).
+
         Args:
-            z_index (int): The index of the redshift snapshot to paint.
-            profiles (RadiationProfiles, optional): The radiation profiles to use for painting. If not provided, they will be loaded from the specified path.
-            profiles_path (Path, optional): The path to load the radiation profiles from if not provided directly. This is used in MPI scenarios where the profiles cannot be passed directly to the worker processes.
+            z_index (int): Index of the snapshot to paint.
+            profiles (RadiationProfiles|None): Profiles object (optional).
+            profiles_path (Path|None): Path to on-disk profiles (used by MPI workers) (optional).
+
         Returns:
-            CoevalCube: The painted coeval cube at the specified redshift.
+            CoevalCube: Painted coeval cube for the requested snapshot.
+
+        Notes:
+            This method requires the information about the radiation profiles. It needs to be passed either as an object or as a path from which to load it.
         """
         if profiles is None and profiles_path is None:
             raise ValueError("Either profiles or profiles_path must be provided to paint_single.")
@@ -382,6 +426,24 @@ class PaintingCoordinator:
         buffer_temp: np.ndarray = None,
         buffer_xHII: np.ndarray = None,
     ):
+        """Paint all halos in a single mass/alpha bin into shared buffers.
+
+        This lower-level method is invoked either directly (single-core)
+        or in worker processes. It computes per-halo contributions for
+        ionization, Lyman-alpha and temperature and writes them into the
+        provided shared-memory buffers.
+
+        Args:
+            halo_catalog (HaloCatalog): Subset of halos to paint.
+            z (float): Snapshot redshift.
+            radial_grid (np.ndarray): Radial coordinate grid for profiles.
+            r_lyal (np.ndarray): Radial grid for Lyman-alpha profiles.
+            profiles_of_bin (tuple): Tuple ``(R_bubble, rho_alpha, Temp_profile)``.
+            buffer_lyal, buffer_temp, buffer_xHII: Optional shared-memory buffers.
+
+        Returns:
+            None: Shared buffers are modified in-place.
+        """
         nGrid = self.parameters.simulation.Ncell
         output_shape = (nGrid, nGrid, nGrid)
         LBox = self.parameters.simulation.Lbox

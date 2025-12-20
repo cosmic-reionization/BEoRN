@@ -15,6 +15,13 @@ class CoevalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMixin
 
 
     def to_arrays(self) -> None:
-        """Convert all grid data properties to numpy arrays. When being loaded from an HDF5 file, they are h5py datasets by default and cannot be communicated between MPI processes."""
+        """Ensure all fields are plain numpy arrays.
+
+        When a :class:`CoevalCube` is loaded from HDF5 its datasets are
+        ``h5py.Dataset`` objects which are not picklable across MPI
+        processes. This helper converts such datasets to numpy arrays in
+        place.
+        """
         for field in self.__dataclass_fields__.values():
             value = getattr(self, field.name)
+            # TODO

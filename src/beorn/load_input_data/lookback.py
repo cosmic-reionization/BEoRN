@@ -3,12 +3,19 @@ from ..structs import Parameters
 
 
 def get_lookback_range(parameters: Parameters, redshifts: np.ndarray) -> np.ndarray:
-    """
-    Returns the redshift range for the lookback time in ascending order, meaning current_redshift is the first element and higher redshifts are later in the array.
+    """Compute the lookback redshift range used when assembling mass histories.
 
-    Parameters:
-        parameters (Parameters): The parameters object containing solver and source configurations.
-        redshifts (np.ndarray): The array of redshifts available up to the current index. Meaning the current redshift is the last element in the array and all previous entries represent earlier redshifts.
+    The returned array is in ascending order (current redshift first,
+    earlier/past redshifts later) to match the expectations of the
+    accretion-fitting routines.
+
+    Args:
+        parameters (Parameters): Simulation parameters providing the requested lookback length.
+        redshifts (np.ndarray): array of available redshifts in descending order.
+
+    Returns:
+        numpy.ndarray: Subset of ``redshifts`` with the requested
+        lookback range, ordered current -> past.
     """
     assert np.all(np.diff(redshifts) < 0), "Redshifts must be in descending order."
     # the lookback should cover a fixed time but since the snapshots are spaced in redshift space we need to calculate the range for each redshift

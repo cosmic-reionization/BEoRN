@@ -18,7 +18,25 @@ def generate_haloes_and_density(
     parameters: Parameters,
     handler: Handler = None,
 ):
-    """Generate halo catalogs and density fields using 21cmFast."""
+    """Generate halo catalog and density field files using py21cmfast.
+
+    This convenience wrapper runs the py21cmfast pipeline to produce
+    halo catalogues and perturbed density fields for the redshifts
+    specified in ``parameters.solver.redshifts``.
+
+    Args:
+        parameters (Parameters): Simulation and cosmology parameters.
+        handler (io.Handler, optional): IO handler used to determine
+            storage locations.
+
+    Returns:
+        tuple: Two lists ``(halo_file_list, dens_file_list)`` containing
+            paths to the created HDF5 files for halo catalogues and
+            density fields respectively.
+
+    Raises:
+        ImportError: If ``py21cmfast`` is not installed.
+    """
     start_time = time.process_time()
     logger.info('Simulating matter evolution with 21cmFast')
 

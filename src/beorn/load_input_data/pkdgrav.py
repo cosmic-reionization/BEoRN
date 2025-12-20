@@ -6,8 +6,11 @@ from ..structs import HaloCatalog
 
 
 class PKDGravLoader(BaseLoader):
-    """
-    Loader for the PKDGrav data format.
+    """Loader for the PKDGrav data format.
+
+    This loader reads FOF catalogs and binary density files produced by
+    PKDGrav-style pipelines and exposes them through the
+    :class:`BaseLoader` interface.
     """
 
     def __init__(self, *args, **kwargs):
@@ -44,11 +47,20 @@ class PKDGravLoader(BaseLoader):
 
     @property
     def redshifts(self):
+        """Return available redshifts for the PKDGrav dataset.
+
+        Returns:
+            numpy.ndarray: Array of redshift values available from the on-disk snapshot set.
+        """
         return self._redshifts
 
 
     def remove_duplicates(self) -> None:
-        # The particular PKDGrav data we have has some duplicate redshifts due to restarted transfers - we want to discard them
+        """Remove duplicate snapshots from internal lists.
+
+        Some PKDGrav exports contain duplicate entries (restarts). This
+        filters the lists used internally so each redshift is represented only once.
+        """
         z_initial = np.inf
         redshifts_copy = []
         catalogs_copy = []
@@ -72,6 +84,14 @@ class PKDGravLoader(BaseLoader):
 
 
     def load_halo_catalog(self, redshift_index: int) -> HaloCatalog:
+        """Load a halo catalog from the on-disk FOF file.
+
+        Args:
+            redshift_index (int): Snapshot index to read.
+
+        Returns:
+            HaloCatalog: Catalog with ``masses`` (Msun) and ``positions`` (Mpc/h).
+        """
         catalog_path = self.catalogs[redshift_index]
         catalog_array = np.loadtxt(catalog_path)
         if catalog_array.shape == (0,):
@@ -87,6 +107,14 @@ class PKDGravLoader(BaseLoader):
 
 
     def load_density_field(self, redshift_index: int) -> np.ndarray:
+        """Load the baryonic density field from a binary file.
+
+        Args:
+            redshift_index (int): Snapshot index to read.
+
+        Returns:
+            numpy.ndarray: 3D overdensity field ``delta_b``.
+        """
         Ncell = self.parameters.simulation.Ncell
 
         density_path = self.density_paths[redshift_index]
@@ -108,4 +136,9 @@ class PKDGravLoader(BaseLoader):
 
 
     def load_rsd_fields(self, redshift_index: int):
+        """RSD fields are not available for PKDGrav in this implementation.
+
+        Raises:
+            NotImplementedError: This loader does not provide RSD fields.
+        """
         raise NotImplementedError("RSD fields are not implemented for PKDGrav data format")

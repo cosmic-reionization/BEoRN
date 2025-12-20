@@ -4,8 +4,14 @@ import matplotlib.pyplot as plt
 from ..structs import HaloCatalog
 
 def plot_halo_mass_function(ax: plt.Axes, halo_catalog: HaloCatalog, bin_count: int = None, label: str = None, color: str = None) -> None:
-    """
-    Plots the halo mass function (HMF) from the given halo catalog on the provided Axes.
+    """Plot the halo mass function from a :class:`HaloCatalog`.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axis to draw the HMF on.
+        halo_catalog (HaloCatalog): Halo catalog providing ``halo_mass_function``.
+        bin_count (int, optional): Number of bins to use; if ``None`` the catalog default is used.
+        label (str, optional): Legend label.
+        color (str, optional): Line/marker color.
     """
     bin_edges, hmf, hmf_err = halo_catalog.halo_mass_function(bin_count)
     # the bin centers are the geometric mean of the edges

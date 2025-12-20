@@ -37,8 +37,16 @@ class RadiationProfiles(BaseStruct):
 
 
     def profiles_of_halo_bin(self, z_index: int, alpha_index: slice, mass_index:slice) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Returns the radiation profile for a given halo bin (z, alpha, mass).
+        """Return the three core profiles for a halo bin.
+
+        Args:
+            z_index (int): Redshift index.
+            alpha_index (int or slice): Alpha (accretion) index or slice.
+            mass_index (int or slice): Mass bin index or slice.
+
+        Returns:
+            tuple: ``(R_bubble, rho_alpha, rho_heat)`` arrays copied from the
+            stored profiles for the requested bin.
         """
         return(
             self.R_bubble[mass_index, alpha_index, z_index].copy(),

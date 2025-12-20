@@ -1,4 +1,12 @@
 
+"""Physical and unit conversion constants used across BEoRN.
+
+This module centralises commonly used physical constants (SI and CGS
+variants), unit conversions and characteristic astrophysical values
+such as the CMB temperature, the 21cm transition constants and typical
+energies.
+"""
+
 sec_per_year = 3600*24*365.25
 M_sun = 1.988 * 10 ** 30 # [kg]
 m_H    = 1.6 * 10 ** - 27

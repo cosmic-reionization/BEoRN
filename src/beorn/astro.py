@@ -1,5 +1,11 @@
-"""
-Contains various functions related to astrophysical sources.
+"""beorn.astro
+=================
+
+Utilities related to astrophysical source modelling used by BEoRN.
+
+This module provides simple, vectorised functions for star-formation
+efficiencies, escape fractions, X-ray spectral shapes and related
+convenience helpers.
 """
 import numpy as np
 from .structs import Parameters
@@ -7,35 +13,41 @@ from .constants import *
 
 
 def S_fct(Mh, Mt, g3, g4):
-    """
-    Parameters
-    ----------
-    Mh : float. Halo mass in [Msol/h]
-    Mt : float. Cutoff mass in [Msol/h]
-    g3,g4 : floats. Control the power-law behavior of the fct.
+    """Small-scale modifier of the stellar-to-halo efficiency.
 
-    Returns
-    ----------
-    Small-scale part of the stellar-to-halo function f_star. See eq.6 in arXiv:2305.15466.
-    (g3,g4) = (1,1),(0,0),(4,-4) gives a boost, power-law, cutoff of SFE at small scales, respectively.
+    Args:
+        Mh (float or array): Halo mass in Msol/h.
+        Mt (float): Cutoff mass in Msol/h.
+        g3 (float): Control parameter for the small-mass power law.
+        g4 (float): Exponent controlling the strength of the modifier.
+
+    Returns:
+        float or array: Modifier factor applied to the stellar-to-halo
+            efficiency. Typical choices of ``(g3,g4)`` produce a boost,
+            power-law behaviour or a cutoff at small scales (see
+            arXiv:2305.15466, Eq. 6).
     """
 
     return (1 + (Mt / Mh) ** g3) ** g4
 
 
 def f_star_Halo(parameters: Parameters, Mh):
-    """
-    Parameters
-    ----------
-    Mh : float. Halo mass in [Msol/h]
-    param : Bunch
+    """Compute the stellar fraction for haloes of a given mass.
 
-    Returns
-    ----------
-    fstar * Mh_dot * Ob/Om = Mstar_dot.
-    fstar is therefore the conversion from baryon accretion rate  to star formation rate.
-    See eq.(5) in arXiv:2305.15466.
-    Double power law + either boost or cutoff at small scales (S_fct)
+    The returned quantity corresponds to the star-formation efficiency
+    (fraction of accreted baryons turned into stars) used in the
+    BEoRN model. The function applies a double power-law in mass with
+    an additional small-scale modifier provided by :func:`S_fct`.
+
+    Args:
+        parameters (Parameters): Model parameters container.
+        Mh (float or array): Halo mass in Msol/h.
+
+    Returns:
+        float or array: Stellar fraction in the range [0, 1].
+
+    Notes:
+        See Eq. (5) in arXiv:2305.15466 for the full definition.
     """
 
     f_st = parameters.source.f_st
@@ -51,15 +63,14 @@ def f_star_Halo(parameters: Parameters, Mh):
 
 
 def f_esc(parameters: Parameters, Mh):
-    """
-    Parameters
-    ----------
-    Mh : float. Halo mass in [Msol/h]
-    param : Bunch
+    """Escape fraction of ionising photons as a function of halo mass.
 
-    Returns
-    ----------
-    Escape fraction of ionising photons
+    Args:
+        parameters (Parameters): Model parameters container.
+        Mh (float or array): Halo mass in Msol/h.
+
+    Returns:
+        float or array: Escape fraction (clipped to a maximum of 1).
     """
 
     f0  = parameters.source.f0_esc
@@ -70,15 +81,13 @@ def f_esc(parameters: Parameters, Mh):
 
 
 def f_Xh(x_e):
-    """
-    Parameters
-    ----------
-    x_e : Free electron fraction in the neutral medium
+    """Fraction of X-ray energy deposited as heat in the IGM.
 
-    Returns
-    ----------
-    Fraction of X-ray energy deposited as heat in the IGM.
-    Dimensionless. Various fitting functions exist in the literature
+    Args:
+        x_e (float): Free-electron fraction in the neutral medium.
+
+    Returns:
+        float: Fraction of X-ray energy deposited as heat (unitless).
     """
     # Schull 1985 fit.
     # C,a,b = 0.9971, 0.2663, 1.3163
@@ -89,18 +98,21 @@ def f_Xh(x_e):
 
 
 def eps_xray(nu_, parameters: Parameters):
-    """
-    Parameters
-    ----------
-    nu_ : float. Photon frequency in [Hz]
-    TODO: rename
-    param : Bunch
+    """Spectral distribution of X-ray emission per unit star-formation.
 
-    Returns
-    ----------
-    Spectral distribution function of x-ray emission in [1/s/Hz*(yr*h/Msun)]
-    See Eq.2 in arXiv:1406.4120
-    Note : fX is included in cX in this code.
+    The spectral energy distribution is assumed to be a power law in
+    frequency with a normalisation set by the parameter container. The
+    returned units follow the convention used in BEoRN (photons / Hz / s / SFR).
+
+    Args:
+        nu_ (float or array): Photon frequency in Hz.
+        parameters (Parameters): Model parameters container.
+
+    Returns:
+        float or array: Spectral photon emission rate per unit SFR.
+
+    Notes:
+        The implementation follows Eq. 2 of arXiv:1406.4120.
     """
 
     # param.source.cX  is in [erg / s /SFR]

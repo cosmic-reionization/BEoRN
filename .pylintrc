@@ -1,0 +1,31 @@
+[MAIN]
+# being generous here
+fail-under=6
+
+[REPORTS]
+output-format=text
+
+[FORMAT]
+# Maximum number of characters on a single line.
+# editors have word wrap, don't worry about it
+# Maximum number of characters on a single line.
+max-line-length=250
+
+# Maximum number of lines in a module.
+max-module-lines=1000
+
+[LOGGING]
+# Disable the logging-fstring-interpolation warning
+logging-format-style=new
+
+
+[IMPORTS]
+ignored-modules=
+    numpy,
+    scipy,
+    numba,
+    h5py,
+    matplotlib,
+    skimage,
+    astropy,
+    mpi4py

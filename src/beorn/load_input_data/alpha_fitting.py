@@ -5,10 +5,20 @@ logger = logging.getLogger(__name__)
 
 def vectorized_alpha_fit(redshifts: np.ndarray, mass_history: np.ndarray) -> np.ndarray:
     """
-    Vectorized fitting of the exponent alpha in the exponential mass growth model:
-    M(z) = M0 * exp(alpha * (z0 - z)).
-    This is implemented as a least squares fit to the logarithm of the mass history.
-    mass_history has shape (n_objects, m_redshifts)
+    Vectorized fit of exponential mass-accretion parameter alpha.
+
+    Fits the exponent ``alpha`` in the model
+    ``M(z) = M0 * exp(alpha * (z0 - z))`` using a least-squares fit on
+    the logarithm of the mass history. The implementation is fully
+    vectorised over mass histories.
+
+    Args:
+        redshifts (np.ndarray): 1D array of redshifts in ascending order (current -> past).
+        mass_history (np.ndarray): Array with shape ``(n_objects, n_redshifts)`` containing the mass history for each object.
+
+    Returns:
+        np.ndarray: 1D array of fitted ``alpha`` values for each
+        object.
     """
     z0 = redshifts[0]
     dz = z0 - redshifts[:]

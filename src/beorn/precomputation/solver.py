@@ -1,6 +1,11 @@
-"""""""""
-Computes the 1D radiation profiles used to paint the 21cm maps.
-"""""""""
+"""1D radiation profile solver used to create inputs for the painter.
+
+This module contains :class:`RadiationProfileSolver` which computes the
+radial emission, heating and ionization profiles for a matrix of halo
+masses and accretion rates. The results are stored in a
+:class:`RadiationProfiles` dataclass for later use by the painting
+stage.
+"""
 
 import numpy as np
 from scipy.integrate import trapezoid, solve_ivp
@@ -29,8 +34,12 @@ from .massaccretion import mass_accretion
 
 
 class RadiationProfileSolver:
-    """
-    Solver for the 1D radiation profiles around sources. These profiles are later used to generate 3D maps.
+    """Compute radiation, heating and ionization profiles around sources.
+
+    The solver produces arrays of X-ray emissivity, heating rates and
+    Lyman-alpha emissivity as a function of radius for a set of halo
+    masses and accretion parameters. Results are returned as a
+    :class:`RadiationProfiles` instance.
     """
 
     def __init__(self, parameters: Parameters, redshifts: np.ndarray):
@@ -55,13 +64,14 @@ class RadiationProfileSolver:
 
 
     def get_or_compute_profiles(self, handler: Handler) -> RadiationProfiles:
-        """
-        Tries to load the radiation profiles using the handler (i.e. from a user-specified cache). If not found, computes them and saves them to cache.
+        """Load profiles from cache or compute and save them if unavailable.
+
         Args:
-            handler: IO handler to use for caching/loading the profiles
+            handler (Handler): IO handler capable of loading/saving
+                :class:`RadiationProfiles` objects.
 
         Returns:
-            RadiationProfiles dataclass containing the computed profiles
+            RadiationProfiles: Loaded or freshly computed profiles.
         """
         try:
             profiles = handler.load_file(self.parameters, RadiationProfiles)
@@ -159,11 +169,11 @@ class RadiationProfileSolver:
 
 
     def R_bubble(self):
-        """
-        Returns
-        ----------
-        TODO
-        Comoving size [cMpc/h] of the ionized bubble around the source, as a function of time.
+        """Compute the ionized bubble radius evolution for each mass/alpha bin.
+
+        Returns:
+            numpy.ndarray: Bubble radii (comoving cMpc/h) with shape
+            (mass_bins-1, alpha_bins-1, len(z_bins)).
         """
 
         Ngam_dot = Ngdot_ion(
@@ -218,17 +228,15 @@ class RadiationProfileSolver:
 
 
     def rho_xray(self, rr: np.ndarray, xe: np.ndarray):
-        """
+        """Compute X-ray energy deposition profiles as a function of radius.
+
         Args:
-            parameters: dictionary containing all the input parameters
-            z_bins: redshift in decreasing order.
-            rr: comoving distance from source center [cMpc/h]
-            M_accr: function of zz, hence should increase. 3D array of shape [M_bins, alpha_bins, z_arr]
-            dMdt_accr: Time derivative of halo mass (MAR). 3D array of shape [M_bins, alpha_bins, z_arr]
+            rr (np.ndarray): Radial grid (comoving cMpc/h) where profiles are evaluated.
+            xe (np.ndarray): Free electron fraction history corresponding to ``self.z_bins``.
 
         Returns:
-            X-ray profile, i.e. energy injected as heat by X-rays, in [eV/s], and of shape [M_bins, alpha_bins, z_arr, r_arr]
-            (zz,rr,M_bin) (M_accr, dMdt_accr all have same dimension :(zz,M_bin) )
+            numpy.ndarray: X-ray heating / energy deposition arrays with
+            shape (len(rr), mass_bins-1, alpha_bins-1, len(z_bins)).
         """
 
         Om = self.parameters.cosmology.Om
@@ -340,16 +348,18 @@ class RadiationProfileSolver:
 
 
     def rho_heat(self, rho_xray: np.ndarray):
-        """
-        Parameters
-        ----------
-        rho_xray :  output of rho_xray.
+        """Solve the temperature evolution from X-ray heating rates.
 
-        Returns
-        ----------
-        Solve the temperature equation, to go from a heating rate to a Temperature in [K].
-        Array of shape (zz,rr, M_bin)
-        We assume 0K initial conditions (background adiabatic temperature is added afterward at the map level.)
+        The routine integrates the heating equation over scale factor to
+        produce a temperature profile from the supplied heating rate
+        ``rho_xray``.
+
+        Args:
+            rho_xray (np.ndarray): Output of :meth:`rho_xray`.
+
+        Returns:
+            numpy.ndarray: Temperature profiles with the same mass/alpha/z
+            axes as the inputs.
         """
         # add the decoupling redshift as "initial condition"
         z0 = self.parameters.cosmology.z_decoupling

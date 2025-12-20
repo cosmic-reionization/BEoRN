@@ -7,4 +7,4 @@ Painting
 
 
 .. automodule:: beorn.painting
-   :members: Painter
+   :members: PaintingCoordinator

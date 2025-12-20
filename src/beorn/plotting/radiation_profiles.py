@@ -21,21 +21,20 @@ Mh_z_3 = np.array([172274291.4769941, 218063348.75063255, 368917395.4438236, 775
 
 
 def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_index: int, redshifts: list, alphas: list, label: str = None) -> None:
-    """
-    Plots the profiles as a function of radius. Since they are computed for a range of masses, redshifts and alpha values, the caller can specify which mass, redshift and alpha values to plot. Different redhifts are represented by different hues, while different alpha values are represented by different line styles.
+    """Plot 1D radiation profiles for selected masses, redshifts and alphas.
 
-    Parameters
-    ----------
-    parameters : Parameters
-        The parameters used for the simulation.
-    profiles : RadiationProfiles
-        The radiation profiles computed by the solver.
-    mass_index : int
-        The index of the mass to plot. This is used to select the correct mass bin from the profiles.
-    redshifts : list
-        A list of redshifts to plot. The according index in the profiles is determined by the closest value to the specified redshift.
-    alphas : list
-        A list of alpha values to plot. The according index in the profiles is determined by the closest value to the specified alpha.
+    The function draws Lyman-alpha, temperature and ionization profiles
+    for the requested mass index across a list of redshifts and alpha
+    values. Different redshifts use color hues and different alphas use
+    line styles.
+
+    Args:
+        parameters (Parameters): Simulation parameters used for axis labels and lookups.
+        profiles (RadiationProfiles): Radiation profiles to plot.
+        mass_index (int): Index selecting the mass bin to visualize.
+        redshifts (list): Sequence of redshifts to plot (closest match is used).
+        alphas (list): Sequence of alpha values to plot (closest match is used).
+        label (str, optional): Optional suptitle for the figure.
     """
     fig, axs = plt.subplots(1, 4, figsize=(17, 5))
     fig.suptitle(label)

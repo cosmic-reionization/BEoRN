@@ -33,7 +33,7 @@ mathjax_path = (
 )
 # autodoc imports the modules to document, but we don't want to install them so we link their path
 sys.path.insert(0, str(Path('..', 'src').resolve()))
-autodoc_mock_imports = ['numpy', 'scipy', 'matplotlib', 'astropy', 'yaml', 'h5py', 'tools21cm', 'tqdm', 'MAS_library', 'skimage']
+autodoc_mock_imports = ['numpy', 'scipy', 'matplotlib', 'astropy', 'yaml', 'h5py', 'tools21cm', 'tqdm', 'MAS_library', 'skimage', 'mpi4py']
 autodoc_default_options = {
     'member-order': 'groupwise',
     "imported-members": True,
@@ -45,7 +45,7 @@ source_suffix = {
     '.rst': 'restructuredtext',
     '.ipynb': 'myst-nb',
 }
-jupyter_execute_notebooks = "off"
+nb_execution_mode = "off"
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

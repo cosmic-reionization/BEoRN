@@ -8,15 +8,26 @@ from ..structs.parameters import Parameters
 
 
 def spreading_excess_fast(parameters: Parameters, Grid_input, plot__=False):
-    """
-    Last and fastest version of the function.
-    Input : Grid_Storage, the cosmological mesh grid (X,X,X) with the ionized fractions, with overlap (pixels where x_ion>1). (X can be 256, 512 ..)
-    A word regarding the elements of this function :
-        - Binary_Grid : contains 1 where Grid_input>=1 and 0 elsewhere. This grid is used as input for scipy.measure.label. Format is (X,X,X).
-        - Connected_regions : (X,X,X). Output of skimage.measure.label. Each pixel of it is labeled according to the ionized clump it belongs to.
-        - x_ion_tot_i : total sum of ionizing fraction.
-        - region_nbr, size_of_region : region label, and size of it . We use it to idenfity the very small regions (small_regions) with less than "pix_thresh" pixels. We treat them all together to speed up the process
-        - Spread_Single :  spread the excess photons.
+    """Redistribute excess ionization from overlapping regions.
+
+    The input grid may contain cells with ionization fraction greater
+    than unity due to overlapping ionized bubbles. This function
+    identifies connected ionized regions, separates small regions from
+    large ones, and spreads the excess ionizing photons into nearby
+    neutral volume using an efficient local distance-transform
+    approach.
+
+    Args:
+        parameters (Parameters): Simulation parameters used to define
+            thresholds and approximations.
+        Grid_input (numpy.ndarray): 3D ionization fraction grid (values
+            may be >1 where overlaps occur).
+        plot__ (bool, optional): If True, print simple progress
+            updates for large-region processing. Defaults to False.
+
+    Returns:
+        numpy.ndarray: Grid with redistributed ionization (no values >1
+        should remain).
     """
 
     nGrid = len(Grid_input[0])
@@ -93,7 +104,7 @@ def spreading_excess_fast(parameters: Parameters, Grid_input, plot__=False):
                 if i % 100 == 0:
                     print('doing region ', i, 'over ', len(large_regions_labels), ' regions in total')
             connected_indices = np.where(label_image == ir)
-            Grid = spread_single(parameters, Grid, connected_indices, print_time=None)
+            Grid = spread_single(parameters, Grid, connected_indices)
 
         if np.any(Grid > 1.):
             logger.error('Some grid pixels are still in excess.')
@@ -106,18 +117,26 @@ def spreading_excess_fast(parameters: Parameters, Grid_input, plot__=False):
     return Grid
 
 
-def spread_single(parameters: Parameters, Grid, connected_indices, print_time=None):
-    """
-    This spreads the excess ionizing photons for a given region.
-    Input :
-    - Grid : The meshgrid containing the ionizing fractions
-    - Connected_indices : The indices of the ionized region from which you want to spread the overlaps. (excess_ion)
-    - print_time : if it's not None, will print the time taken, along with the message contained in "print_time".
+def spread_single(parameters: Parameters, Grid, connected_indices):
+    """Spread excess ionizing photons for a single connected region.
 
-    Return : the same grid but with the excess ion fraction of the connected region spread around.
+    This routine redistributes the excess ionizing fraction from cells
+    inside ``connected_indices`` into surrounding neutral cells. To
+    improve performance it works on a local sub-box around the region
+    (distance-transform approach) when possible.
 
-    Trick : we run distance_transform only for a sub-box centered on the connected region. This is particularly important for high resolution grids, when distance_transform_edt starts to take time (~s, but multilplied by the number of connected regions >1e4, starts taking time...)
-            the size of the subbox is N_subgrid. It is called Sub_Grid.
+    Args:
+        parameters (Parameters): Simulation parameters, used to set
+            thresholds such as the subgrid approximation and pixel
+            thresholds.
+        Grid (numpy.ndarray): 3D array with ionization fractions.
+        connected_indices (tuple): Tuple of index arrays (as returned
+            by ``np.where(label_image == label)``) selecting the
+            connected region to process.
+
+    Returns:
+        numpy.ndarray: The input ``Grid`` with the excess redistributed
+        around the provided connected region.
     """
 
     nGrid = len(Grid[0])
