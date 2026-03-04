@@ -3,7 +3,7 @@
 #SBATCH --output=/xdisk/timeifler/yhhuang/BEoRN-v2/log/test-%A.out
 #SBATCH --error=/xdisk/timeifler/yhhuang/BEoRN-v2/log/test-%A.err
 #SBATCH --nodes=1
-#SBATCH --nstasks=1
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --partition=standard
 #SBATCH --account=timeifler
