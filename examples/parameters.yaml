@@ -1,5 +1,5 @@
 simulation:
-  cores: 1
+  cores: 4
   halo_mass_bin_min: 1.0e+7
   halo_mass_bin_max: 1.0e+15
   halo_mass_bin_n: 200

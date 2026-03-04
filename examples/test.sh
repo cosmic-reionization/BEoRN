@@ -11,13 +11,11 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=yhhuang@arizona.edu
 
-module load openmpi3
 
 source ~/.bashrc
 conda activate v2
 
-echo "Running test.py with 2 processes..."
-
-mpirun -n 2 python test.py
+echo "Running test.py without MPI."
+python test.py
 
 echo "Test completed."
