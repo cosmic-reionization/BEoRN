@@ -1,11 +1,11 @@
 simulation:
-  cores: 1
+  cores: 5
   halo_mass_bin_min: 1.0e+7
   halo_mass_bin_max: 1.0e+15
   halo_mass_bin_n: 200
   halo_mass_accretion_alpha: [0.3, 0.7, 1.1]
-  Lbox: 100
-  Ncell: 128
+  Lbox: 95.5
+  Ncell: 512
   store_grids: ['Tk', 'bubbles', 'lyal', 'Grid_dTb']
   spreading_pixel_threshold: null
   spreading_subgrid_approximation: true
