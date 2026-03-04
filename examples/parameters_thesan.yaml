@@ -6,8 +6,8 @@ simulation:
   halo_mass_accretion_alpha: [0.3, 0.7, 1.1]
   Lbox: 95.5
   Ncell: 512
-  store_grids: ['Tk', 'bubbles', 'lyal', 'Grid_dTb']
-  spreading_pixel_threshold: null
+  store_grids: ['Grid_Temp', 'Grid_xHII', 'Grid_xal', 'Grid_dTb']
+  spreading_pixel_threshold: -1
   spreading_subgrid_approximation: true
   minimum_grid_size_heat: 4
   minimum_grid_size_lyal: 16
@@ -57,20 +57,3 @@ cosmology:
   HI_frac: 0.92
   clumping: 1
   z_decoupling: 135
-
-excursion_set:
-  R_max: 40
-  n_rec: 3
-  stepping: 1.1
-
-halo_mass_function:
-  fileter: 'tophat'
-  c: 1
-  q: 0.85
-  p: 0.3
-  delta_c: 1.686
-  A: 0.322
-  m_min: 1.0e+4
-  m_max: 1.0e+16
-  Mbin: 300
-  z: [0]
