@@ -17,23 +17,27 @@ module load openmpi3
 module load anaconda
 
 # Activate the conda environment
-source ~/.bashrc
+source $(conda info --base)/etc/profile.d/conda.sh
 conda activate v2
 
 # Set environment variables for MPI and HDF5
 export OMPI_MCA_btl=^openib  # Use TCP instead of InfiniBand if needed
 export HDF5_USE_FILE_LOCKING=FALSE  # Important for parallel HDF5 I/O
+export OMP_NUM_THREADS=1
 
 # Verify MPI is available
 which mpirun
 mpirun --version
 
+# Optional: check current account/user limits for Ocelote
+# job-limits timeifler
+
 # Change to the examples directory
-cd /Users/yhhuang/code/cosmology/BEoRN-v2/examples
+cd /home/u15/yhhuang/cosmology/BEoRN-v2/examples
 
 # Run full_run.py with MPI
 # Total number of MPI processes = nodes * ntasks-per-node = 4 * 8 = 32
-mpirun -np 32 python full_run.py
+mpirun -np ${SLURM_NTASKS:-32} python full_run.py
 
 # Capture exit status
 EXIT_CODE=$?
