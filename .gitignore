@@ -178,3 +178,4 @@ build
 dist
 *.egg
 .DS_Store
+.vscode
