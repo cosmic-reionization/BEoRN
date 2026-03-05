@@ -1,2 +1,2 @@
-from .solver import RadiationProfileSolver
+from .solver import RadiationProfileSolver, RadiationProfileFstSolver
 from .massaccretion import mass_accretion, mass_accretion_derivative
