@@ -270,7 +270,7 @@ def test_mpi_fstar_profile_cache_roundtrip(tmp_path, monkeypatch):
 
     params = make_parameters()
     solver = RadiationProfileFstSolver(params, np.array([15.0, 12.0]))
-    handler = Handler(file_root=shared_root_str)
+    handler = Handler(file_root=Path(shared_root_str))
 
     solve_call_counter = {"count": 0}
 
