@@ -6,6 +6,7 @@ if "MAS_library" not in sys.modules:
     sys.modules["MAS_library"] = types.SimpleNamespace(MASL=None)
 
 import numpy as np
+import pytest
 from types import SimpleNamespace
 
 from beorn.painting.coordinator import PaintingCoordinator
@@ -643,3 +644,142 @@ def test_paint_single_fstar_end_to_end_cache_roundtrip(tmp_path, monkeypatch):
     np.testing.assert_allclose(cube2.Grid_Temp, cube1.Grid_Temp)
     np.testing.assert_allclose(cube2.Grid_xal, cube1.Grid_xal)
     assert cube2.z == cube1.z
+
+
+
+# MPI integration test for painted-output caching in the stochastic f_st path.
+def test_mpi_paint_single_fstar_cache_roundtrip(tmp_path, monkeypatch):
+    """MPI integration test for painted-output caching in the stochastic f_st path.
+
+    Run with:
+        mpirun -n 2 pytest tests/test_coordinator.py::test_mpi_paint_single_fstar_cache_roundtrip -q -s
+
+    This test matches the current coordinator behavior by orchestrating the MPI
+    sequence externally:
+      - rank 0 paints and writes the cached output
+      - all ranks synchronize
+      - rank 1 loads from the shared cache and must not repaint
+    """
+    pytest.importorskip("mpi4py")
+    from mpi4py import MPI
+    from pathlib import Path
+    from beorn.io.handler import Handler
+    from beorn.structs.coeval_cube import CoevalCube
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    # Under mpirun, each rank runs its own pytest process, so tmp_path may differ.
+    # Create one shared cache directory on rank 0 and broadcast it.
+    if rank == 0:
+        shared_root = tmp_path / "shared_mpi_paint_cache"
+        shared_root.mkdir(parents=True, exist_ok=True)
+        shared_root_str = str(shared_root)
+    else:
+        shared_root_str = None
+    shared_root_str = comm.bcast(shared_root_str, root=0)
+
+    halo_catalog = DummyHaloCatalog(
+        masses=np.array([2.0e8, 2.5e8, 3.0e8, 3.5e8]),
+        alpha_vals=np.array([0.7, 0.7, 0.7, 0.7]),
+    )
+    params = make_parameters(seed=5151)
+    loader = DummyLoader(halo_catalog)
+    cache_handler = Handler(file_root=Path(shared_root_str))
+    coordinator = PaintingCoordinator(params, loader, DummyHandler(), cache_handler=cache_handler)
+    profiles = make_profiles()
+
+    paint_calls = {"count": 0}
+
+    def fake_paint_single_mass_bin(
+        self,
+        halo_catalog,
+        z,
+        radial_grid,
+        r_lyal,
+        profiles_of_bin,
+        buffer_lyal=None,
+        buffer_temp=None,
+        buffer_xHII=None,
+    ):
+        paint_calls["count"] += 1
+        if buffer_xHII is not None:
+            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_xHII.buf)
+            arr += 1.0
+        if buffer_temp is not None:
+            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_temp.buf)
+            arr += 2.0
+        if buffer_lyal is not None:
+            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_lyal.buf)
+            arr += 3.0
+
+    monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_paint_single_mass_bin)
+    monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_fast", lambda parameters, grid: grid)
+    monkeypatch.setattr("beorn.painting.coordinator.T_adiab_fluctu", lambda z, parameters, delta_b: np.zeros_like(delta_b))
+    monkeypatch.setattr("beorn.painting.coordinator.S_alpha", lambda z, temp, neutral_frac: 1.0)
+
+    # Patch CoevalCube IO for this integration test to avoid depending on full
+    # BaseStruct / Parameters serialization while still using the real Handler.
+    def _test_cube_write(self, directory, parameters, **kwargs):
+        directory.mkdir(parents=True, exist_ok=True)
+        z_index = kwargs.get("z_index", 0)
+        path = directory / f"CoevalCube_{parameters.unique_hash()}_z{z_index}.npz"
+        np.savez(
+            path,
+            z=float(self.z),
+            Grid_xHII=self.Grid_xHII,
+            Grid_Temp=self.Grid_Temp,
+            Grid_xal=self.Grid_xal,
+        )
+
+    @classmethod
+    def _test_cube_read(cls, directory, parameters, **kwargs):
+        z_index = kwargs.get("z_index", 0)
+        path = directory / f"CoevalCube_{parameters.unique_hash()}_z{z_index}.npz"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        data = np.load(path)
+        return cls(
+            parameters=parameters,
+            z=float(data["z"]),
+            delta_b=np.zeros((4, 4, 4), dtype=float),
+            Grid_Temp=data["Grid_Temp"],
+            Grid_xHII=data["Grid_xHII"],
+            Grid_xal=data["Grid_xal"],
+        )
+
+    monkeypatch.setattr(CoevalCube, "write", _test_cube_write, raising=True)
+    monkeypatch.setattr(CoevalCube, "read", _test_cube_read, raising=True)
+
+    if rank == 0:
+        cube = coordinator.paint_single_fstar(0, profiles)
+        assert paint_calls["count"] > 0
+        n_paint_groups = paint_calls["count"]
+        np.testing.assert_allclose(cube.Grid_xHII, float(n_paint_groups) * np.ones((4, 4, 4)))
+        np.testing.assert_allclose(cube.Grid_Temp, 2.0 * float(n_paint_groups) * np.ones((4, 4, 4)))
+        np.testing.assert_allclose(cube.Grid_xal, 3.0 * float(n_paint_groups) / (4 * np.pi) * np.ones((4, 4, 4)))
+
+    # Ensure rank 0 finished writing before rank 1 tries to load.
+    comm.Barrier()
+
+    if rank == 1:
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("rank 1 should load painted output from cache without repainting")
+
+        monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fail_if_called)
+        cube = coordinator.paint_single_fstar(0, profiles)
+        assert paint_calls["count"] == 0
+
+    namespace_dir = Path(shared_root_str) / coordinator._paint_cache_namespace(profiles)
+    assert namespace_dir.exists()
+
+    payload = (
+        float(np.sum(cube.Grid_xHII)),
+        float(np.sum(cube.Grid_Temp)),
+        float(np.sum(cube.Grid_xal)),
+        float(cube.z),
+    )
+    gathered = comm.gather(payload, root=0)
+    if rank == 0:
+        assert len(gathered) == 2
+        assert gathered[0] == gathered[1]
