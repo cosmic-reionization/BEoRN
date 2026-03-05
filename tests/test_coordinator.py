@@ -482,3 +482,49 @@ def test_paint_single_fstar_cache_uses_fstar_namespace():
     result = coordinator.paint_single_fstar(0, profiles)
     assert isinstance(result, CachedCube)
     assert calls["kwargs"]["cache_namespace"] == coordinator._paint_cache_namespace(profiles)
+
+
+
+# Integration test for Handler cache namespace isolation
+def test_handler_cache_namespace_isolation_roundtrip(tmp_path):
+    # This is a tiny integration test for the Handler cache namespace feature.
+    # It writes two objects with the same logical name into two namespaces and
+    # verifies that they do not collide and that each can be read back.
+    from beorn.io.handler import Handler
+
+    class DummyCached:
+        def __init__(self, payload: str):
+            self.payload = payload
+
+        def write(self, directory, parameters, **kwargs):
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / "dummy_cache.txt"
+            path.write_text(self.payload)
+
+        @classmethod
+        def read(cls, directory, parameters, **kwargs):
+            path = directory / "dummy_cache.txt"
+            if not path.exists():
+                raise FileNotFoundError(path)
+            return cls(path.read_text())
+
+    handler = Handler(file_root=tmp_path)
+    params = SimpleNamespace()  # not used by DummyCached
+
+    handler.write_file(params, DummyCached("legacy"), cache_namespace="painted_output_legacy")
+    handler.write_file(params, DummyCached("fstar"), cache_namespace="painted_output_fstar_dist_lognormal_sigma_0.4_seed_123")
+
+    legacy = handler.load_file(params, DummyCached, cache_namespace="painted_output_legacy")
+    fstar = handler.load_file(params, DummyCached, cache_namespace="painted_output_fstar_dist_lognormal_sigma_0.4_seed_123")
+
+    assert legacy.payload == "legacy"
+    assert fstar.payload == "fstar"
+
+    # Ensure isolation on disk.
+    assert (tmp_path / "painted_output_legacy" / "dummy_cache.txt").exists()
+    assert (tmp_path / "painted_output_fstar_dist_lognormal_sigma_0.4_seed_123" / "dummy_cache.txt").exists()
+
+    # Ensure no collision: contents differ.
+    assert (tmp_path / "painted_output_legacy" / "dummy_cache.txt").read_text() != (
+        tmp_path / "painted_output_fstar_dist_lognormal_sigma_0.4_seed_123" / "dummy_cache.txt"
+    ).read_text()
