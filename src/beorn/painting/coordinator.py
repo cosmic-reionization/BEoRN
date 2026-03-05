@@ -21,7 +21,7 @@ from .spread  import spreading_excess_fast
 from ..cosmo import T_adiab_fluctu
 from ..couplings import S_alpha
 from ..io.handler import Handler
-from ..structs.radiation_profiles import RadiationProfiles
+from ..structs.radiation_profiles import RadiationProfiles, RadiationProfilesFStarGrid
 from ..structs.parameters import Parameters
 from ..structs.coeval_cube import CoevalCube
 from ..structs.temporal_cube import TemporalCube
@@ -30,6 +30,25 @@ from ..load_input_data.base import BaseLoader
 
 
 class PaintingCoordinator:
+
+    def _format_cache_value(self, value) -> str:
+        """Format cache-key values into stable path-safe strings."""
+        if value is None:
+            return "none"
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        return str(value).replace("/", "-")
+
+    def _paint_cache_namespace(self, profiles: RadiationProfiles | RadiationProfilesFStarGrid) -> str:
+        """Return the cache namespace for painted coeval outputs."""
+        if isinstance(profiles, RadiationProfilesFStarGrid):
+            source = self.parameters.source
+            distribution = self._format_cache_value(getattr(source, "f_st_paint_distribution", "lognormal"))
+            sigma = self._format_cache_value(getattr(source, "f_st_paint_sigma", 0.5))
+            seed = self._format_cache_value(getattr(source, "f_st_paint_seed", None))
+            return f"painted_output_fstar_dist_{distribution}_sigma_{sigma}_seed_{seed}"
+        return "painted_output_legacy"
+    
     """Orchestrate painting of 1D radiation profiles to 3D grids.
 
     The coordinator handles loading halo catalogs / density fields,
@@ -198,11 +217,21 @@ class PaintingCoordinator:
         if profiles is None and profiles_path is None:
             raise ValueError("Either profiles or profiles_path must be provided to paint_single.")
         if profiles is None:
-            profiles = RadiationProfiles.read(profiles_path)
+            try:
+                profiles = RadiationProfilesFStarGrid.read(profiles_path)
+            except Exception:
+                profiles = RadiationProfiles.read(profiles_path)
+        if isinstance(profiles, RadiationProfilesFStarGrid):
+            return self.paint_single_fstar(z_index, profiles)
 
         if self.cache_handler:
             try:
-                grid_data = self.cache_handler.load_file(self.parameters, CoevalCube, z_index=z_index)
+                grid_data = self.cache_handler.load_file(
+                    self.parameters, 
+                    CoevalCube, 
+                    z_index=z_index,
+                    cache_namespace=self._paint_cache_namespace(profiles)
+                )
                 self.logger.info(f"Found painted output in cache for {z_index=}. Skipping.")
                 grid_data.to_arrays()
                 return grid_data
@@ -410,10 +439,298 @@ class PaintingCoordinator:
         )
 
         if self.cache_handler:
-            self.cache_handler.write_file(self.parameters, grid_data, z_index=z_index)
+            self.cache_handler.write_file(
+                self.parameters, 
+                grid_data, 
+                z_index=z_index,
+                cache_namespace=self._paint_cache_namespace(profiles)
+            )
         return grid_data
+    
+    def paint_single_fstar(self, z_index: int, profiles: RadiationProfilesFStarGrid) -> CoevalCube:
+        """Paint a single snapshot using stochastic per-halo f_st sampling."""
+        if self.cache_handler:
+            try:
+                grid_data = self.cache_handler.load_file(
+                    self.parameters, 
+                    CoevalCube, 
+                    z_index=z_index,
+                    cache_namespace=self._paint_cache_namespace(profiles)
+                )
+                self.logger.info(f"Found painted output in cache for {z_index=}. Skipping.")
+                grid_data.to_arrays()
+                return grid_data
+            except FileNotFoundError:
+                self.logger.debug("Painted output not found in cache. Processing now")
+    
+        iteration_start_time = time.time()
+        zero_grid = np.zeros((
+            self.parameters.simulation.Ncell,
+            self.parameters.simulation.Ncell,
+            self.parameters.simulation.Ncell
+        ))
+
+        halo_catalog = self.loader.load_halo_catalog(z_index)
+        delta_b = self.loader.load_density_field(z_index)
+
+        zgrid = profiles.z_history[z_index]
+        mass_range = profiles.halo_mass_bins[..., z_index]
+
+        rng = self._make_f_st_rng(z_index)  # create a random number generator for sampling f_st values, seeded by the redshift index to ensure reproducibility
+
+        alphas = self.parameters.simulation.halo_mass_accretion_alpha
+        self.logger.debug(
+            f"Got {mass_range.shape[0]}x{mass_range.shape[1]} profile-bin edges. Range: "
+            f"alpha={alphas[0]:.2f} [{mass_range[...,0].min():.2e} - {mass_range[..., 0].max():.2e} Msun] and "
+            f"alpha={alphas[-1]:.2f} [{mass_range[...,-1].min():.2e} - {mass_range[..., -1].max():.2e} Msun]."
+        )
+
+        if halo_catalog.masses.max() > mass_range.max() or halo_catalog.masses.min() < mass_range.min():
+            raise RuntimeError(
+                f"The current halo catalog at z={zgrid} has a higher masse range "
+                f"({halo_catalog.masses.max():.2e} - {halo_catalog.masses.min():.2e}) than the mass range "
+                f"of the precomputed profiles ({mass_range.max():.2e} - {mass_range.min():.2e}). "
+                "You need to adjust your parameters: either increase the mass range of the profile simulation "
+                "(parameters.simulation) or decrease the mass range of star forming halos (parameters.source)."
+            )
+
+        self.logger.info(f'Painting {halo_catalog.size} halos at {zgrid=:.2f} ({z_index=:.0f}) using stochastic f_st sampling.')
+
+        size = zero_grid.size * np.dtype(np.float64).itemsize
+        if "Grid_xHII" in self.parameters.simulation.store_grids:
+            buffer_xHII = shared_memory.SharedMemory(create=True, size=size)
+        else:
+            buffer_xHII = None
+
+        if "Grid_Temp" in self.parameters.simulation.store_grids:
+            buffer_Temp = shared_memory.SharedMemory(create=True, size=size)
+        else:
+            buffer_Temp = None
+
+        if "Grid_xal" in self.parameters.simulation.store_grids:
+            buffer_xal = shared_memory.SharedMemory(create=True, size=size)
+        else:
+            buffer_xal = None
+
+        with ProcessPoolExecutor(max_workers=self.parameters.simulation.cores) as executor:
+            futures = []
+            total_halos = 0
+
+            alpha_indices = range(len(self.parameters.simulation.halo_mass_accretion_alpha) - 1)
+            mass_indices = range(len(self.parameters.simulation.halo_mass_bins) - 1)
+
+            self.logger.debug(f"Using {self.parameters.simulation.cores} processes for painting.")
+            start_time = time.time()
+
+            for alpha_index in alpha_indices:
+                loop_alpha_range = [
+                    self.parameters.simulation.halo_mass_accretion_alpha[alpha_index],
+                    self.parameters.simulation.halo_mass_accretion_alpha[alpha_index + 1]
+                ]
+
+                for mass_index in mass_indices:
+                    loop_mass_range = [
+                        mass_range[mass_index, alpha_index],
+                        mass_range[mass_index + 1, alpha_index]
+                    ]
+
+                    halo_indices = halo_catalog.get_halo_indices(loop_alpha_range, loop_mass_range)
+                    if halo_indices.size == 0:
+                        continue
+
+                    halo_subset = halo_catalog.at_indices(halo_indices)
+
+                    sampled_f_st = self._sample_f_st_for_halos(halo_subset.size, rng)
+                    f_st_indices = self._nearest_f_st_indices(sampled_f_st, profiles.f_st_grid)
+
+                    self.logger.debug(
+                        "Sampled f_st for %d halos in mass bin %d / alpha bin %d; using %d unique profile slices.",
+                        halo_subset.size,
+                        mass_index,
+                        alpha_index,
+                        np.unique(f_st_indices).size,
+                    )
+
+                    for f_st_index in np.unique(f_st_indices):
+                        subhalo_local_indices = np.where(f_st_indices == f_st_index)[0]
+                        if subhalo_local_indices.size == 0:
+                            continue
+
+                        total_halos += subhalo_local_indices.size
+
+                        profiles_of_bin = profiles.profiles_of_halo_bin(
+                            z_index,
+                            alpha_index,
+                            mass_index,
+                            int(f_st_index)
+                        )
+
+                        assert not np.any(np.isnan(profiles_of_bin[0])), "R_bubble at the current range seem to be malformed (got nan values)"
+                        assert not np.any(np.isnan(profiles_of_bin[1])), "rho_alpha at the current range seem to be malformed (got nan values)"
+                        assert not np.any(np.isnan(profiles_of_bin[2])), "rho_heat at the current range seem to be malformed (got nan values)"
+
+                        radial_grid = profiles.r_grid_cell[:] / (1 + zgrid)
+
+                        kwargs = {
+                            "halo_catalog": halo_subset.at_indices(subhalo_local_indices),
+                            "z": zgrid,
+                            "radial_grid": radial_grid,
+                            "r_lyal": profiles.r_lyal[:],
+                            "profiles_of_bin": profiles_of_bin,
+                            "buffer_lyal": buffer_xal,
+                            "buffer_temp": buffer_Temp,
+                            "buffer_xHII": buffer_xHII,
+                        }
+
+                        if self.parameters.simulation.cores > 1:
+                            f = executor.submit(self.paint_single_mass_bin, **kwargs)
+                            futures.append(f)
+                        else:
+                            self.paint_single_mass_bin(**kwargs)
+
+            completed, uncompleted = wait(futures)
+            assert len(uncompleted) == 0, "Not all painting subprocesses completed successfully"
+            assert total_halos == halo_catalog.size, (
+                f"Number of painted halos ({total_halos}) does not match the halo catalog size ({halo_catalog.size})."
+            )
+
+        if buffer_xHII:
+            array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer_xHII.buf)
+            Grid_xHII = array.copy()
+            buffer_xHII.close()
+            buffer_xHII.unlink()
+        else:
+            Grid_xHII = zero_grid
+
+        if buffer_Temp:
+            array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer_Temp.buf)
+            Grid_Temp = array.copy()
+            buffer_Temp.close()
+            buffer_Temp.unlink()
+        else:
+            Grid_Temp = zero_grid
+
+        if buffer_xal:
+            array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer_xal.buf)
+            Grid_xal = array.copy()
+            buffer_xal.close()
+            buffer_xal.unlink()
+        else:
+            Grid_xal = zero_grid
+
+        self.logger.info(f'Profile painting took {timedelta(seconds=time.time() - start_time)}.')
+
+        start_time = time.time()
+        Grid_xHII = spreading_excess_fast(self.parameters, Grid_xHII)
+        self.logger.info(f'Redistributing excess photons from the overlapping regions took {timedelta(seconds=time.time() - start_time)}.')
+
+        start_time = time.time()
+
+        Grid_Temp += T_adiab_fluctu(zgrid, self.parameters, delta_b)
+        Grid_xHII[Grid_xHII < self.parameters.source.min_xHII_value] = self.parameters.source.min_xHII_value
+
+        if self.parameters.simulation.compute_s_alpha_fluctuations:
+            self.logger.debug('Including Salpha fluctuations in dTb')
+            Grid_xal *= S_alpha(zgrid, Grid_Temp, 1 - Grid_xHII) / (4 * np.pi)
+        else:
+            self.logger.debug('NOT including Salpha fluctuations in dTb')
+            Grid_xal *= S_alpha(zgrid, np.mean(Grid_Temp), 1 - np.mean(Grid_xHII)) / (4 * np.pi)
+
+        self.logger.info(f'Postprocessing of the grids took {timedelta(seconds=time.time() - start_time)}.')
+        self.logger.info(f'Current snapshot took {timedelta(seconds=time.time() - iteration_start_time)}.')
+
+        grid_data = CoevalCube(
+            parameters=self.parameters,
+            z=zgrid,
+            delta_b=delta_b,
+            Grid_Temp=Grid_Temp,
+            Grid_xHII=Grid_xHII,
+            Grid_xal=Grid_xal,
+        )
+
+        if self.cache_handler:
+            self.cache_handler.write_file(
+                self.parameters, 
+                grid_data, 
+                z_index=z_index,
+                cache_namespace=self._paint_cache_namespace(profiles)
+            )
+
+        return grid_data
+    
+    def _sample_f_st_for_halos(self, halo_count: int, rng: np.random.Generator) -> np.ndarray:
+        """Sample one stellar-fraction value per halo for f_st-grid painting.
+
+        Optional source parameters:
+        - f_st_paint_distribution: 'lognormal', 'normal', or 'uniform'
+        - f_st_paint_sigma
+        - f_st_paint_min
+        - f_st_paint_max
+        - f_st_paint_seed
+
+        Defaults:
+        - distribution = 'lognormal'
+        - sigma = 0.5
+        - clipping range = [f_st_grid_min, f_st_grid_max]
+        """
+        source = self.parameters.source
+        distribution = getattr(source, "f_st_paint_distribution", "lognormal").lower()
+        sigma = float(getattr(source, "f_st_paint_sigma", 0.5))
+        f_st_center = float(source.f_st)
+        f_st_min = float(getattr(source, "f_st_paint_min", getattr(source, "f_st_grid_min", 0.01)))
+        f_st_max = float(getattr(source, "f_st_paint_max", getattr(source, "f_st_grid_max", 0.2)))
+
+        if f_st_center <= 0:
+            raise ValueError("parameters.source.f_st must be > 0 for stochastic f_st painting")
+        if f_st_min <= 0 or f_st_max <= 0:
+            raise ValueError("f_st painting bounds must be > 0")
+        if f_st_min >= f_st_max:
+            raise ValueError("f_st_paint_min must be smaller than f_st_paint_max")
+
+        if distribution == "lognormal":
+            sampled = rng.lognormal(mean=np.log(f_st_center), sigma=sigma, size=halo_count)
+        elif distribution == "normal":
+            sampled = rng.normal(loc=f_st_center, scale=sigma, size=halo_count)
+        elif distribution == "uniform":
+            sampled = rng.uniform(low=f_st_min, high=f_st_max, size=halo_count)
+        else:
+            raise ValueError(
+                f"Unknown f_st painting distribution {distribution!r}. "
+                "Use 'lognormal', 'normal', or 'uniform'."
+            )
+
+        return np.clip(sampled, f_st_min, f_st_max)
+    
+    def _nearest_f_st_indices(self, sampled_f_st: np.ndarray, f_st_grid: np.ndarray) -> np.ndarray:
+        """Map sampled f_st values to the nearest precomputed f_st-grid index."""
+        return np.abs(sampled_f_st[:, None] - f_st_grid[None, :]).argmin(axis=1)
+
+    def _make_f_st_rng(self, z_index: int):
+        seed = getattr(self.parameters.source, "f_st_paint_seed", None)
+        if seed is None:
+            return np.random.default_rng()
+        return np.random.default_rng(int(seed) + int(z_index))
 
 
+    # def _sample_f_st_for_halos(self, halo_count: int, rng: np.random.Generator) -> np.ndarray:
+    #     source = self.parameters.source
+    #     distribution = getattr(source, "f_st_paint_distribution", "lognormal").lower()
+    #     sigma = float(getattr(source, "f_st_paint_sigma", 0.5))
+    #     f_st_center = float(source.f_st)
+    #     f_st_min = float(getattr(source, "f_st_paint_min", getattr(source, "f_st_grid_min", 0.01)))
+    #     f_st_max = float(getattr(source, "f_st_paint_max", getattr(source, "f_st_grid_max", 0.2)))
+
+    #     if distribution == "lognormal":
+    #         sampled = rng.lognormal(mean=np.log(f_st_center), sigma=sigma, size=halo_count)
+    #     elif distribution == "normal":
+    #         sampled = rng.normal(loc=f_st_center, scale=sigma, size=halo_count)
+    #     elif distribution == "uniform":
+    #         sampled = rng.uniform(low=f_st_min, high=f_st_max, size=halo_count)
+    #     else:
+    #         raise ValueError(f"Unknown f_st painting distribution {distribution!r}")
+
+    #     return np.clip(sampled, f_st_min, f_st_max)
+    
     def paint_single_mass_bin(
         self,
         halo_catalog: HaloCatalog,

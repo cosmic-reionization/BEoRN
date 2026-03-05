@@ -66,3 +66,76 @@ class RadiationProfiles(BaseStruct):
         assert np.all(np.isfinite(self.rho_alpha)), "rho_alpha contains invalid values"
         assert np.all(np.isfinite(self.R_bubble)), "R_bubble contains invalid values"
         assert np.all(np.isfinite(self.r_lyal)), "r_lyal contains invalid values"
+
+
+
+@dataclass(slots = True)
+class RadiationProfilesFStarGrid(BaseStruct):
+    """
+    Stores radiation profiles on a (mass, alpha, f_st, z) grid. Radial profiles use (r, mass, alpha, f_st, z).
+    """
+    z_history: np.ndarray
+    """Redshift range for which the profiles have been computed. Corresponds to the parameters.solver.redshifts parameter."""
+
+    halo_mass_bins: np.ndarray
+    """Bin edges of the halo masses that the profiles have been computed for. The radiation profile at index i corresponds to the halo mass range [halo_mass_bins[i], halo_mass_bins[i+1]]."""
+
+    f_st_grid: np.ndarray
+    """1D grid of stellar-fraction values used in the precomputation."""
+
+    rho_xray: np.ndarray
+    """X-ray profile. Radial profile with shape (r, mass, alpha, f_st, z)."""
+
+    rho_heat: np.ndarray
+    """Heating profile, derived from the X-ray profile. Shape (r, mass, alpha, f_st, z)."""
+
+    rho_alpha: np.ndarray
+    """rho alpha profile. Radial profile with shape (r, mass, alpha, f_st, z)."""
+
+    R_bubble: np.ndarray
+    """Radius of the ionized bubble around the star forming halo. Shape (mass, alpha, f_st, z)."""
+
+    r_lyal: np.ndarray
+    """Radius of the Lyman alpha halo."""
+
+    r_grid_cell: np.ndarray
+    """Radial grid of the profiles."""
+
+    def profiles_of_halo_bin(
+        self,
+        z_index: int,
+        alpha_index: int | slice,
+        mass_index: int | slice,
+        f_st_index: int | slice
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Return the three core profiles for a halo bin and a given f_st index.
+
+        Args:
+            z_index (int): Redshift index.
+            alpha_index (int or slice): Alpha (accretion) index or slice.
+            mass_index (int or slice): Mass bin index or slice.
+            f_st_index (int or slice): f_st grid index or slice.
+
+        Returns:
+            tuple: ``(R_bubble, rho_alpha, rho_heat)`` arrays copied from the
+            stored profiles for the requested bin and f_st value(s).
+        """
+        return (
+            self.R_bubble[mass_index, alpha_index, f_st_index, z_index].copy(),
+            self.rho_alpha[:, mass_index, alpha_index, f_st_index, z_index].copy(),
+            self.rho_heat[:, mass_index, alpha_index, f_st_index, z_index].copy(),
+        )
+
+    def __post_init__(self):
+        BaseStruct.__post_init__(self)
+        assert self.z_history.ndim == 1, "z_history must be a 1D array"
+        assert self.r_grid_cell.ndim == 1, "r_grid_cell must be a 1D array"
+        assert self.f_st_grid.ndim == 1, "f_st_grid must be a 1D array"
+
+        # nan value in any of the profiles indicates a miscalculation
+        assert np.all(np.isfinite(self.rho_xray)), "rho_xray contains invalid values"
+        assert np.all(np.isfinite(self.rho_heat)), "rho_heat contains invalid values"
+        assert np.all(np.isfinite(self.rho_alpha)), "rho_alpha contains invalid values"
+        assert np.all(np.isfinite(self.R_bubble)), "R_bubble contains invalid values"
+        assert np.all(np.isfinite(self.r_lyal)), "r_lyal contains invalid values"
