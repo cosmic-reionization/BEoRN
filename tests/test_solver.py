@@ -5,6 +5,7 @@ import beorn.precomputation.solver as solver_mod
 from beorn.precomputation.solver import RadiationProfileFstSolver, RadiationProfileSolver
 from beorn.structs.radiation_profiles import RadiationProfilesFStarGrid, RadiationProfiles
 
+import pytest
 
 def make_parameters():
     return SimpleNamespace(
@@ -236,3 +237,64 @@ def test_get_or_compute_profiles_fstar_uses_fstar_cache_namespace():
     assert isinstance(profiles, DummyProfiles)
     assert captured["load_cls"] is RadiationProfilesFStarGrid
     assert captured["load_kwargs"]["cache_namespace"] == solver.profile_cache_namespace()
+
+def test_mpi_fstar_profile_cache_roundtrip(tmp_path, monkeypatch):
+    """MPI integration test for f_st-grid profile caching.
+
+    Run with:
+        mpirun -n 2 pytest tests/test_solver.py::test_mpi_fstar_profile_cache_roundtrip -q -s
+
+    Expected behavior:
+      - rank 0 computes and writes the cached f_st-grid profiles
+      - rank 1 waits at the barrier, then loads the cached profiles
+      - only rank 0 executes solve()
+    """
+    pytest.importorskip("mpi4py")
+    from mpi4py import MPI
+    from beorn.io.handler import Handler
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    params = make_parameters()
+    solver = RadiationProfileFstSolver(params, np.array([15.0, 12.0]))
+    handler = Handler(file_root=tmp_path)
+
+    solve_call_counter = {"count": 0}
+
+    class DummyProfiles:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def write(self, directory, parameters, **kwargs):
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / "dummy_profiles.txt"
+            path.write_text(str(self.payload))
+
+        @classmethod
+        def read(cls, directory, parameters, **kwargs):
+            path = directory / "dummy_profiles.txt"
+            if not path.exists():
+                raise FileNotFoundError(path)
+            return cls(path.read_text())
+
+    def fake_solve(self):
+        solve_call_counter["count"] += 1
+        return DummyProfiles(payload=f"computed-by-rank-{rank}")
+
+    monkeypatch.setattr(RadiationProfileFstSolver, "solve", fake_solve)
+    monkeypatch.setattr(solver_mod, "RadiationProfilesFStarGrid", DummyProfiles)
+
+    profiles = solver.get_or_compute_profiles(handler)
+
+    assert isinstance(profiles, DummyProfiles)
+    if rank == 0:
+        assert solve_call_counter["count"] == 1
+        assert profiles.payload == "computed-by-rank-0"
+    else:
+        assert solve_call_counter["count"] == 0
+        assert profiles.payload == "computed-by-rank-0"
+
+    gathered = comm.gather(profiles.payload, root=0)
+    if rank == 0:
+        assert gathered == ["computed-by-rank-0", "computed-by-rank-0"]
