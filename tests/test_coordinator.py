@@ -68,7 +68,7 @@ class DummyHandler:
 
 
 def make_parameters(seed=12345):
-    return SimpleNamespace(
+    params = SimpleNamespace(
         simulation=SimpleNamespace(
             Ncell=4,
             Lbox=10.0,
@@ -92,6 +92,8 @@ def make_parameters(seed=12345):
             f_st_paint_seed=seed,
         ),
     )
+    params.unique_hash = lambda: "testhash"
+    return params
 
 
 def make_profiles():
@@ -528,3 +530,116 @@ def test_handler_cache_namespace_isolation_roundtrip(tmp_path):
     assert (tmp_path / "painted_output_legacy" / "dummy_cache.txt").read_text() != (
         tmp_path / "painted_output_fstar_dist_lognormal_sigma_0.4_seed_123" / "dummy_cache.txt"
     ).read_text()
+
+
+
+# New end-to-end cache roundtrip test for stochastic f_st painting
+def test_paint_single_fstar_end_to_end_cache_roundtrip(tmp_path, monkeypatch):
+    """Tiny end-to-end workflow test for stochastic f_st painting with real cache IO.
+
+    First call should compute and write a cached coeval cube. Second call should
+    load from cache without invoking the painting kernel again.
+    """
+    from beorn.io.handler import Handler
+    from beorn.structs.coeval_cube import CoevalCube
+
+    halo_catalog = DummyHaloCatalog(
+        masses=np.array([2.0e8, 2.5e8, 3.0e8, 3.5e8]),
+        alpha_vals=np.array([0.7, 0.7, 0.7, 0.7]),
+    )
+    params = make_parameters(seed=4242)
+    loader = DummyLoader(halo_catalog)
+    cache_handler = Handler(file_root=tmp_path)
+    coordinator = PaintingCoordinator(params, loader, DummyHandler(), cache_handler=cache_handler)
+    profiles = make_profiles()
+
+    paint_calls = {"count": 0}
+
+    def fake_paint_single_mass_bin(
+        self,
+        halo_catalog,
+        z,
+        radial_grid,
+        r_lyal,
+        profiles_of_bin,
+        buffer_lyal=None,
+        buffer_temp=None,
+        buffer_xHII=None,
+    ):
+        paint_calls["count"] += 1
+        if buffer_xHII is not None:
+            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_xHII.buf)
+            arr += 1.0
+        if buffer_temp is not None:
+            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_temp.buf)
+            arr += 2.0
+        if buffer_lyal is not None:
+            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_lyal.buf)
+            arr += 3.0
+
+    monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_paint_single_mass_bin)
+    monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_fast", lambda parameters, grid: grid)
+    monkeypatch.setattr("beorn.painting.coordinator.T_adiab_fluctu", lambda z, parameters, delta_b: np.zeros_like(delta_b))
+    monkeypatch.setattr("beorn.painting.coordinator.S_alpha", lambda z, temp, neutral_frac: 1.0)
+
+        # Patch CoevalCube IO for this integration test: we only need to confirm
+    # that caching round-trips the painted grids and respects namespaces.
+    def _test_cube_write(self, directory, parameters, **kwargs):
+        directory.mkdir(parents=True, exist_ok=True)
+        z_index = kwargs.get("z_index", 0)
+        path = directory / f"CoevalCube_{parameters.unique_hash()}_z{z_index}.npz"
+        np.savez(
+            path,
+            z=float(self.z),
+            Grid_xHII=self.Grid_xHII,
+            Grid_Temp=self.Grid_Temp,
+            Grid_xal=self.Grid_xal,
+        )
+
+    @classmethod
+    def _test_cube_read(cls, directory, parameters, **kwargs):
+        z_index = kwargs.get("z_index", 0)
+        path = directory / f"CoevalCube_{parameters.unique_hash()}_z{z_index}.npz"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        data = np.load(path)
+        # minimal object with the fields used by the coordinator/tests
+        return cls(
+            parameters=parameters,
+            z=float(data["z"]),
+            delta_b=np.zeros((4, 4, 4), dtype=float),
+            Grid_Temp=data["Grid_Temp"],
+            Grid_xHII=data["Grid_xHII"],
+            Grid_xal=data["Grid_xal"],
+        )
+
+    monkeypatch.setattr(CoevalCube, "write", _test_cube_write, raising=True)
+    monkeypatch.setattr(CoevalCube, "read", _test_cube_read, raising=True)
+
+
+    # First run computes and writes to cache.
+    cube1 = coordinator.paint_single_fstar(0, profiles)
+    assert paint_calls["count"] > 0
+    n_paint_groups = paint_calls["count"]
+    np.testing.assert_allclose(cube1.Grid_xHII, float(n_paint_groups) * np.ones((4, 4, 4)))
+    np.testing.assert_allclose(cube1.Grid_Temp, 2.0 * float(n_paint_groups) * np.ones((4, 4, 4)))
+    np.testing.assert_allclose(cube1.Grid_xal, 3.0 * float(n_paint_groups) / (4 * np.pi) * np.ones((4, 4, 4)))
+
+    namespace_dir = tmp_path / coordinator._paint_cache_namespace(profiles)
+    assert namespace_dir.exists()
+    assert any(namespace_dir.iterdir())
+
+    # Second run should load from cache and avoid repainting.
+    paint_calls_before = paint_calls["count"]
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("paint_single_mass_bin should not be called when loading painted output from cache")
+
+    monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fail_if_called)
+
+    cube2 = coordinator.paint_single_fstar(0, profiles)
+    assert paint_calls["count"] == paint_calls_before
+    np.testing.assert_allclose(cube2.Grid_xHII, cube1.Grid_xHII)
+    np.testing.assert_allclose(cube2.Grid_Temp, cube1.Grid_Temp)
+    np.testing.assert_allclose(cube2.Grid_xal, cube1.Grid_xal)
+    assert cube2.z == cube1.z
