@@ -1,5 +1,6 @@
 import numpy as np
 from types import SimpleNamespace
+from pathlib import Path
 
 import beorn.precomputation.solver as solver_mod
 from beorn.precomputation.solver import RadiationProfileFstSolver, RadiationProfileSolver
@@ -256,9 +257,20 @@ def test_mpi_fstar_profile_cache_roundtrip(tmp_path, monkeypatch):
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
+    # Under mpirun, each rank runs its own pytest process, so tmp_path may differ
+    # between ranks. Build one shared cache directory on rank 0 and broadcast it.
+    if rank == 0:
+        shared_root = tmp_path / "shared_mpi_cache"
+        shared_root.mkdir(parents=True, exist_ok=True)
+        shared_root_str = str(shared_root)
+    else:
+        shared_root_str = None
+    shared_root_str = comm.bcast(shared_root_str, root=0)
+
+
     params = make_parameters()
     solver = RadiationProfileFstSolver(params, np.array([15.0, 12.0]))
-    handler = Handler(file_root=tmp_path)
+    handler = Handler(file_root=shared_root_str)
 
     solve_call_counter = {"count": 0}
 
