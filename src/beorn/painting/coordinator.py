@@ -5,6 +5,7 @@ import logging
 from multiprocessing import shared_memory
 from concurrent.futures import ProcessPoolExecutor, wait, as_completed
 import numpy as np
+import h5py
 from pathlib import Path
 from tqdm.auto import tqdm
 try:
@@ -30,6 +31,47 @@ from ..load_input_data.base import BaseLoader
 
 
 class PaintingCoordinator:
+
+    def _load_fstar_profiles_z_slice(self, profiles_path: Path, z_index: int) -> RadiationProfilesFStarGrid:
+        """Load only one redshift slice of f_st-grid profiles from disk.
+
+        This avoids loading the full (mass, alpha, f_st, z) profile grid into memory.
+        The returned object keeps a trailing z-dimension of length 1 so existing
+        painting code can reuse the same indexing pattern by using `z_local=0`.
+        """
+        profiles_path = Path(profiles_path)
+        with h5py.File(profiles_path, "r") as h5:
+            r_grid_cell = h5["r_grid_cell"][...]
+            r_lyal = h5["r_lyal"][...]
+            f_st_grid = h5["f_st_grid"][...]
+
+            z_all = h5["z_history"][...]
+            z_val = float(z_all[z_index])
+            z_history = np.array([z_val], dtype=z_all.dtype)
+
+            halo_mass_bins = h5["halo_mass_bins"][..., z_index][..., None]
+            R_bubble = h5["R_bubble"][..., z_index][..., None]
+            rho_xray = h5["rho_xray"][..., z_index][..., None]
+            rho_heat = h5["rho_heat"][..., z_index][..., None]
+            rho_alpha = h5["rho_alpha"][..., z_index][..., None]
+
+        # Use the coordinator parameters (small object) rather than materializing
+        # Parameters from the HDF5 file.
+        obj = RadiationProfilesFStarGrid(
+            parameters=self.parameters,
+            z_history=z_history,
+            halo_mass_bins=halo_mass_bins,
+            f_st_grid=f_st_grid,
+            rho_xray=rho_xray,
+            rho_heat=rho_heat,
+            rho_alpha=rho_alpha,
+            R_bubble=R_bubble,
+            r_lyal=r_lyal,
+            r_grid_cell=r_grid_cell,
+        )
+        obj._file_path = profiles_path
+        return obj
+
 
     def _format_cache_value(self, value) -> str:
         """Format cache-key values into stable path-safe strings."""
@@ -217,10 +259,17 @@ class PaintingCoordinator:
         if profiles is None and profiles_path is None:
             raise ValueError("Either profiles or profiles_path must be provided to paint_single.")
         if profiles is None:
+            # Detect f_st-grid profile files by dataset presence and slice-load only the needed z.
             try:
-                profiles = RadiationProfilesFStarGrid.read(profiles_path)
+                with h5py.File(profiles_path, "r") as h5:
+                    is_fstar = "f_st_grid" in h5
             except Exception:
+                is_fstar = False
+            if is_fstar:
+                profiles = self._load_fstar_profiles_z_slice(profiles_path, z_index)
+            else:
                 profiles = RadiationProfiles.read(profiles_path)
+
         if isinstance(profiles, RadiationProfilesFStarGrid):
             return self.paint_single_fstar(z_index, profiles)
 
@@ -247,10 +296,12 @@ class PaintingCoordinator:
         halo_catalog = self.loader.load_halo_catalog(z_index)
         delta_b = self.loader.load_density_field(z_index)
 
-        # find matching redshift between solver output and simulation snapshot.
+        # Use z_local=0 for single-z slice objects, otherwise z_index
+        z_local = 0 if profiles.z_history.size == 1 else z_index
 
-        zgrid = profiles.z_history[z_index]
-        mass_range = profiles.halo_mass_bins[..., z_index]
+        # find matching redshift between solver output and simulation snapshot.
+        zgrid = profiles.z_history[z_local]
+        mass_range = profiles.halo_mass_bins[..., z_local]
 
         # log some information about the current "paintable range"
         alphas = self.parameters.simulation.halo_mass_accretion_alpha
@@ -332,7 +383,7 @@ class PaintingCoordinator:
                     total_halos += halo_indices.size
 
                     # since the profiles are large and copied in the multiprocessing approach, we only pass the relevant slice
-                    profiles_of_bin = profiles.profiles_of_halo_bin(z_index, alpha_index, mass_index)
+                    profiles_of_bin = profiles.profiles_of_halo_bin(z_local, alpha_index, mass_index)
                     assert not np.any(np.isnan(profiles_of_bin[0])), "R_bubble at the current range seem to be malformed (got nan values)"
                     assert not np.any(np.isnan(profiles_of_bin[1])), "rho_alpha at the current range seem to be malformed (got nan values)"
                     assert not np.any(np.isnan(profiles_of_bin[2])), "rho_heat at the current range seem to be malformed (got nan values)"
@@ -473,8 +524,10 @@ class PaintingCoordinator:
         halo_catalog = self.loader.load_halo_catalog(z_index)
         delta_b = self.loader.load_density_field(z_index)
 
-        zgrid = profiles.z_history[z_index]
-        mass_range = profiles.halo_mass_bins[..., z_index]
+        # Use z_local=0 for single-z slice objects, otherwise z_index
+        z_local = 0 if profiles.z_history.size == 1 else z_index
+        zgrid = profiles.z_history[z_local]
+        mass_range = profiles.halo_mass_bins[..., z_local]
 
         rng = self._make_f_st_rng(z_index)  # create a random number generator for sampling f_st values, seeded by the redshift index to ensure reproducibility
 
@@ -559,7 +612,7 @@ class PaintingCoordinator:
                         total_halos += subhalo_local_indices.size
 
                         profiles_of_bin = profiles.profiles_of_halo_bin(
-                            z_index,
+                            z_local,
                             alpha_index,
                             mass_index,
                             int(f_st_index)
