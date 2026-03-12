@@ -1,10 +1,19 @@
 from pathlib import Path
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 import numpy as np
 import beorn
 
+from types import SimpleNamespace
+
+try:
+    from mpi4py import MPI
+    _comm = MPI.COMM_WORLD
+    _rank = _comm.Get_rank()
+except Exception:
+    _comm = None
+    _rank = 0
 # change the simulation-related paths here
 SCRATCH_ROOT = Path("/xdisk/timeifler/yhhuang/BEoRN-v2/")
 FILE_ROOT = Path("/xdisk/timeifler/yhhuang/Thesan/")
@@ -32,10 +41,21 @@ output_handler.save_logs(parameters)
 
 ### In a first step, we compute the radiation profiles around sources at all redshifts of interest
 # Use the f_st-grid solver so profiles are precomputed on (mass, alpha, f_st, z)
-solver = beorn.precomputation.RadiationProfileFstSolver(parameters, loader.redshifts)
+from beorn.precomputation.solver import RadiationProfileFstSolver
+solver = RadiationProfileFstSolver(parameters, loader.redshifts)
 # the computation does not depend on the spatial information, so the profiles are reusable
 # instead of recomputing them every time, we can reuse a cached version if available
-profiles = solver.get_or_compute_profiles(cache_handler)
+if _rank == 0:
+    profiles_full = solver.get_or_compute_profiles(cache_handler)
+    profiles_path = str(profiles_full._file_path)
+else:
+    profiles_path = None
+
+if _comm is not None:
+    profiles_path = _comm.bcast(profiles_path, root=0)
+
+# Pass only the file path into painting on all ranks to avoid OOM.
+profiles = SimpleNamespace(_file_path=Path(profiles_path))
 
 ### In a second step, we use the precomputed profiles to paint the desired quantities onto the simulation grids
 # For RadiationProfilesFStarGrid, the PaintingCoordinator automatically switches to the
