@@ -4,9 +4,9 @@
 #SBATCH --error=/xdisk/timeifler/yhhuang/BEoRN-v2/log/full_run_%A.err
 #SBATCH --time=24:00:00
 #SBATCH --nodes=4
-#SBATCH --ntasks-per-node=8
+#SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=4G
+#SBATCH --mem-per-cpu=8G
 #SBATCH --partition=standard
 #SBATCH --account=timeifler
 #SBATCH --mail-type=ALL
@@ -57,9 +57,17 @@ case "$RUN_MODE" in
     ;;
 esac
 
-# Run the selected BEoRN script with MPI
-# Total number of MPI processes = nodes * ntasks-per-node = 4 * 8 = 32
-mpirun -np ${SLURM_NTASKS:-32} python $RUN_SCRIPT
+# Memory note:
+# Each MPI rank allocates 3D grids of size Ncell^3 (float64) for Grid_xHII, Grid_Temp, Grid_xal
+# plus delta_b and intermediate arrays. For Ncell=512, one float64 grid is ~1.07 GiB.
+# With multiple ranks per node, memory adds up quickly. If you see OOM kills:
+#   - reduce ntasks-per-node
+#   - increase --mem-per-cpu
+#   - set simulation.cores=1 in the YAML when running under MPI (avoid MPI * multiprocessing)
+#   - consider reducing Ncell or store_grids in the YAML
+
+# Total number of MPI processes = nodes * ntasks-per-node = 4 * 4 = 16 (default is 32 if SLURM_NTASKS unset)
+mpirun -np ${SLURM_NTASKS:-32} python "$RUN_SCRIPT"
 
 # Capture exit status
 EXIT_CODE=$?
