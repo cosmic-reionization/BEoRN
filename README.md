@@ -83,7 +83,7 @@ If you use this package in your research, please consider citing the following p
 }
 ```
 
-## Authors
+## 👨‍💻 Authors
 - Sambit Giri - [GitHub](https://github.com/sambit-giri)
 - Rémy Moll - [GitHub](https://github.com/moll-re)
 - Timothée Schaeffer - [GitHub](https://github.com/timotheeschaeffer)

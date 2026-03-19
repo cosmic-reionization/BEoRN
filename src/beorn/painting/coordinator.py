@@ -15,7 +15,7 @@ except RuntimeError:
     # mpi fails to import because the host system does not have it installed
     MPI_ENABLED = False
 
-from .helpers import TQDM_KWARGS
+from .helpers import TQDM_KWARGS, precompute_fft
 from .painters import paint_alpha_profile, paint_ionization_profile, paint_temperature_profile
 from .spread  import spreading_excess_fast
 from ..cosmo import T_adiab_fluctu
@@ -165,10 +165,13 @@ class PaintingCoordinator:
 
         self.logger.info(f"Painting profiles onto grid for {self.snapshot_count} redshift snapshots. Using {self.parameters.simulation.cores} processes on a single node.")
 
-        for loop_index in tqdm(range(self.snapshot_count), **TQDM_KWARGS):
-            grid_data = self.paint_single(loop_index, radiation_profiles)
-            # write the painted output to the file (append mode)
-            cube.append(grid_data, loop_index)
+        with tqdm(range(self.snapshot_count), **TQDM_KWARGS) as pbar:
+            for loop_index in pbar:
+                z = self.loader.redshifts[loop_index]
+                pbar.set_postfix(z=f"{z:.3f}", refresh=False)
+                grid_data = self.paint_single(loop_index, radiation_profiles)
+                # write the painted output to the file (append mode)
+                cube.append(grid_data, loop_index)
 
         self.logger.info(f"Painting of {self.snapshot_count} snapshots done.")
 
@@ -239,6 +242,20 @@ class PaintingCoordinator:
         # but there are a few short-circuits:
         # 1. if there are no halos at all -> skip the painting
         # 2. if there are halos but they lie outside the mass range -> raise an error
+
+        if halo_catalog.masses.size == 0:
+            self.logger.info(f'No halos at z={zgrid:.2f}. Returning empty grids.')
+            grid_data = CoevalCube(
+                parameters=self.parameters,
+                z=zgrid,
+                delta_b=delta_b,
+                Grid_Temp=T_adiab_fluctu(zgrid, self.parameters, delta_b),
+                Grid_xHII=zero_grid.copy(),
+                Grid_xal=zero_grid.copy(),
+            )
+            if self.cache_handler:
+                self.cache_handler.write_file(self.parameters, grid_data, z_index=z_index)
+            return grid_data
 
         if halo_catalog.masses.max() > mass_range.max() or halo_catalog.masses.min() < mass_range.min():
             raise RuntimeError(f"The current halo catalog at z={zgrid} has a higher masse range ({halo_catalog.masses.max():.2e} - {halo_catalog.masses.min():.2e}) than the mass range of the precomputed profiles ({mass_range.max():.2e} - {mass_range.min():.2e}). You need to adjust your parameters: either increase the mass range of the profile simulation (parameters.simulation) or decrease the mass range of star forming halos (parameters.source).")
@@ -455,6 +472,8 @@ class PaintingCoordinator:
 
         # place the halos on the grid so that they can be used in a convolution
         halo_grid = halo_catalog.to_mesh()
+        # precompute the FFT of the halo grid once; all three paint functions reuse it
+        fft_halo_grid = precompute_fft(halo_grid)
 
         # Every halo in the mass bin i is assumed to have the mass M_bin[i].
         if buffer_xHII:
@@ -465,7 +484,8 @@ class PaintingCoordinator:
 
             # modify Grid_xHII in place
             paint_ionization_profile(
-                output_grid_xHII, radial_grid, x_HII_profile, nGrid, LBox, z, halo_grid
+                output_grid_xHII, radial_grid, x_HII_profile, nGrid, LBox, z, halo_grid,
+                fft_halo_grid=fft_halo_grid,
             )
 
         if buffer_lyal:
@@ -477,7 +497,8 @@ class PaintingCoordinator:
             # TODO - document how r_lyal is the physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
             # modify Grid_xal in place
             paint_alpha_profile(
-                output_grid_lyal, r_lyal, x_alpha_prof, nGrid, LBox, self.parameters.simulation.minimum_grid_size_lyal, z, truncate, halo_grid
+                output_grid_lyal, r_lyal, x_alpha_prof, nGrid, LBox, self.parameters.simulation.minimum_grid_size_lyal, z, truncate, halo_grid,
+                fft_halo_grid=fft_halo_grid,
             )
 
         if buffer_temp:
@@ -485,5 +506,6 @@ class PaintingCoordinator:
             output_grid_temp = np.ndarray(output_shape, dtype=np.float64, buffer=buffer_temp.buf)
             # modify Grid_Temp in place
             paint_temperature_profile(
-                output_grid_temp, radial_grid, Temp_profile, nGrid, LBox, self.parameters.simulation.minimum_grid_size_heat, z, truncate, halo_grid
+                output_grid_temp, radial_grid, Temp_profile, nGrid, LBox, self.parameters.simulation.minimum_grid_size_heat, z, truncate, halo_grid,
+                fft_halo_grid=fft_halo_grid,
             )
