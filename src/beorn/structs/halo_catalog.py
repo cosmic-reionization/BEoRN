@@ -2,10 +2,11 @@
 from dataclasses import dataclass
 import numpy as np
 import logging
-logger = logging.getLogger(__name__)
 
 from .parameters import Parameters
 from ..particle_mapping.pylians import map_particles_to_mesh
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

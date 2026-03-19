@@ -5,10 +5,11 @@ time derivative from a :class:`~beorn.structs.RadiationProfiles`.
 """
 import matplotlib.pyplot as plt
 import logging
-logger = logging.getLogger(__name__)
 
 from ..structs import RadiationProfiles
 from ..precomputation.massaccretion import mass_accretion
+
+logger = logging.getLogger(__name__)
 
 
 # TODO - make better

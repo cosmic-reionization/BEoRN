@@ -6,9 +6,10 @@ from dataclasses import dataclass, fields
 import h5py
 import numpy as np
 import logging
-logger = logging.getLogger(__name__)
 
 from .parameters import Parameters, to_dict
+
+logger = logging.getLogger(__name__)
 
 
 # kw_only allows use to specify an optional field even though subclasses have required fields

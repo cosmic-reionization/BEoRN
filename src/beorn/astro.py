@@ -9,7 +9,7 @@ convenience helpers.
 """
 import numpy as np
 from .structs import Parameters
-from .constants import *
+from .constants import h_eV_sec, eV_per_erg
 
 
 def S_fct(Mh, Mt, g3, g4):

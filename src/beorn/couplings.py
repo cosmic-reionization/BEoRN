@@ -7,7 +7,7 @@ import importlib.util
 from pathlib import Path
 
 from scipy.interpolate import splrep,splev
-from .constants import *
+from .constants import Tstar, A10, rhoc0, M_sun, cm_per_Mpc, m_H, nu_al, nu_LL, m_p_in_Msun
 from .cosmo import T_cmb
 from .structs import Parameters
 
@@ -77,7 +77,7 @@ def x_coll_coef(z,param):
     """
     Coefficient to turn rho/rho_mean into a baryon density in nbr of H atoms per physical cm**3 [1/pcm**3]
     """
-    Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
+    _Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
     coef = rhoc0 * h0 ** 2 * Ob * (1 + z) ** 3 * M_sun / cm_per_Mpc ** 3 / m_H
     return coef
 
@@ -127,7 +127,8 @@ def eps_lyal(nu, parameters: Parameters):
     nu_max_norm  = nu_LL
 
     Anorm = (1-alS)/(nu_max_norm**(1-alS) - nu_min_norm**(1-alS))
-    Inu   = lambda nu: Anorm * nu**(-alS)
+    def Inu(nu):
+        return Anorm * nu**(-alS)
 
     eps_alpha = Inu(nu)*N_al/(m_p_in_Msun * h0)
 

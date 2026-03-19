@@ -13,8 +13,10 @@ import inspect
 import yaml
 import h5py
 import logging
-logger = logging.getLogger(__name__)
+
 from .helpers import bin_centers
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots = True)
@@ -354,14 +356,14 @@ class Parameters:
         This is useful for loading parameters from an hdf5 file.
         """
         params_dict = {}
-        for field in fields(cls):
-            field_name = field.name
+        for param_field in fields(cls):
+            field_name = param_field.name
             # check if the nested field would be a dataclass as well
-            if is_dataclass(field.type):
+            if is_dataclass(param_field.type):
                 # iterate over the fields of the dataclass
                 sub_group = group[field_name]
                 sub_params_dict = {}
-                for sub_field in fields(field.type):
+                for sub_field in fields(param_field.type):
                     sub_field_name = sub_field.name
                     if sub_field_name in sub_group.attrs:
                         sub_params_dict[sub_field_name] = sub_group.attrs[sub_field_name]

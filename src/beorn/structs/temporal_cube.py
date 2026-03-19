@@ -1,18 +1,19 @@
 """Global description of the 3d data computed over multiple redshifts."""
-from dataclasses import dataclass, fields as dataclass_fields
+from dataclasses import dataclass
 from pathlib import Path
 import h5py
 import numpy as np
 import logging
 import tools21cm as t2c
 from tqdm.auto import tqdm
-logger = logging.getLogger(__name__)
 
 from .base_struct import BaseStruct
 from .coeval_cube import CoevalCube
 from .base_quantities import GridBasePropertiesMixin
 from .derived_quantities import GridDerivedPropertiesMixin
 from .parameters import Parameters
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

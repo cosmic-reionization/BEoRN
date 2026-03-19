@@ -1,7 +1,6 @@
-from .parameters import Parameters
-
-from .radiation_profiles import RadiationProfiles
-from .coeval_cube import CoevalCube
-from .temporal_cube import TemporalCube
-from .halo_catalog import HaloCatalog
-from .lightcone import Lightcone
+from .parameters import Parameters as Parameters
+from .radiation_profiles import RadiationProfiles as RadiationProfiles
+from .coeval_cube import CoevalCube as CoevalCube
+from .temporal_cube import TemporalCube as TemporalCube
+from .halo_catalog import HaloCatalog as HaloCatalog
+from .lightcone import Lightcone as Lightcone

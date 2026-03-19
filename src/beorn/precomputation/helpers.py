@@ -11,7 +11,6 @@ import numpy as np
 from scipy.interpolate import splrep, splev, interp1d
 from scipy.integrate import trapezoid, solve_ivp, cumulative_trapezoid
 import logging
-logger = logging.getLogger(__name__)
 
 from ..couplings import eps_lyal
 from ..structs.parameters import Parameters
@@ -19,6 +18,8 @@ from ..cross_sections import sigma_HI, sigma_HeI
 from ..constants import sec_per_year, m_H, M_sun, m_p_in_Msun, km_per_Mpc, h_eV_sec, cm_per_Mpc, E_HI, E_HeI, c_km_s, Tcmb0, nu_LL, rhoc0
 from ..astro import f_star_Halo, f_esc, eps_xray
 from ..cosmo import comoving_distance, hubble
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -189,19 +190,27 @@ def solve_xe(parameters: Parameters, mean_G_ion, mean_Gsec_ion, zz: np.ndarray):
     alB = 1.14e-19 * 4.309 * tt ** (-0.6166) / (1 + 0.6703 * tt ** 0.53) * 1e6  # [cm^3/s]
     alB = alB * (h0 / cm_per_Mpc) ** 3
     alB_tck = splrep(aa, alB)
-    alphaB = lambda a: splev(a, alB_tck)
+    def alphaB(a):
+        return splev(a, alB_tck)
 
     # Energy deposition from first ionisation, see astro-ph/060723 (Eq.12) or 1509.07868 (Eq.3)
    # Gamma_HI = np.interp(zz, aa, mean_G_ion, right=0)
    # G_sec_ion_tck = np.interp(zz, aa, mean_G_ion, right=0)
 
-    fXion = lambda xe: (1 - xe) / 2.5  # approx from Fig.4 of 0910.4410
-    gamma_HI = lambda a, xe: np.interp(a, aa, mean_Gsec_ion, right=0) * fXion(xe)
-    nH = lambda a: (1 - f_He_bynumb) * nb0 / a ** 3
+    def fXion(xe):  # approx from Fig.4 of 0910.4410
+        return (1 - xe) / 2.5
+
+    def gamma_HI(a, xe):
+        return np.interp(a, aa, mean_Gsec_ion, right=0) * fXion(xe)
+
+    def nH(a):
+        return (1 - f_He_bynumb) * nb0 / a ** 3
 
     # x_e
-    source = lambda a, xe: (np.interp(a, aa, mean_G_ion, right=0)  + gamma_HI(a, xe)) * (1 - xe) / (a * hubble(1 / a - 1, parameters) / km_per_Mpc) - \
-                           alphaB(a) * nH(a) * xe ** 2 / (a * hubble(1 / a - 1, parameters) / km_per_Mpc)
+    def source(a, xe):
+        return ((np.interp(a, aa, mean_G_ion, right=0) + gamma_HI(a, xe)) * (1 - xe)
+                / (a * hubble(1 / a - 1, parameters) / km_per_Mpc)
+                - alphaB(a) * nH(a) * xe ** 2 / (a * hubble(1 / a - 1, parameters) / km_per_Mpc))
 
     result = solve_ivp(source, [aa[0], aa[-1]], xe0, t_eval=aa)
     x_e = result.y

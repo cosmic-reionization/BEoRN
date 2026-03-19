@@ -11,13 +11,6 @@ import numpy as np
 from scipy.integrate import trapezoid, solve_ivp
 from scipy.interpolate import interp1d
 import logging
-logger = logging.getLogger(__name__)
-try:
-    from mpi4py import MPI
-    MPI_ENABLED = True
-except RuntimeError:
-    # mpi fails to import because the host system does not have it installed
-    MPI_ENABLED = False
 
 from ..cosmo import comoving_distance, hubble
 from ..cross_sections import alpha_HII
@@ -29,8 +22,16 @@ from .. import constants
 # TODO: replace these unit conversions by astropy units
 from ..constants import m_p_in_Msun, km_per_Mpc, h_eV_sec, cm_per_Mpc, E_HI, E_HeI, kb_eV_per_K, rhoc0
 from ..astro import f_Xh, f_star_Halo, eps_xray
-from .helpers import Ngdot_ion, mean_gamma_ion_xray, solve_xe, rho_alpha_profile, cum_optical_depth
+from .helpers import Ngdot_ion, rho_alpha_profile, cum_optical_depth
 from .massaccretion import mass_accretion
+
+logger = logging.getLogger(__name__)
+try:
+    from mpi4py import MPI
+    MPI_ENABLED = True
+except RuntimeError:
+    # mpi fails to import because the host system does not have it installed
+    MPI_ENABLED = False
 
 
 class RadiationProfileSolver:

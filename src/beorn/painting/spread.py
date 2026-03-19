@@ -2,9 +2,10 @@ import numpy as np
 from skimage.measure import label
 from scipy.ndimage import distance_transform_edt
 import logging
-logger = logging.getLogger(__name__)
 
 from ..structs.parameters import Parameters
+
+logger = logging.getLogger(__name__)
 
 
 def _box_slice(center: int, half: int, n: int) -> slice:
