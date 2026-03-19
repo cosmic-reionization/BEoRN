@@ -1,14 +1,12 @@
 """
 
 FUNCTIONS RELATED TO COSMOLOGY
-TODO Use astropy instead
 """
 import os.path
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
-from astropy.cosmology import FlatLambdaCDM
 
-from .constants import *
+from .constants import sec_per_year, km_per_Mpc, c_km_s, Tcmb0, sigma_T, cm_per_Mpc, rhoc0, m_p_in_Msun
 from .structs import Parameters
 
 def hubble(z, parameters: Parameters):
@@ -121,13 +119,6 @@ def siny_ov_y(y):
     s[np.where(y > 100)] = 0
     return s
 
-def cosmo_astropy(param):
-    Ob, Om, h0 = param.cosmo.Ob, param.cosmo.Om, param.cosmo.h
-    cosmo = FlatLambdaCDM(H0=100 * h0, Om0= Om, Ob0 = Ob, Tcmb0=2.725)
-    return cosmo
-
-
-
 def correlation_fct(param):
     """
     Old function that we are not using now (2024). It might be usefull in the future to compute the 2-h term profile for non-homogeneous IGM.
@@ -144,7 +135,7 @@ def correlation_fct(param):
         print('Correlation function already computed : par.cosmo.corr_fct')
     else:
         try:
-            names = "k, PS"
+            _names = "k, PS"
             Power_Spec = np.loadtxt(PS_)
         except IOError:
             print('IOERROR: Cannot read power spec. Try: par.cosmo.ps = "/path/to/file"')
@@ -233,7 +224,8 @@ def Thomson_optical_depth(zz, xHII, param):
     """
     # check if zz array is in increasing order.
     is_increasing = zz[0]<zz[-1]
-    if not is_increasing: zz,xHII = np.flip(zz),np.flip(xHII)
+    if not is_increasing:
+        zz, xHII = np.flip(zz), np.flip(xHII)
 
     z0 = zz[0]
     if z0 > 0:  ## the integral has to be done starting from z=0
@@ -246,7 +238,7 @@ def Thomson_optical_depth(zz, xHII, param):
         print(
             'Warning: reionisation is not complete at the lower redshift available!! The CMB otpical depth calculation will be wrong.')
 
-    from scipy.integrate import cumtrapz, trapz, odeint
+    from scipy.integrate import cumtrapz
     Ob = param.cosmo.Ob
     h0 = param.cosmo.h
 
@@ -265,5 +257,5 @@ def Thomson_optical_depth(zz, xHII, param):
 
 
 def R_of_M(M):
-    R = (3 * M / (200 * rhoc0 * 0.31 * np.pi * 4)) ** (1 / 3)
+    _R = (3 * M / (200 * rhoc0 * 0.31 * np.pi * 4)) ** (1 / 3)
     return R_of_M

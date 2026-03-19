@@ -5,9 +5,9 @@ submodules are re-exported here for convenience (for example
 ``import beorn; beorn.structs``).
 """
 
-from . import structs
-from . import load_input_data
-from . import precomputation
-from . import io
-from . import painting
-from . import plotting
+from . import structs as structs
+from . import load_input_data as load_input_data
+from . import precomputation as precomputation
+from . import io as io
+from . import painting as painting
+from . import plotting as plotting

@@ -15,7 +15,7 @@ except RuntimeError:
     # mpi fails to import because the host system does not have it installed
     MPI_ENABLED = False
 
-from .helpers import TQDM_KWARGS
+from .helpers import TQDM_KWARGS, precompute_fft
 from .painters import paint_alpha_profile, paint_ionization_profile, paint_temperature_profile
 from .spread  import spreading_excess_fast
 from ..cosmo import T_adiab_fluctu
@@ -51,6 +51,7 @@ class PaintingCoordinator:
             loader: type[BaseLoader],
             output_handler: Handler,
             cache_handler: Handler = None,
+            force_repaint: bool = False,
         ):
         """
         Initialize the Painter class with the given parameters.
@@ -60,12 +61,15 @@ class PaintingCoordinator:
             loader (BaseLoader): The loader class responsible for providing halo catalogs and density fields.
             output_handler (Handler): The handler for saving the painted output data.
             cache_handler (Handler, optional): The handler for loading and saving cache data that can be reused between runs.
+            force_repaint (bool): If True, repaint all snapshots even when output files already exist.
+                Defaults to False (existing snapshots are reused).
         """
         self.parameters = parameters
         self.output_handler = output_handler
         self.cache_handler = cache_handler
         self.loader = loader
         self.snapshot_count = self.loader.redshifts.size
+        self.force_repaint = force_repaint
 
 
     def paint_full(self, radiation_profiles: RadiationProfiles) -> TemporalCube:
@@ -108,25 +112,52 @@ class PaintingCoordinator:
 
         self.logger.debug(f"Starting painter process on rank {rank}.")
         if rank == 0:
-
-            # this is the "master" process. it will handle writing to the main output file.
             self.logger.info(f"Setting up {comm.Get_size()} painting processes for MPI.")
-
             cube = TemporalCube.create_empty(
                 self.parameters,
                 self.output_handler.file_root,
-                snapshot_number = self.snapshot_count,
                 **self.output_handler.write_kwargs
             )
+            if self.force_repaint:
+                missing_indices = list(range(self.snapshot_count))
+                n_cached = sum(
+                    1 for i in range(self.snapshot_count)
+                    if cube.snapshot_path(self.loader.redshifts[i]).exists()
+                )
+                if n_cached:
+                    self.logger.info(
+                        f"force_repaint=True: repainting {n_cached} already-present snapshot(s) "
+                        f"plus {self.snapshot_count - n_cached} new snapshot(s)."
+                    )
+            else:
+                missing_indices = [
+                    i for i in range(self.snapshot_count)
+                    if not cube.snapshot_path(self.loader.redshifts[i]).exists()
+                ]
+                n_cached = self.snapshot_count - len(missing_indices)
+                if n_cached:
+                    self.logger.info(
+                        f"Found {n_cached} already-painted snapshot(s) — skipping "
+                        f"(set force_repaint=True to repaint them)."
+                    )
+            self.logger.info(
+                f"Submitting {len(missing_indices)}/{self.snapshot_count} snapshot(s) to MPI workers."
+            )
+        else:
+            missing_indices = None
 
-        # since the other processes will need to load the radiation profiles from file, we ensure that the file exists
+        missing_indices = comm.bcast(missing_indices, root=0)
+
+        # since workers load radiation profiles from file, ensure the file exists
         if radiation_profiles._file_path is None:
             self.output_handler.write_file(self.parameters, radiation_profiles)
 
         with MPICommExecutor(comm) as executor:
             if executor is not None:
-                # use mpi to automatically assign it to workers
-                futures = {executor.submit(self.paint_single, index, profiles_path = radiation_profiles._file_path): index for index in range(self.snapshot_count)}
+                futures = {
+                    executor.submit(self.paint_single, index, profiles_path=radiation_profiles._file_path): index
+                    for index in missing_indices
+                }
 
                 if rank == 0:
                     for future in as_completed(futures):
@@ -135,10 +166,7 @@ class PaintingCoordinator:
                         cube.append(grid_data, loop_index)
 
                     self.logger.info(f"Painting of {self.snapshot_count} snapshots done.")
-
-                    # reinitialize the grid data to correctly create the attributes that are mapped from the hdf5 fields
-                    cube = self.output_handler.load_file(self.parameters, TemporalCube)
-                    return cube
+                    return TemporalCube.read(file_path=cube._file_path, parameters=self.parameters)
 
         return None
 
@@ -146,35 +174,40 @@ class PaintingCoordinator:
     def paint_simple_loop(self, radiation_profiles: RadiationProfiles) -> TemporalCube:
         """Paint snapshots in a single (possibly multi-process) loop.
 
-        This routine creates an empty :class:`TemporalCube` and iterates
-        over the redshift snapshots, calling :meth:`paint_single` for
-        each index and appending the resulting :class:`CoevalCube`.
+        Creates the ``igm_data_*/`` output directory and iterates over
+        redshift snapshots.  Snapshots whose ``CoevalCube_z{z:.3f}.h5`` file
+        already exists are skipped unless ``force_repaint=True`` was passed
+        to the constructor, allowing interrupted runs to resume automatically.
 
         Args:
             radiation_profiles (RadiationProfiles): Precomputed profiles.
 
         Returns:
-            TemporalCube: The assembled temporal cube.
+            TemporalCube: The assembled temporal cube loaded from the output directory.
         """
         cube = TemporalCube.create_empty(
             self.parameters,
             self.output_handler.file_root,
-            snapshot_number = self.snapshot_count,
             **self.output_handler.write_kwargs
         )
 
         self.logger.info(f"Painting profiles onto grid for {self.snapshot_count} redshift snapshots. Using {self.parameters.simulation.cores} processes on a single node.")
 
-        for loop_index in tqdm(range(self.snapshot_count), **TQDM_KWARGS):
-            grid_data = self.paint_single(loop_index, radiation_profiles)
-            # write the painted output to the file (append mode)
-            cube.append(grid_data, loop_index)
+        with tqdm(range(self.snapshot_count), **TQDM_KWARGS) as pbar:
+            for loop_index in pbar:
+                z = self.loader.redshifts[loop_index]
+                pbar.set_postfix(z=f"{z:.3f}", refresh=False)
+                if cube.snapshot_path(z).exists():
+                    if self.force_repaint:
+                        self.logger.info(f"Found painted output for z={z:.3f} — repainting (force_repaint=True).")
+                    else:
+                        self.logger.info(f"Found painted output for z={z:.3f} — skipping (set force_repaint=True to repaint).")
+                        continue
+                grid_data = self.paint_single(loop_index, radiation_profiles)
+                cube.append(grid_data, loop_index)
 
         self.logger.info(f"Painting of {self.snapshot_count} snapshots done.")
-
-        # reinitialize the grid data to create the attributes that are mapped from the hdf5 fields
-        cube = self.output_handler.load_file(self.parameters, TemporalCube)
-        return cube
+        return TemporalCube.read(file_path=cube._file_path, parameters=self.parameters)
 
 
     def paint_single(self, z_index: int, profiles: RadiationProfiles = None, profiles_path: Path = None) -> CoevalCube:
@@ -200,16 +233,6 @@ class PaintingCoordinator:
         if profiles is None:
             profiles = RadiationProfiles.read(profiles_path)
 
-        if self.cache_handler:
-            try:
-                grid_data = self.cache_handler.load_file(self.parameters, CoevalCube, z_index=z_index)
-                self.logger.info(f"Found painted output in cache for {z_index=}. Skipping.")
-                grid_data.to_arrays()
-                return grid_data
-
-            except FileNotFoundError:
-                # there is no cache or the cache does not contain the halo catalog - compute it fresh
-                self.logger.debug("Painted output not found in cache. Processing now")
 
 
         iteration_start_time = time.time()
@@ -239,6 +262,18 @@ class PaintingCoordinator:
         # but there are a few short-circuits:
         # 1. if there are no halos at all -> skip the painting
         # 2. if there are halos but they lie outside the mass range -> raise an error
+
+        if halo_catalog.masses.size == 0:
+            self.logger.info(f'No halos at z={zgrid:.2f}. Returning empty grids.')
+            grid_data = CoevalCube(
+                parameters=self.parameters,
+                z=zgrid,
+                delta_b=delta_b,
+                Grid_Temp=T_adiab_fluctu(zgrid, self.parameters, delta_b),
+                Grid_xHII=zero_grid.copy(),
+                Grid_xal=zero_grid.copy(),
+            )
+            return grid_data
 
         if halo_catalog.masses.max() > mass_range.max() or halo_catalog.masses.min() < mass_range.min():
             raise RuntimeError(f"The current halo catalog at z={zgrid} has a higher masse range ({halo_catalog.masses.max():.2e} - {halo_catalog.masses.min():.2e}) than the mass range of the precomputed profiles ({mass_range.max():.2e} - {mass_range.min():.2e}). You need to adjust your parameters: either increase the mass range of the profile simulation (parameters.simulation) or decrease the mass range of star forming halos (parameters.source).")
@@ -409,8 +444,6 @@ class PaintingCoordinator:
             Grid_xal = Grid_xal,
         )
 
-        if self.cache_handler:
-            self.cache_handler.write_file(self.parameters, grid_data, z_index=z_index)
         return grid_data
 
 
@@ -455,6 +488,8 @@ class PaintingCoordinator:
 
         # place the halos on the grid so that they can be used in a convolution
         halo_grid = halo_catalog.to_mesh()
+        # precompute the FFT of the halo grid once; all three paint functions reuse it
+        fft_halo_grid = precompute_fft(halo_grid)
 
         # Every halo in the mass bin i is assumed to have the mass M_bin[i].
         if buffer_xHII:
@@ -465,7 +500,8 @@ class PaintingCoordinator:
 
             # modify Grid_xHII in place
             paint_ionization_profile(
-                output_grid_xHII, radial_grid, x_HII_profile, nGrid, LBox, z, halo_grid
+                output_grid_xHII, radial_grid, x_HII_profile, nGrid, LBox, z, halo_grid,
+                fft_halo_grid=fft_halo_grid,
             )
 
         if buffer_lyal:
@@ -477,7 +513,8 @@ class PaintingCoordinator:
             # TODO - document how r_lyal is the physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
             # modify Grid_xal in place
             paint_alpha_profile(
-                output_grid_lyal, r_lyal, x_alpha_prof, nGrid, LBox, self.parameters.simulation.minimum_grid_size_lyal, z, truncate, halo_grid
+                output_grid_lyal, r_lyal, x_alpha_prof, nGrid, LBox, self.parameters.simulation.minimum_grid_size_lyal, z, truncate, halo_grid,
+                fft_halo_grid=fft_halo_grid,
             )
 
         if buffer_temp:
@@ -485,5 +522,6 @@ class PaintingCoordinator:
             output_grid_temp = np.ndarray(output_shape, dtype=np.float64, buffer=buffer_temp.buf)
             # modify Grid_Temp in place
             paint_temperature_profile(
-                output_grid_temp, radial_grid, Temp_profile, nGrid, LBox, self.parameters.simulation.minimum_grid_size_heat, z, truncate, halo_grid
+                output_grid_temp, radial_grid, Temp_profile, nGrid, LBox, self.parameters.simulation.minimum_grid_size_heat, z, truncate, halo_grid,
+                fft_halo_grid=fft_halo_grid,
             )

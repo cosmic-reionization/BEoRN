@@ -11,7 +11,6 @@ import numpy as np
 from scipy.interpolate import splrep, splev, interp1d
 from scipy.integrate import trapezoid, solve_ivp, cumulative_trapezoid
 import logging
-logger = logging.getLogger(__name__)
 
 from ..couplings import eps_lyal
 from ..structs.parameters import Parameters
@@ -19,6 +18,8 @@ from ..cross_sections import sigma_HI, sigma_HeI
 from ..constants import sec_per_year, m_H, M_sun, m_p_in_Msun, km_per_Mpc, h_eV_sec, cm_per_Mpc, E_HI, E_HeI, c_km_s, Tcmb0, nu_LL, rhoc0
 from ..astro import f_star_Halo, f_esc, eps_xray
 from ..cosmo import comoving_distance, hubble
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -114,22 +115,23 @@ def mean_gamma_ion_xray(parameters: Parameters, sfrd, zz):
     for i in range(len(zz)):
         J_X_nu_z = np.zeros(len(nu))
         if (zz[i] < zstar):
-            # rr_comoving = rr * (1 + zz[i])
             z_max = zstar
-            zrange = z_max - zz[i]
-            N_prime = int(zrange / dz_prime)
-
-            if (N_prime < 4):
-                N_prime = 4
+            N_prime = max(int((z_max - zz[i]) / dz_prime), 4)
             z_prime = np.logspace(np.log(zz[i]), np.log(z_max), N_prime, base=np.e)
 
-            for j in range(len(nu)):
-                tau_prime = cum_optical_depth(z_prime, nu[j] * h_eV_sec, parameters)
-                eps_X = eps_xray(nu[j] * (1 + z_prime) / (1 + zz[i]), parameters)  * sfrd_interp(z_prime)  # [1/s/Hz/(Mpc/h)^3]
-                itd = c_km_s * h0 / hubble(z_prime, parameters) * eps_X * np.exp(-tau_prime)
+            # Hoist z_prime-only quantities out of the former nu loop.
+            sfrd_zp = sfrd_interp(z_prime)                                   # (N_zprime,)
+            H_zp    = hubble(z_prime, parameters)                            # (N_zprime,)
 
-                J_X_nu_z[j] = (1 + zz[i]) ** 2 / (4 * np.pi) * trapezoid(itd, z_prime) * (h0/cm_per_Mpc)**2       # [1/s/Hz * (1/cm)^2]
+            # cum_optical_depth handles array E: returns shape (N_nu, N_zprime)
+            tau_prime = cum_optical_depth(z_prime, nu * h_eV_sec, parameters)
 
+            # eps_xray is a vectorised power law — evaluate on a 2-D (N_nu, N_zprime) grid
+            nu_prime_2d = nu[:, None] * (1 + z_prime)[None, :] / (1 + zz[i])
+            eps_X = eps_xray(nu_prime_2d, parameters) * sfrd_zp[None, :]    # (N_nu, N_zprime)
+
+            itd = c_km_s * h0 / H_zp[None, :] * eps_X * np.exp(-tau_prime) # (N_nu, N_zprime)
+            J_X_nu_z = (1 + zz[i]) ** 2 / (4 * np.pi) * trapezoid(itd, z_prime, axis=-1) * (h0 / cm_per_Mpc) ** 2  # (N_nu,)
 
         itlH = nH0 * sigma_HI(nu * h_eV_sec) * J_X_nu_z
         itlHe = nHe0 * sigma_HeI(nu * h_eV_sec) * J_X_nu_z
@@ -188,19 +190,27 @@ def solve_xe(parameters: Parameters, mean_G_ion, mean_Gsec_ion, zz: np.ndarray):
     alB = 1.14e-19 * 4.309 * tt ** (-0.6166) / (1 + 0.6703 * tt ** 0.53) * 1e6  # [cm^3/s]
     alB = alB * (h0 / cm_per_Mpc) ** 3
     alB_tck = splrep(aa, alB)
-    alphaB = lambda a: splev(a, alB_tck)
+    def alphaB(a):
+        return splev(a, alB_tck)
 
     # Energy deposition from first ionisation, see astro-ph/060723 (Eq.12) or 1509.07868 (Eq.3)
    # Gamma_HI = np.interp(zz, aa, mean_G_ion, right=0)
    # G_sec_ion_tck = np.interp(zz, aa, mean_G_ion, right=0)
 
-    fXion = lambda xe: (1 - xe) / 2.5  # approx from Fig.4 of 0910.4410
-    gamma_HI = lambda a, xe: np.interp(a, aa, mean_Gsec_ion, right=0) * fXion(xe)
-    nH = lambda a: (1 - f_He_bynumb) * nb0 / a ** 3
+    def fXion(xe):  # approx from Fig.4 of 0910.4410
+        return (1 - xe) / 2.5
+
+    def gamma_HI(a, xe):
+        return np.interp(a, aa, mean_Gsec_ion, right=0) * fXion(xe)
+
+    def nH(a):
+        return (1 - f_He_bynumb) * nb0 / a ** 3
 
     # x_e
-    source = lambda a, xe: (np.interp(a, aa, mean_G_ion, right=0)  + gamma_HI(a, xe)) * (1 - xe) / (a * hubble(1 / a - 1, parameters) / km_per_Mpc) - \
-                           alphaB(a) * nH(a) * xe ** 2 / (a * hubble(1 / a - 1, parameters) / km_per_Mpc)
+    def source(a, xe):
+        return ((np.interp(a, aa, mean_G_ion, right=0) + gamma_HI(a, xe)) * (1 - xe)
+                / (a * hubble(1 / a - 1, parameters) / km_per_Mpc)
+                - alphaB(a) * nH(a) * xe ** 2 / (a * hubble(1 / a - 1, parameters) / km_per_Mpc))
 
     result = solve_ivp(source, [aa[0], aa[-1]], xe0, t_eval=aa)
     x_e = result.y
@@ -233,9 +243,25 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
     nu_n = nu_LL * (1 - 1 / rec['n'] ** 2)
     nu_n[nu_n == 0] = np.inf
 
-    # rho_alpha = np.zeros((len(z_bins), len(r_grid), len(MM[0, :])))
-
     rho_alpha = np.zeros((len(r_grid), parameters.simulation.halo_mass_bin_n - 1, len(parameters.simulation.halo_mass_accretion_alpha) - 1, len(z_bins)))
+
+    # eps_lyal is a pure power law: eps_lyal(nu) = eps_lyal_C * nu^(-alS_lyal).
+    # Precompute the scalar prefactor and exponent once — avoids recomputing Anorm
+    # for every k-transition (21 times) × every redshift step.
+    alS_lyal  = parameters.source.lyman_alpha_power_law
+    eps_lyal_C = eps_lyal(1.0, parameters)  # constant: Anorm * N_al / (m_p_in_Msun * h0)
+
+    # Build dMdt_star_int once over the full redshift history.
+    # z_prime is always in [z_current, z_star], so the interpolator is never queried
+    # below the lowest z_bin; anchoring at z_star with zeros is the same boundary
+    # condition used in the previous per-iteration construction.
+    dMdt_star_full = halo_mass_derivative * f_star_Halo(parameters, halo_mass) * parameters.cosmology.Ob / parameters.cosmology.Om
+    dMdt_star_int = interp1d(
+        np.concatenate(([z_star], z_bins)),
+        np.concatenate((np.zeros_like(dMdt_star_full[..., :1]), dMdt_star_full), axis=-1),
+        axis=-1,
+        fill_value='extrapolate',
+    )
 
     for i, z in enumerate(z_bins):
         if z > z_star:
@@ -252,20 +278,10 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
         # Compute rcom_prime for all k
         rcom_primes = [comoving_distance(z_prime, parameters) * h0 for z_prime in z_primes]
 
-        # Compute dMdt_star interpolator
-        dMdt_star = halo_mass_derivative[..., :i+1] * f_star_Halo(parameters, halo_mass[..., :i+1]) * parameters.cosmology.Ob / parameters.cosmology.Om
-        dMdt_star_int = interp1d(
-            np.concatenate((np.array([z_star]), z_bins[:i + 1])),
-            np.concatenate((np.zeros_like(dMdt_star[..., :1]), dMdt_star), axis=-1),
-            axis=-1,
-            fill_value='extrapolate'
-        )
-
-        # Vectorized computation for all k
         flux = np.zeros((len(r_grid), parameters.simulation.halo_mass_bin_n - 1, len(parameters.simulation.halo_mass_accretion_alpha) - 1))
         for k, (z_prime, rcom_prime) in enumerate(zip(z_primes, rcom_primes)):
             nu_prime = nu_n[k + 2] * (1 + z_prime) / (1 + z)
-            eps_al = eps_lyal(nu_prime, parameters)[None, None, :] * dMdt_star_int(z_prime)
+            eps_al = (eps_lyal_C * nu_prime ** (-alS_lyal))[None, None, :] * dMdt_star_int(z_prime)
             eps_int = interp1d(rcom_prime, eps_al, axis=-1, fill_value=0.0, bounds_error=False)
 
             flux_k = eps_int(r_grid * (1 + z)) * rec['f'][k + 2]

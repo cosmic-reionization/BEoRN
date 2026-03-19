@@ -23,5 +23,5 @@ class CoevalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMixin
         place.
         """
         for field in self.__dataclass_fields__.values():
-            value = getattr(self, field.name)
+            getattr(self, field.name)
             # TODO

@@ -13,8 +13,10 @@ import inspect
 import yaml
 import h5py
 import logging
-logger = logging.getLogger(__name__)
+
 from .helpers import bin_centers
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots = True)
@@ -132,11 +134,19 @@ class SimulationParameters:
     Ncell: int = 128
     """Number of pixels of the final grid. This is the number of pixels in each dimension. The total number of pixels will be Ncell^3."""
 
+    py21cmfast_high_res_factor: int = 3
+    """Resolution enhancement factor for py21cmfast internal grid (DIM = Ncell * py21cmfast_high_res_factor).
+    A larger factor resolves lower halo masses at the cost of more memory and compute time.
+    The minimum resolvable halo mass scales roughly as (Lbox / DIM)^3."""
+
     Lbox: float = 100
     """Box length, in [Mpc/h]. This is the length of the box in each dimension. The total volume will be Lbox^3."""
 
-    store_grids: list = ('delta_b', 'Grid_Temp', 'Grid_xHII', 'Grid_xal', 'Grid_dTb', )
-    """List of the grids to store. By default all quantities are stored but simulating a subset will speed up the simulation. The available grids are: 'delta_b', 'Grid_Temp', 'Grid_xHII', 'Grid_xal', 'Grid_dTb'"""
+    store_grids: list = ('delta_b', 'Grid_Temp', 'Grid_xHII', 'Grid_xal')
+    """Base grids to write to the HDF5 output file. These four fields are the independent outputs of the painting stage.
+    Derived quantities such as 'Grid_dTb' are *not* stored by default because they can be recomputed on the fly
+    as cached properties from the base fields (``Grid_dTb = f(delta_b, Grid_Temp, Grid_xHII, Grid_xal, z)``).
+    Add 'Grid_dTb' here only if you need pre-computed access to it for very large grids where recomputation is expensive."""
 
     cores: int = 1
     """Number of cores used in parallelization. The computation for each redshift can be parallelized with a shared memory approach. This is the number of cores used for this. Keeping the number at 1 disables parallelization."""
@@ -273,6 +283,43 @@ class Parameters:
 
         return hashlib.md5(dict_string.encode()).hexdigest()
 
+    def profiles_hash(self) -> str:
+        """Short MD5 hash of parameters that affect the 1D radiation profiles.
+
+        Covers source parameters, cosmology, solver redshifts, and the halo
+        mass / accretion-rate bins.  Intentionally excludes random seed, grid
+        dimensions (Ncell, Lbox, py21cmfast_high_res_factor), and other
+        simulation parameters that do not influence the 1D profile shapes.
+        This allows profiles to be reused when re-running BEoRN with a
+        different py21cmfast seed or a different grid resolution.
+        """
+        d = {
+            'source': to_dict(self.source),
+            'cosmology': to_dict(self.cosmology),
+            'redshifts': list(self.solver.redshifts),
+            'fXh': self.solver.fXh,
+            'halo_mass_bin_min': self.simulation.halo_mass_bin_min,
+            'halo_mass_bin_max': self.simulation.halo_mass_bin_max,
+            'halo_mass_bin_n': self.simulation.halo_mass_bin_n,
+            'halo_mass_accretion_alpha': list(self.simulation.halo_mass_accretion_alpha),
+        }
+        return hashlib.md5(str(d).encode()).hexdigest()[:8]
+
+    def beorn_hash(self) -> str:
+        """Short MD5 hash of BEoRN-specific parameters (source, solver, simulation).
+
+        Cosmology is intentionally excluded — it is already encoded in the
+        input data directory name (e.g. the py21cmfast subdirectory).  This
+        hash therefore differentiates astrophysical models applied to the
+        same underlying density/halo data.
+        """
+        d = {
+            'source': to_dict(self.source),
+            'solver': to_dict(self.solver),
+            'simulation': to_dict(self.simulation),
+        }
+        return hashlib.md5(str(d).encode()).hexdigest()[:8]
+
 
     @classmethod
     def from_dict(cls, params_dict: dict) -> 'Parameters':
@@ -309,14 +356,14 @@ class Parameters:
         This is useful for loading parameters from an hdf5 file.
         """
         params_dict = {}
-        for field in fields(cls):
-            field_name = field.name
+        for param_field in fields(cls):
+            field_name = param_field.name
             # check if the nested field would be a dataclass as well
-            if is_dataclass(field.type):
+            if is_dataclass(param_field.type):
                 # iterate over the fields of the dataclass
                 sub_group = group[field_name]
                 sub_params_dict = {}
-                for sub_field in fields(field.type):
+                for sub_field in fields(param_field.type):
                     sub_field_name = sub_field.name
                     if sub_field_name in sub_group.attrs:
                         sub_params_dict[sub_field_name] = sub_group.attrs[sub_field_name]

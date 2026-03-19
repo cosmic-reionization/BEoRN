@@ -1,9 +1,11 @@
 """Plotting routines for star-formation rate related quantities."""
 import matplotlib.pyplot as plt
 import logging
-logger = logging.getLogger(__name__)
+
 from ..structs import Parameters
 from ..astro import f_star_Halo, f_esc
+
+logger = logging.getLogger(__name__)
 
 
 def draw_star_formation_rate(ax: plt.Axes, parameters: Parameters, label=None, color=None):

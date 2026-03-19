@@ -151,7 +151,7 @@ class ThesanLoader(BaseLoader):
         # snapshot_halo_count = f["Header"]["Ngroups_Total"]
         # in practice this key does not exist, so we need the offset file to estimate the number of halos
         snapshot_group_count = int(group_offset_indices[-1]  * 1.5)
-        snapshot_subhalo_count = int(subhalo_start_index[-1] * 1.5)
+        snapshot_subhalo_count = int(subhalo_start_index[-1] * 1.5)  # noqa: F841
 
         current_halo_positions = np.zeros((snapshot_group_count, 3))
         current_halo_masses = np.zeros((snapshot_group_count))

@@ -10,16 +10,64 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-CONVOLVE_FFT_KWARGS = {
-    "boundary": "wrap",
-    "normalize_kernel": False,
-    "allow_huge": True
-}
-
 TQDM_KWARGS = {
     "desc": "Painting redshift snapshots",
     "unit": "snapshot",
 }
+
+
+def precompute_fft(array: np.ndarray, backend: str = 'numpy') -> np.ndarray:
+    """Compute the forward real FFT of an array for reuse across multiple convolutions.
+
+    Separating the forward transform lets callers avoid recomputing it when the
+    same array (e.g. a halo grid) is convolved with several different kernels.
+
+    Args:
+        array (np.ndarray): Input array (e.g. a 3-D halo count mesh).
+        backend (str): FFT backend. ``'numpy'`` uses :func:`numpy.fft.rfftn`.
+            Pass ``'torch'`` once GPU support is added.
+
+    Returns:
+        np.ndarray: Complex array of shape suitable for :func:`fft_convolve_periodic`.
+    """
+    if backend == 'numpy':
+        return np.fft.rfftn(array)
+    raise ValueError(f"Unknown backend '{backend}'. Supported: 'numpy'.")
+
+
+def fft_convolve_periodic(
+    fa: np.ndarray,
+    kernel: np.ndarray,
+    shape: tuple,
+    backend: str = 'numpy',
+) -> np.ndarray:
+    """Convolve a pre-FFT'd signal with a kernel under periodic boundary conditions.
+
+    This is a lightweight replacement for ``astropy.convolution.convolve_fft``
+    with ``boundary='wrap'``, ``normalize_kernel=False``.  Periodic BCs are
+    automatic because the DFT assumes periodicity; no zero-padding is applied.
+
+    The kernel is expected to be *centered* (origin at the array midpoint, as
+    produced by :func:`profile_to_3Dkernel`).  It is internally
+    :func:`numpy.fft.ifftshift`-ed before the forward transform so that the
+    convolution phase is correct.
+
+    Args:
+        fa (np.ndarray): Pre-computed forward FFT of the input array, as
+            returned by :func:`precompute_fft`.
+        kernel (np.ndarray): 3-D convolution kernel centered at the midpoint.
+        shape (tuple): Shape of the original (un-FFT'd) input array — required
+            by :func:`numpy.fft.irfftn` to reconstruct the real-valued output.
+        backend (str): FFT backend matching the one used in :func:`precompute_fft`.
+
+    Returns:
+        np.ndarray: Real-valued convolution result with the same shape as the
+        original input array.
+    """
+    if backend == 'numpy':
+        fk = np.fft.rfftn(np.fft.ifftshift(kernel))
+        return np.fft.irfftn(fa * fk, s=shape).real
+    raise ValueError(f"Unknown backend '{backend}'. Supported: 'numpy'.")
 
 
 def profile_to_3Dkernel(profile: callable, nGrid: int, LB: float) -> np.ndarray:
@@ -74,19 +122,12 @@ def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
         box_extension += 1  ### this need to be even to make things work
 
     kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, box_extension * nGrid_min, box_extension * LBox)
-    # kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, box_extension * nGrid_min, box_extension * LBox)
-    # nGrid_extd = box_extension * nGrid_min
-    # LBox_extd = box_extension * LBox  ## size and nbr of pix of the larger box
 
-    stacked_xal_ker = np.zeros((nGrid_min, nGrid_min, nGrid_min))
-    for ii in range(box_extension):  ## loop over the box_extension**3 subboxes and stack them
-        for jj in range(box_extension):
-            for kk in range(box_extension):
-                stacked_xal_ker += kernel_xal_HM[
-                    ii * nGrid_min:(ii + 1) * nGrid_min,
-                    jj * nGrid_min:(jj + 1) * nGrid_min,
-                    kk * nGrid_min:(kk + 1) * nGrid_min
-                ]
+    # Sum over box_extension**3 sub-boxes of size nGrid_min**3 via reshape instead of a triple loop.
+    n = box_extension
+    stacked_xal_ker = kernel_xal_HM.reshape(
+        n, nGrid_min, n, nGrid_min, n, nGrid_min
+    ).sum(axis=(0, 2, 4))
 
     pix_lft = int(box_extension / 2) * nGrid_min  ### coordinate of the central subbox
     pix_rgth = (1 + int(box_extension / 2)) * nGrid_min
@@ -134,15 +175,12 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
         box_extension += 1  ### this need to be even to make things work
 
     kernel_T_HM = profile_to_3Dkernel(profile_T_HM, box_extension * nGrid_min, box_extension * LBox)
-    # nGrid_extd = box_extension * nGrid_min
-    # LBox_extd = box_extension * LBox  ## size and nbr of pix of the larger box
 
-    stacked_T_ker = np.zeros((nGrid_min, nGrid_min, nGrid_min))
-    for ii in range(box_extension):  ## loop over the box_extension**3 subboxes and stack them
-        for jj in range(box_extension):
-            for kk in range(box_extension):
-                stacked_T_ker += kernel_T_HM[ii * nGrid_min:(ii + 1) * nGrid_min, jj * nGrid_min:(jj + 1) * nGrid_min,
-                                 kk * nGrid_min:(kk + 1) * nGrid_min]
+    # Sum over box_extension**3 sub-boxes of size nGrid_min**3 via reshape instead of a triple loop.
+    n = box_extension
+    stacked_T_ker = kernel_T_HM.reshape(
+        n, nGrid_min, n, nGrid_min, n, nGrid_min
+    ).sum(axis=(0, 2, 4))
 
     pix_lft = int(box_extension / 2) * nGrid_min  ### coordinate of the central subbox
     pix_rgth = (1 + int(box_extension / 2)) * nGrid_min

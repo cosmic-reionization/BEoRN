@@ -1,5 +1,5 @@
 """Module that handles the import of nbody simulation data from various formats."""
-from .artificial import *
-from .pkdgrav import *
-from .thesan import *
-from .twentyone_cm_fast import *
+from .cosmo_sim_artificial import *  # noqa: F403
+from .cosmo_sim_pkdgrav import *  # noqa: F403
+from .cosmo_sim_thesan import *  # noqa: F403
+from .cosmo_sim_py21cmfast import *  # noqa: F403

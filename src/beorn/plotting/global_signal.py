@@ -97,7 +97,7 @@ def draw_dTb_power_spectrum_of_z(ax: plt.Axes, grid: TemporalCube, parameters: P
     ps_c = ps_k * k ** 3 * mean_dtb ** 2 / (2 * np.pi ** 2)
     ax.semilogy(z_range, ps_c, label=label, color=color)
     ax.set_ylim(1e-1, 1e3)
-    ax.set_ylabel(rf'$| dT_b |^2 \, \Delta_{{tot}}^{{2}} (k_0, z)$ [mK]$^2$')
+    ax.set_ylabel(r'$| dT_b |^2 \, \Delta_{{tot}}^{{2}} (k_0, z)$ [mK]$^2$')
     ax.set_xlabel('z')
     ax.set_xlim(z_range.min() - 0.2, z_range.max())
     # write the k value inside the plot
@@ -130,7 +130,7 @@ def draw_dTb_power_spectrum_of_k(ax: plt.Axes, grid: TemporalCube, parameters: P
 
     ax.semilogy(bins, ps_c, ls='-', label=f"{label} (z={z:.2f})", color=color)
     ax.set_ylim(1e-1, 1e3)
-    ax.set_ylabel(rf'$| dT_b |^2 \, \Delta_{{tot}}^{{2}} (k, z_0)$ [mK]$^2$')
+    ax.set_ylabel(r'$| dT_b |^2 \, \Delta_{{tot}}^{{2}} (k, z_0)$ [mK]$^2$')
     ax.set_xlabel('k [cMpc$^{-1}$]')
 
 
