@@ -134,12 +134,11 @@ class RadiationProfileSolver:
             logger.info('param.solver.fXh is set to constant. We will assume f_X,h = 2e-4**0.225')
             x_e = np.full(len(self.z_bins), 2e-4)
         else:
-            zz_, sfrd_ = global_qty.compute_sfrd(self.parameters, self.z_bins, halo_mass, halo_mass_derivative)
-            sfrd = np.interp(self.z_bins, zz_, sfrd_, right=0)
-            Gamma_ion, Gamma_sec_ion = mean_gamma_ion_xray(self.parameters, sfrd, self.z_bins)
-
-            x_e = solve_xe(self.parameters, Gamma_ion, Gamma_sec_ion, self.z_bins)
-            logger.info('param.solver.fXh is not set to constant. We will compute the free e- fraction x_e and assume fXh = x_e**0.225.')
+            raise NotImplementedError(
+                "Computing x_e from the SFRD (parameters.solver.fXh != 'constant') is not yet implemented. "
+                "The old global_qty.compute_sfrd() was removed during the v2 cleanup. "
+                "Set parameters.solver.fXh = 'constant' to use the default approximation (x_e = 2e-4)."
+            )
 
         logger.info(f"Computing profiles for {self.z_bins.size} redshifts, {self.parameters.simulation.halo_mass_bins.size - 1} halo mass bins and {self.parameters.simulation.halo_mass_accretion_alpha.size - 1} alpha bins.")
         r_bubble = self.R_bubble()
@@ -278,6 +277,17 @@ class RadiationProfileSolver:
 
         rho_xray = np.zeros((len(rr), self.parameters.simulation.halo_mass_bin_n - 1, len(self.parameters.simulation.halo_mass_accretion_alpha) - 1, len(self.z_bins)))
 
+        # Build dMdt_int once over the full redshift history.
+        # We anchor M_star_dot = 0 at z_star (no emission above the starting redshift) and
+        # include all z_bins. z_prime is always queried in [z_current, z_star], so the
+        # interpolator is never asked to extrapolate below the lowest z_bin.
+        dMdt_int = interp1d(
+            x = np.concatenate(([z_star], self.z_bins)),
+            y = np.concatenate((np.zeros_like(M_star_dot[..., :1]), M_star_dot), axis=-1),
+            axis = -1,
+            fill_value = 'extrapolate',
+        )
+
         for i, z in enumerate(self.z_bins):
             # it only makes sense to compute the profile for z < zstar
             if z > z_star:
@@ -286,28 +296,6 @@ class RadiationProfileSolver:
             # lookback redshift
             z_prime = np.logspace(np.log(z), np.log(z_star), N_prime[i], base=np.e)
             rcom_prime = comoving_distance(z_prime, self.parameters) * h0  # comoving distance
-
-            # TODO: why do we interpolate here if we have the analytical expression?
-            if i == 0: # if zz[0]<zstar, then concatenate two numbers..
-                dMdt_int = interp1d(
-                    x = np.concatenate(([z_star], self.z_bins[:i+1])),
-                    y = np.stack(
-                        (
-                            np.zeros_like(M_star_dot[..., 0]),
-                            M_star_dot[..., 0]
-                        ),
-                        axis = -1
-                    ),
-                    axis = -1,
-                    fill_value='extrapolate'
-                )
-            else:
-                dMdt_int = interp1d(
-                    x = self.z_bins[:i + 1],
-                    y = M_star_dot[..., :i+1],
-                    axis = -1,
-                    fill_value = 'extrapolate'
-                )
 
             # as described in the paper, we express the emission of xrays as a function of distance
             # this is precomputed for a range of parameters: alpha, Mh, z

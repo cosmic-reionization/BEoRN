@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from pathlib import Path
 import numpy as np
 
 from .base_struct import BaseStruct
+from .parameters import Parameters
 
 
 @dataclass(slots = True)
@@ -9,6 +11,16 @@ class RadiationProfiles(BaseStruct):
     """
     Flux profiles around star forming halos, computed for a range of halo masses and accretion rates (alpha). The central assumption is that each halo with given key properties (mass, alpha) produces the same radiation profile, meaning these profiles can be reused for multiple halos in the painting step of the simulation.
     """
+
+    @classmethod
+    def get_file_path(cls, directory: Path, parameters: Parameters, **kwargs) -> Path:
+        """Cache key covers only the parameters that shape the 1D profiles.
+
+        Random seed and grid dimensions (Ncell, Lbox, DIM) are excluded so
+        that profiles computed for one py21cmfast realisation are reused when
+        painting a different seed or grid resolution with the same physics.
+        """
+        return directory / f"RadiationProfiles_{parameters.profiles_hash()}.h5"
 
     z_history: np.ndarray
     """redshift range for which the profiles have been computed. Corresponds to the parameters.solver.redshifts parameter"""
@@ -49,9 +61,9 @@ class RadiationProfiles(BaseStruct):
             stored profiles for the requested bin.
         """
         return(
-            self.R_bubble[mass_index, alpha_index, z_index].copy(),
-            self.rho_alpha[:, mass_index, alpha_index, z_index].copy(),
-            self.rho_heat[:, mass_index, alpha_index, z_index].copy(),
+            self.R_bubble[mass_index, alpha_index, z_index],
+            self.rho_alpha[:, mass_index, alpha_index, z_index],
+            self.rho_heat[:, mass_index, alpha_index, z_index],
         )
 
 

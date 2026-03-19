@@ -107,7 +107,7 @@ def spreading_excess_fast(parameters: Parameters, Grid_input, print_time=False):
 
     if x_ion_tot_i > Grid.size:
         logger.debug('Universe is fully ionized.')
-        return np.array([1])
+        return np.ones_like(Grid)
 
     logger.info(f'Universe not fully ionized : xHII is {round(x_ion_tot_i / Grid.size, 4)}.')
 

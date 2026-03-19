@@ -114,22 +114,23 @@ def mean_gamma_ion_xray(parameters: Parameters, sfrd, zz):
     for i in range(len(zz)):
         J_X_nu_z = np.zeros(len(nu))
         if (zz[i] < zstar):
-            # rr_comoving = rr * (1 + zz[i])
             z_max = zstar
-            zrange = z_max - zz[i]
-            N_prime = int(zrange / dz_prime)
-
-            if (N_prime < 4):
-                N_prime = 4
+            N_prime = max(int((z_max - zz[i]) / dz_prime), 4)
             z_prime = np.logspace(np.log(zz[i]), np.log(z_max), N_prime, base=np.e)
 
-            for j in range(len(nu)):
-                tau_prime = cum_optical_depth(z_prime, nu[j] * h_eV_sec, parameters)
-                eps_X = eps_xray(nu[j] * (1 + z_prime) / (1 + zz[i]), parameters)  * sfrd_interp(z_prime)  # [1/s/Hz/(Mpc/h)^3]
-                itd = c_km_s * h0 / hubble(z_prime, parameters) * eps_X * np.exp(-tau_prime)
+            # Hoist z_prime-only quantities out of the former nu loop.
+            sfrd_zp = sfrd_interp(z_prime)                                   # (N_zprime,)
+            H_zp    = hubble(z_prime, parameters)                            # (N_zprime,)
 
-                J_X_nu_z[j] = (1 + zz[i]) ** 2 / (4 * np.pi) * trapezoid(itd, z_prime) * (h0/cm_per_Mpc)**2       # [1/s/Hz * (1/cm)^2]
+            # cum_optical_depth handles array E: returns shape (N_nu, N_zprime)
+            tau_prime = cum_optical_depth(z_prime, nu * h_eV_sec, parameters)
 
+            # eps_xray is a vectorised power law — evaluate on a 2-D (N_nu, N_zprime) grid
+            nu_prime_2d = nu[:, None] * (1 + z_prime)[None, :] / (1 + zz[i])
+            eps_X = eps_xray(nu_prime_2d, parameters) * sfrd_zp[None, :]    # (N_nu, N_zprime)
+
+            itd = c_km_s * h0 / H_zp[None, :] * eps_X * np.exp(-tau_prime) # (N_nu, N_zprime)
+            J_X_nu_z = (1 + zz[i]) ** 2 / (4 * np.pi) * trapezoid(itd, z_prime, axis=-1) * (h0 / cm_per_Mpc) ** 2  # (N_nu,)
 
         itlH = nH0 * sigma_HI(nu * h_eV_sec) * J_X_nu_z
         itlHe = nHe0 * sigma_HeI(nu * h_eV_sec) * J_X_nu_z
@@ -233,9 +234,25 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
     nu_n = nu_LL * (1 - 1 / rec['n'] ** 2)
     nu_n[nu_n == 0] = np.inf
 
-    # rho_alpha = np.zeros((len(z_bins), len(r_grid), len(MM[0, :])))
-
     rho_alpha = np.zeros((len(r_grid), parameters.simulation.halo_mass_bin_n - 1, len(parameters.simulation.halo_mass_accretion_alpha) - 1, len(z_bins)))
+
+    # eps_lyal is a pure power law: eps_lyal(nu) = eps_lyal_C * nu^(-alS_lyal).
+    # Precompute the scalar prefactor and exponent once — avoids recomputing Anorm
+    # for every k-transition (21 times) × every redshift step.
+    alS_lyal  = parameters.source.lyman_alpha_power_law
+    eps_lyal_C = eps_lyal(1.0, parameters)  # constant: Anorm * N_al / (m_p_in_Msun * h0)
+
+    # Build dMdt_star_int once over the full redshift history.
+    # z_prime is always in [z_current, z_star], so the interpolator is never queried
+    # below the lowest z_bin; anchoring at z_star with zeros is the same boundary
+    # condition used in the previous per-iteration construction.
+    dMdt_star_full = halo_mass_derivative * f_star_Halo(parameters, halo_mass) * parameters.cosmology.Ob / parameters.cosmology.Om
+    dMdt_star_int = interp1d(
+        np.concatenate(([z_star], z_bins)),
+        np.concatenate((np.zeros_like(dMdt_star_full[..., :1]), dMdt_star_full), axis=-1),
+        axis=-1,
+        fill_value='extrapolate',
+    )
 
     for i, z in enumerate(z_bins):
         if z > z_star:
@@ -252,20 +269,10 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
         # Compute rcom_prime for all k
         rcom_primes = [comoving_distance(z_prime, parameters) * h0 for z_prime in z_primes]
 
-        # Compute dMdt_star interpolator
-        dMdt_star = halo_mass_derivative[..., :i+1] * f_star_Halo(parameters, halo_mass[..., :i+1]) * parameters.cosmology.Ob / parameters.cosmology.Om
-        dMdt_star_int = interp1d(
-            np.concatenate((np.array([z_star]), z_bins[:i + 1])),
-            np.concatenate((np.zeros_like(dMdt_star[..., :1]), dMdt_star), axis=-1),
-            axis=-1,
-            fill_value='extrapolate'
-        )
-
-        # Vectorized computation for all k
         flux = np.zeros((len(r_grid), parameters.simulation.halo_mass_bin_n - 1, len(parameters.simulation.halo_mass_accretion_alpha) - 1))
         for k, (z_prime, rcom_prime) in enumerate(zip(z_primes, rcom_primes)):
             nu_prime = nu_n[k + 2] * (1 + z_prime) / (1 + z)
-            eps_al = eps_lyal(nu_prime, parameters)[None, None, :] * dMdt_star_int(z_prime)
+            eps_al = (eps_lyal_C * nu_prime ** (-alS_lyal))[None, None, :] * dMdt_star_int(z_prime)
             eps_int = interp1d(rcom_prime, eps_al, axis=-1, fill_value=0.0, bounds_error=False)
 
             flux_k = eps_int(r_grid * (1 + z)) * rec['f'][k + 2]

@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import time
 import h5py
 import logging
@@ -7,6 +8,7 @@ from tqdm.auto import tqdm
 
 from .base import BaseLoader
 from ..structs import HaloCatalog, Parameters
+from ..structs.parameters import to_dict
 from ..io import Handler
 
 logger = logging.getLogger(__name__)
@@ -34,13 +36,52 @@ class Py21cmFastLoader(BaseLoader):
         """Redshift grid from simulation parameters (descending order)."""
         return self.parameters.solver.redshifts
 
+    @property
+    def input_tag(self) -> str:
+        """Human-readable directory name for this py21cmfast dataset.
+
+        Pass this to :class:`~beorn.io.Handler` as ``input_tag`` so that
+        BEoRN output files embed the provenance of the input data:
+
+        .. code-block:: python
+
+            handler = Handler(output_dir, input_tag=loader.input_tag)
+        """
+        sim = self.parameters.simulation
+        dim = sim.Ncell * sim.py21cmfast_high_res_factor
+        cosmo_hash = hashlib.md5(str(to_dict(self.parameters.cosmology)).encode()).hexdigest()[:8]
+        return f"py21cmfast_N{sim.Ncell}_D{dim}_L{sim.Lbox:.0f}_seed{sim.random_seed}_{cosmo_hash}"
+
+    def _simulation_info(self, file_root: Path) -> str:
+        """Return a formatted multi-line summary of the py21cmfast setup (no redshift list)."""
+        sim = self.parameters.simulation
+        cosmo = self.parameters.cosmology
+        dim = sim.Ncell * sim.py21cmfast_high_res_factor
+        return (
+            f'py21cmfast setup:\n'
+            f'  Output directory : {file_root}\n'
+            f'  Grid             : HII_DIM={sim.Ncell}, DIM={dim} (factor {sim.py21cmfast_high_res_factor}x)\n'
+            f'  Box size         : {sim.Lbox:.1f} Mpc/h ({sim.Lbox / cosmo.h:.1f} Mpc)\n'
+            f'  Threads          : {sim.cores}\n'
+            f'  Random seed      : {sim.random_seed}\n'
+            f'  Cosmology        : Om={cosmo.Om}, Ob={cosmo.Ob}, h={cosmo.h}, '
+            f'sigma_8={cosmo.sigma_8}, ns={cosmo.ns}'
+        )
+
     def generate(self, handler: Handler) -> None:
         """Run py21cmfast to generate halo catalogs and density fields.
 
-        Produces ``haloes_z{z}.h5`` and ``densities_z{z}.h5`` files for
-        every redshift in ``parameters.solver.redshifts`` and stores them
-        under a hash-keyed subdirectory of ``handler.file_root``. Sets
-        ``self.file_root`` so that :meth:`load_halo_catalog` and
+        Produces ``haloes_z{z:.3f}.h5`` and ``densities_z{z:.3f}.h5`` files for
+        every redshift in ``parameters.solver.redshifts`` under a subdirectory
+        of ``handler.file_root``. The directory is keyed on cosmological and
+        simulation parameters (not astrophysics, not the redshift list), so:
+
+        - Changing astrophysical parameters reuses the same directory.
+        - Adding or removing redshifts only generates the missing snapshots;
+          existing ones are left untouched.
+        - Changing cosmology or grid/seed creates a new directory.
+
+        Sets ``self.file_root`` so that :meth:`load_halo_catalog` and
         :meth:`load_density_field` can be called immediately after.
 
         Args:
@@ -49,6 +90,34 @@ class Py21cmFastLoader(BaseLoader):
         Raises:
             ImportError: If ``py21cmfast`` is not installed.
         """
+        sim = self.parameters.simulation
+        cosmo = self.parameters.cosmology
+        dim = sim.Ncell * sim.py21cmfast_high_res_factor
+        file_root = handler.file_root / self.input_tag
+
+        all_redshifts = list(self.parameters.solver.redshifts)
+        present = [z for z in all_redshifts
+                   if (file_root / f'haloes_z{z:.3f}.h5').exists() and
+                      (file_root / f'densities_z{z:.3f}.h5').exists()]
+        missing = [z for z in all_redshifts if z not in present]
+
+        logger.info(self._simulation_info(file_root))
+
+        if not missing:
+            logger.info(f'All {len(present)} snapshots already cached. Skipping generation.')
+            self.file_root = file_root
+            return
+
+        if present:
+            logger.info(
+                f'Found {len(present)}/{len(all_redshifts)} cached snapshots: '
+                f'z = {", ".join(f"{z:.3f}" for z in present)}'
+            )
+        logger.info(
+            f'Generating {len(missing)}/{len(all_redshifts)} missing snapshots: '
+            f'z = {", ".join(f"{z:.3f}" for z in missing)}'
+        )
+
         try:
             import py21cmfast as p21c
         except ImportError:
@@ -59,35 +128,22 @@ class Py21cmFastLoader(BaseLoader):
             )
 
         start_time = time.process_time()
-
-        file_root = handler.file_root / f"py21cmfast_{self.parameters.unique_hash()}"
         file_root.mkdir(parents=True, exist_ok=True)
 
-        n_redshifts = len(self.parameters.solver.redshifts)
-        logger.info(
-            f'Generating matter and halo data with py21cmfast for {n_redshifts} redshift snapshots.\n'
-            f'  Output directory : {file_root}\n'
-            f'  Grid             : HII_DIM={self.parameters.simulation.Ncell}, DIM={self.parameters.simulation.Ncell * 3}\n'
-            f'  Box size         : {self.parameters.simulation.Lbox:.1f} Mpc/h '
-            f'({self.parameters.simulation.Lbox / self.parameters.cosmology.h:.1f} Mpc)\n'
-            f'  Redshift range   : z={self.parameters.solver.redshifts[-1]:.2f} - {self.parameters.solver.redshifts[0]:.2f}\n'
-            f'  Threads          : {self.parameters.simulation.cores}'
-        )
-
         user_params = p21c.UserParams(
-            HII_DIM=self.parameters.simulation.Ncell,
-            DIM=self.parameters.simulation.Ncell * 3,
-            BOX_LEN=self.parameters.simulation.Lbox / self.parameters.cosmology.h,
+            HII_DIM=sim.Ncell,
+            DIM=dim,
+            BOX_LEN=sim.Lbox / cosmo.h,
             USE_INTERPOLATION_TABLES=True,
-            N_THREADS=self.parameters.simulation.cores,
+            N_THREADS=sim.cores,
         )
 
         cosmo_params = p21c.CosmoParams(
-            SIGMA_8=self.parameters.cosmology.sigma_8,
-            hlittle=self.parameters.cosmology.h,
-            OMm=self.parameters.cosmology.Om,
-            OMb=self.parameters.cosmology.Ob,
-            POWER_INDEX=self.parameters.cosmology.ns,
+            SIGMA_8=cosmo.sigma_8,
+            hlittle=cosmo.h,
+            OMm=cosmo.Om,
+            OMb=cosmo.Ob,
+            POWER_INDEX=cosmo.ns,
         )
 
         global_params = {
@@ -100,42 +156,44 @@ class Py21cmFastLoader(BaseLoader):
         IC = p21c.initial_conditions(
             user_params=user_params,
             cosmo_params=cosmo_params,
-            random_seed=self.parameters.simulation.random_seed,
+            random_seed=sim.random_seed,
             direc=str(file_root),
         )
         logger.info(f'Initial conditions done in {time.process_time() - ic_start:.1f}s.')
 
         with p21c.global_params.use(**global_params):
-            for redshift in tqdm(self.parameters.solver.redshifts, desc='py21cmfast snapshots', unit='snapshot'):
-                halo_fname = f'haloes_z{redshift}.h5'
-                field_fname = f'densities_z{redshift}.h5'
+            with tqdm(missing, desc='py21cmfast snapshots', unit='snapshot') as pbar:
+                for redshift in pbar:
+                    pbar.set_postfix(z=f"{redshift:.3f}", refresh=False)
+                    halo_fname = f'haloes_z{redshift:.3f}.h5'
+                    field_fname = f'densities_z{redshift:.3f}.h5'
 
-                z_start = time.process_time()
-                perturbed_field = p21c.perturb_field(
-                    redshift=redshift, init_boxes=IC, direc=str(file_root)
-                )
-                halo_list = p21c.perturb_halo_list(
-                    redshift=redshift, init_boxes=IC, direc=str(file_root)
-                )
+                    z_start = time.process_time()
+                    perturbed_field = p21c.perturb_field(
+                        redshift=redshift, init_boxes=IC, direc=str(file_root), write=False
+                    )
+                    halo_list = p21c.perturb_halo_list(
+                        redshift=redshift, init_boxes=IC, direc=str(file_root), write=False
+                    )
 
-                halo_list.write(direc=file_root, fname=halo_fname)
-                perturbed_field.write(direc=file_root, fname=field_fname)
-                logger.debug(
-                    f'z={redshift:.3f}: {len(halo_list.halo_masses)} halos, '
-                    f'wrote {halo_fname} and {field_fname} '
-                    f'({time.process_time() - z_start:.1f}s)'
-                )
+                    halo_list.write(direc=file_root, fname=halo_fname)
+                    perturbed_field.write(direc=file_root, fname=field_fname)
+                    logger.debug(
+                        f'z={redshift:.3f}: {len(halo_list.halo_masses)} halos, '
+                        f'wrote {halo_fname} and {field_fname} '
+                        f'({time.process_time() - z_start:.1f}s)'
+                    )
 
         self.file_root = file_root
         logger.info(
-            f'Finished generating data in {time.process_time() - start_time:.1f}s. '
-            f'Files stored at: {file_root}'
+            f'Finished generating {len(missing)} snapshots in {time.process_time() - start_time:.1f}s. '
+            f'Directory: {file_root}'
         )
 
     def load_halo_catalog(self, redshift_index: int) -> HaloCatalog:
         self._require_file_root()
         redshift = self.redshifts[redshift_index]
-        path = self.file_root / f'haloes_z{redshift}.h5'
+        path = self.file_root / f'haloes_z{redshift:.3f}.h5'
 
         with h5py.File(path, 'r') as f:
             haloes = f['PerturbHaloField']
@@ -147,12 +205,13 @@ class Py21cmFastLoader(BaseLoader):
             masses=m * self.parameters.cosmology.h,
             positions=positions * scaling,
             parameters=self.parameters,
+            redshift_index=redshift_index,
         )
 
     def load_density_field(self, redshift_index: int) -> np.ndarray:
         self._require_file_root()
         redshift = self.redshifts[redshift_index]
-        path = self.file_root / f'densities_z{redshift}.h5'
+        path = self.file_root / f'densities_z{redshift:.3f}.h5'
 
         with h5py.File(path, 'r') as f:
             return f['PerturbedField']['density'][:]

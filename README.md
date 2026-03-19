@@ -25,29 +25,33 @@ Full documentation is available at: **[https://cosmic-reionization.github.io/BEo
 ## Installation
 
 ### Standard Installation
-You can install BEoRN directly using `pip`. This ensures all required dependencies are installed:
+You can install BEoRN directly from GitHub using `pip`:
 ```bash
-pip install git+[https://github.com/cosmic-reionization/beorn.git](https://github.com/cosmic-reionization/beorn.git)
+pip install git+https://github.com/cosmic-reionization/beorn.git
 ```
 
-### With 21cmFAST Support
-To enable support for generating synthetic halo catalogs using the `21cmFAST` package, install with the extra option:
+### With Optional Dependencies
+The `extra` option installs additional packages needed for generating synthetic halo catalogs with `21cmFAST` and for comparing halo mass functions against analytical models (`hmf`):
 ```bash
-pip install "git+[https://github.com/cosmic-reionization/beorn.git](https://github.com/cosmic-reionization/beorn.git)[extra]"
+pip install "git+https://github.com/cosmic-reionization/beorn.git[extra]"
 ```
-**Note:** If this installation method fails, please refer to the [21cmFAST](https://github.com/21cmfast/21cmFAST) repository to install it properly, as it is being actively developed. Once `21cmFAST` is installed, you can proceed to install BEoRN using the standard method.
+**Note:** If `21cmFAST` installation fails, please refer to the [21cmFAST](https://github.com/21cmfast/21cmFAST) repository and install it manually first, then install BEoRN without the extra option.
 
 ### Development Installation
 For a local, editable installation (useful if you want to modify the code):
 
 1. Clone the repository:
 ```bash
-git clone [https://github.com/cosmic-reionization/beorn.git](https://github.com/cosmic-reionization/beorn.git)
+git clone https://github.com/cosmic-reionization/beorn.git
 cd beorn
 ```
 2. Install in editable mode:
 ```bash
 pip install -e .
+```
+To also install the optional dependencies:
+```bash
+pip install -e ".[extra]"
 ```
 
 ## Dependencies

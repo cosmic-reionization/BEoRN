@@ -38,6 +38,13 @@ def kappa_coll():
     return HH, eH
 
 
+# Splines computed once at import time — kappa_coll() reads two .dat files and
+# fits splines; doing this per x_coll() call is pure waste.
+_kappa_HH_raw, _kappa_eH_raw = kappa_coll()
+_kappa_eH_tck = splrep(_kappa_eH_raw['T'], _kappa_eH_raw['kappa'])
+_kappa_HH_tck = splrep(_kappa_HH_raw['T'], _kappa_HH_raw['kappa'])
+
+
 def x_coll(z, Tk, xHI, rho_b):
     """
     Parameters
@@ -59,11 +66,8 @@ def x_coll(z, Tk, xHI, rho_b):
     Tcmb = T_cmb(z)
     prefac = Tstar / A10 / Tcmb  # [s]
 
-    HH, eH = kappa_coll()
-    kappa_eH_tck = splrep(eH['T'], eH['kappa'])
-    kappa_eH = splev(Tk, kappa_eH_tck, ext=3)  # [cm^3/s]
-    kappa_HH_tck = splrep(HH['T'], HH['kappa'])
-    kappa_HH = splev(Tk, kappa_HH_tck, ext=3)
+    kappa_eH = splev(Tk, _kappa_eH_tck, ext=3)  # [cm^3/s]
+    kappa_HH = splev(Tk, _kappa_HH_tck, ext=3)
 
     x_HH = prefac * kappa_HH * n_HI
     x_eH = prefac * kappa_eH * n_HII

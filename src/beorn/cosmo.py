@@ -1,12 +1,10 @@
 """
 
 FUNCTIONS RELATED TO COSMOLOGY
-TODO Use astropy instead
 """
 import os.path
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
-from astropy.cosmology import FlatLambdaCDM
 
 from .constants import *
 from .structs import Parameters
@@ -120,13 +118,6 @@ def siny_ov_y(y):
     s = np.sin(y) / y
     s[np.where(y > 100)] = 0
     return s
-
-def cosmo_astropy(param):
-    Ob, Om, h0 = param.cosmo.Ob, param.cosmo.Om, param.cosmo.h
-    cosmo = FlatLambdaCDM(H0=100 * h0, Om0= Om, Ob0 = Ob, Tcmb0=2.725)
-    return cosmo
-
-
 
 def correlation_fct(param):
     """
