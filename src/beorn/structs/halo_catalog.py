@@ -29,6 +29,9 @@ class HaloCatalog:
     redshift_index: int = 0
     """The index of the redshift snapshot that this catalog corresponds to. This is used to look up accretion history"""
 
+    redshift: float = None
+    """Actual redshift of this snapshot. Preferred over redshift_index for any quantity that needs z."""
+
     alphas: np.ndarray = None
     """
     Halo mass accretion rate, calculated from the mass history of the halo. If not available, it is set to a default value of 0.79.
@@ -123,7 +126,7 @@ class HaloCatalog:
             masses = self.masses[indices],
             parameters = self.parameters,
             redshift_index = self.redshift_index,
-            # at that point self.alphas is guaranteed to exist since __post_init__ was called
+            redshift = self.redshift,
             alphas = self.alphas[indices]
         )
 

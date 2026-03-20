@@ -83,5 +83,5 @@ class ArtificialHaloLoader(BaseLoader):
         masses = exponential_mass_accretion(z, M0 = self.mass_at_z0, z0=self.redshifts.min(), alpha=self.alpha)
         positions = np.stack([self.X, self.Y, self.Z], axis=-1)
         return HaloCatalog(
-            positions, masses, self.parameters, redshift_index
+            positions, masses, self.parameters, redshift_index, redshift=float(z)
         )

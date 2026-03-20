@@ -53,8 +53,8 @@ def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_i
             ind_z = np.argmin(np.abs(zz - zi))
             z_val = zz[ind_z]
 
-            ind_alpha = np.argmin(np.abs(parameters.simulation.halo_mass_accretion_alpha - alpha_j))
-            alpha_val = parameters.simulation.halo_mass_accretion_alpha[ind_alpha]
+            ind_alpha = np.argmin(np.abs(parameters.solver.halo_mass_accretion_alpha - alpha_j))
+            alpha_val = parameters.solver.halo_mass_accretion_alpha[ind_alpha]
 
             # the mass history is now uniquely defined:
             Mh_i = profiles.halo_mass_bins[mass_index, ind_alpha, ind_z]
@@ -162,8 +162,8 @@ def plot_profile_alpha_dependence(ax: plt.axes, profiles: RadiationProfiles, qua
     for j, alpha_j in enumerate(alphas):
         # the user specifies the redshifts and alpha values - here we find the index lying closest to these values in the profile
 
-        ind_alpha = np.argmin(np.abs(profiles.parameters.simulation.halo_mass_accretion_alpha - alpha_j))
-        alpha_val = profiles.parameters.simulation.halo_mass_accretion_alpha[ind_alpha]
+        ind_alpha = np.argmin(np.abs(profiles.parameters.solver.halo_mass_accretion_alpha - alpha_j))
+        alpha_val = profiles.parameters.solver.halo_mass_accretion_alpha[ind_alpha]
 
         actual_alpha_list.append(alpha_val)
 

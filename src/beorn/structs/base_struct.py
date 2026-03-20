@@ -96,7 +96,7 @@ class BaseStruct(ABC):
         """
         Reads the content of a specified HDF5 file and populate the dataclass. Can be called with a specific file path, or with a base directory and parameters to infer the file path.
         """
-        if file_path and (directory or parameters or kwargs):
+        if file_path and (directory or kwargs):
             raise ValueError("Either provide a file path or a directory and parameters, but not both.")
         if file_path is None:
             file_path = cls.get_file_path(directory, parameters, **kwargs)

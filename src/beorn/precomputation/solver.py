@@ -76,10 +76,27 @@ class RadiationProfileSolver:
         """
         try:
             profiles = handler.load_file(self.parameters, RadiationProfiles)
-            logger.info("Loaded radiation profiles from cache.")
+            # Validate that the cached redshift grid matches what is currently requested.
+            # A hash mismatch would already produce FileNotFoundError above, but an
+            # explicit check here gives a clear diagnostic if the cache is somehow stale.
+            if not np.array_equal(profiles.z_history, self.z_bins):
+                raise ValueError(
+                    f"Cached radiation profiles cover "
+                    f"z={profiles.z_history[0]:.2f}→{profiles.z_history[-1]:.2f} "
+                    f"({len(profiles.z_history)} steps) but solver.redshifts requests "
+                    f"z={self.z_bins[0]:.2f}→{self.z_bins[-1]:.2f} "
+                    f"({len(self.z_bins)} steps). "
+                    "Delete the cached file or restore the matching solver.redshifts."
+                )
+            logger.info(
+                f"Loaded radiation profiles from cache "
+                f"(z={profiles.z_history[0]:.2f}→{profiles.z_history[-1]:.2f}, "
+                f"{len(profiles.z_history)} steps)."
+            )
             return profiles
         except FileNotFoundError:
             logger.info("Radiation profiles not found in cache. Launching a single computation process.")
+            logger.info(self.parameters.summary_str())
 
         # we need to consider that this is likely being run in MPI mode. Only a single rank should perform the computation and save the results, others should wait and then load the results
         if MPI_ENABLED:
@@ -88,6 +105,8 @@ class RadiationProfileSolver:
             if rank == 0:
                 profiles = self.solve()
                 handler.write_file(self.parameters, profiles)
+                if profiles._file_path is not None:
+                    self.parameters.to_yaml(profiles._file_path.with_suffix('.yaml'))
                 logger.info(f"Rank {rank} computed profiles and saved them to cache.")
                 # notify other ranks that computation is done
                 comm.Barrier()
@@ -99,6 +118,8 @@ class RadiationProfileSolver:
         else:
             profiles = self.solve()
             handler.write_file(self.parameters, profiles)
+            if profiles._file_path is not None:
+                self.parameters.to_yaml(profiles._file_path.with_suffix('.yaml'))
             logger.info("Radiation profiles computed and saved to cache.")
         return profiles
 
@@ -117,15 +138,15 @@ class RadiationProfileSolver:
         halo_mass_bins, _ = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bins,
-            self.parameters.simulation.halo_mass_accretion_alpha
+            self.parameters.solver.halo_mass_bins,
+            self.parameters.solver.halo_mass_accretion_alpha
         )
         # the halo mass for the bin centers is the one used throughout the profile computation
         halo_mass, halo_mass_derivative = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bin_centers,
-            self.parameters.simulation.halo_mass_accreation_alpha_bin_centers
+            self.parameters.solver.halo_mass_bin_centers,
+            self.parameters.solver.halo_mass_accretion_alpha_bin_centers
         )
         self.halo_mass_evolution = halo_mass
         self.halo_mass_derivative = halo_mass_derivative
@@ -141,7 +162,7 @@ class RadiationProfileSolver:
                 "Set parameters.solver.fXh = 'constant' to use the default approximation (x_e = 2e-4)."
             )
 
-        logger.info(f"Computing profiles for {self.z_bins.size} redshifts, {self.parameters.simulation.halo_mass_bins.size - 1} halo mass bins and {self.parameters.simulation.halo_mass_accretion_alpha.size - 1} alpha bins.")
+        logger.info(f"Computing profiles for {self.z_bins.size} redshifts, {self.parameters.solver.halo_mass_bins.size - 1} halo mass bins and {self.parameters.solver.halo_mass_accretion_alpha.size - 1} alpha bins.")
         r_bubble = self.R_bubble()
 
         rho_xray = self.rho_xray(self.r_grid, x_e)
@@ -193,7 +214,7 @@ class RadiationProfileSolver:
         # b_0(z) - physical baryon density
         physical_baryon_density = baryon_density / scale_factors** 3
         # clumping factor
-        clumping_factor = self.parameters.cosmology.clumping
+        clumping_factor = self.parameters.solver.clumping
 
         nb0_interp  = interp1d(scale_factors, physical_baryon_density, fill_value = 'extrapolate')
         Ngam_interp = interp1d(scale_factors, Ngam_dot, axis = -1, fill_value = 'extrapolate')
@@ -207,7 +228,7 @@ class RadiationProfileSolver:
             return km_per_Mpc / (hubble(z, self.parameters) * a) * (photon_number / baryon_density - alpha_HII(1e4) * clumping_factor / cm_per_Mpc ** 3 * h0 ** 3 * baryon_number * volume).flatten()  # eq 65 from barkana and loeb
 
         # the time dependence will be given by the redshifts (added later)
-        volume_shape = (self.parameters.simulation.halo_mass_bin_n - 1, len(self.parameters.simulation.halo_mass_accretion_alpha) - 1)
+        volume_shape = (self.parameters.solver.halo_mass_nbin - 1, len(self.parameters.solver.halo_mass_accretion_alpha) - 1)
         v0 = np.zeros(volume_shape)
 
         sol = solve_ivp(
@@ -259,7 +280,7 @@ class RadiationProfileSolver:
         N_mu = NE
         nu = np.logspace(np.log(nu_min), np.log(nu_max), N_mu, base=np.e)
 
-        f_He_bynumb = 1 - self.parameters.cosmology.HI_frac
+        f_He_bynumb = 1 - self.parameters.solver.HI_frac
         # hydrogen
         nH0 = (1-f_He_bynumb) * nb0
         # helium
@@ -276,7 +297,7 @@ class RadiationProfileSolver:
         # we cast to int later on because this gives the number of points
         N_prime = np.maximum(N_prime, 4).astype(int) # TODO explain why 4 exactly
 
-        rho_xray = np.zeros((len(rr), self.parameters.simulation.halo_mass_bin_n - 1, len(self.parameters.simulation.halo_mass_accretion_alpha) - 1, len(self.z_bins)))
+        rho_xray = np.zeros((len(rr), self.parameters.solver.halo_mass_nbin - 1, len(self.parameters.solver.halo_mass_accretion_alpha) - 1, len(self.z_bins)))
 
         # Build dMdt_int once over the full redshift history.
         # We anchor M_star_dot = 0 at z_star (no emission above the starting redshift) and
@@ -351,7 +372,7 @@ class RadiationProfileSolver:
             axes as the inputs.
         """
         # add the decoupling redshift as "initial condition"
-        z0 = self.parameters.cosmology.z_decoupling
+        z0 = self.parameters.solver.z_decoupling
         zz = np.insert(self.z_bins, 0, z0)
 
         # prepend 0 to the rho_xray array to account for the additional z bin

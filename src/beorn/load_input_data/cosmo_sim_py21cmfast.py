@@ -27,14 +27,21 @@ class Py21cmFastLoader(BaseLoader):
             call :meth:`generate` before loading data.
     """
 
-    def __init__(self, parameters: Parameters, file_root: Path = None):
+    def __init__(self, parameters: Parameters, file_root: "Path | str" = None):
         super().__init__(parameters)
         self.file_root = Path(file_root) if file_root is not None else None
+        if self.file_root is not None and self.file_root.is_dir():
+            self._ensure_parameters_yaml(self.file_root)
 
     @property
     def redshifts(self) -> np.ndarray:
-        """Redshift grid from simulation parameters (descending order)."""
-        return self.parameters.solver.redshifts
+        """Snapshot redshifts — the sparse cosmo-sim grid.
+
+        Uses ``parameters.cosmo_sim.snapshot_redshifts`` when set, otherwise falls
+        back to the full ``parameters.solver.redshifts`` profile grid (backward-compatible).
+        """
+        snap = self.parameters.cosmo_sim.snapshot_redshifts
+        return snap if snap is not None else self.parameters.solver.redshifts
 
     @property
     def input_tag(self) -> str:
@@ -48,31 +55,79 @@ class Py21cmFastLoader(BaseLoader):
             handler = Handler(output_dir, input_tag=loader.input_tag)
         """
         sim = self.parameters.simulation
-        dim = sim.Ncell * sim.py21cmfast_high_res_factor
+        cosmo_sim = self.parameters.cosmo_sim
+        dim = sim.Ncell * cosmo_sim.py21cmfast_high_res_factor
         cosmo_hash = hashlib.md5(str(to_dict(self.parameters.cosmology)).encode()).hexdigest()[:8]
-        return f"py21cmfast_N{sim.Ncell}_D{dim}_L{sim.Lbox:.0f}_seed{sim.random_seed}_{cosmo_hash}"
+        return f"py21cmfast_N{sim.Ncell}_D{dim}_L{sim.Lbox:.0f}_seed{cosmo_sim.random_seed}_{cosmo_hash}"
 
     def _simulation_info(self, file_root: Path) -> str:
         """Return a formatted multi-line summary of the py21cmfast setup (no redshift list)."""
         sim = self.parameters.simulation
+        cosmo_sim = self.parameters.cosmo_sim
         cosmo = self.parameters.cosmology
-        dim = sim.Ncell * sim.py21cmfast_high_res_factor
+        dim = sim.Ncell * cosmo_sim.py21cmfast_high_res_factor
         return (
             f'py21cmfast setup:\n'
             f'  Output directory : {file_root}\n'
-            f'  Grid             : HII_DIM={sim.Ncell}, DIM={dim} (factor {sim.py21cmfast_high_res_factor}x)\n'
+            f'  Grid             : HII_DIM={sim.Ncell}, DIM={dim} (factor {cosmo_sim.py21cmfast_high_res_factor}x)\n'
             f'  Box size         : {sim.Lbox:.1f} Mpc/h ({sim.Lbox / cosmo.h:.1f} Mpc)\n'
             f'  Threads          : {sim.cores}\n'
-            f'  Random seed      : {sim.random_seed}\n'
+            f'  Random seed      : {cosmo_sim.random_seed}\n'
             f'  Cosmology        : Om={cosmo.Om}, Ob={cosmo.Ob}, h={cosmo.h}, '
             f'sigma_8={cosmo.sigma_8}, ns={cosmo.ns}'
         )
+
+    def _py21cmfast_yaml_dict(self) -> dict:
+        """Return only the parameters needed to reproduce this py21cmfast run.
+
+        Includes the cosmological inputs to :class:`py21cmfast.CosmoParams` and
+        the grid/seed inputs to :class:`py21cmfast.UserParams`.  Astrophysical
+        BEoRN parameters, redshift lists, and solver settings are intentionally
+        omitted — redshifts can be inferred from the filenames on disk.
+        """
+        sim = self.parameters.simulation
+        cosmo_sim = self.parameters.cosmo_sim
+        cosmo = self.parameters.cosmology
+        return {
+            "cosmology": {
+                "Om": cosmo.Om,
+                "Ob": cosmo.Ob,
+                "Ol": cosmo.Ol,
+                "h": cosmo.h,
+                "sigma_8": cosmo.sigma_8,
+                "ns": cosmo.ns,
+            },
+            "simulation": {
+                "Ncell": sim.Ncell,
+                "Lbox": sim.Lbox,
+                "cores": sim.cores,
+            },
+            "cosmo_sim": {
+                "py21cmfast_high_res_factor": cosmo_sim.py21cmfast_high_res_factor,
+                "random_seed": cosmo_sim.random_seed,
+            },
+        }
+
+    def _ensure_parameters_yaml(self, directory: Path) -> None:
+        """Write ``cosmo_params.yaml`` to *directory* if it does not already exist.
+
+        Only the cosmological and grid/seed parameters used by py21cmfast are
+        written — not the full BEoRN parameter set.
+        """
+        import yaml
+        yaml_path = directory / "cosmo_params.yaml"
+        if not yaml_path.exists():
+            with yaml_path.open("w") as f:
+                yaml.dump(self._py21cmfast_yaml_dict(), f, default_flow_style=False, sort_keys=False)
+            logger.info(
+                f"cosmo_params.yaml not found in {directory} — written from current parameters."
+            )
 
     def generate(self, handler: Handler) -> None:
         """Run py21cmfast to generate halo catalogs and density fields.
 
         Produces ``haloes_z{z:.3f}.h5`` and ``densities_z{z:.3f}.h5`` files for
-        every redshift in ``parameters.solver.redshifts`` under a subdirectory
+        every redshift in ``parameters.cosmo_sim.snapshot_redshifts`` under a subdirectory
         of ``handler.file_root``. The directory is keyed on cosmological and
         simulation parameters (not astrophysics, not the redshift list), so:
 
@@ -91,11 +146,12 @@ class Py21cmFastLoader(BaseLoader):
             ImportError: If ``py21cmfast`` is not installed.
         """
         sim = self.parameters.simulation
+        cosmo_sim = self.parameters.cosmo_sim
         cosmo = self.parameters.cosmology
-        dim = sim.Ncell * sim.py21cmfast_high_res_factor
+        dim = sim.Ncell * cosmo_sim.py21cmfast_high_res_factor
         file_root = handler.file_root / self.input_tag
 
-        all_redshifts = list(self.parameters.solver.redshifts)
+        all_redshifts = list(self.redshifts)
         present = [z for z in all_redshifts
                    if (file_root / f'haloes_z{z:.3f}.h5').exists() and
                       (file_root / f'densities_z{z:.3f}.h5').exists()]
@@ -106,6 +162,7 @@ class Py21cmFastLoader(BaseLoader):
         if not missing:
             logger.info(f'All {len(present)} snapshots already cached. Skipping generation.')
             self.file_root = file_root
+            self._ensure_parameters_yaml(file_root)
             return
 
         if present:
@@ -129,6 +186,7 @@ class Py21cmFastLoader(BaseLoader):
 
         start_time = time.process_time()
         file_root.mkdir(parents=True, exist_ok=True)
+        self._ensure_parameters_yaml(file_root)
 
         user_params = p21c.UserParams(
             HII_DIM=sim.Ncell,
@@ -137,6 +195,7 @@ class Py21cmFastLoader(BaseLoader):
             USE_INTERPOLATION_TABLES=True,
             N_THREADS=sim.cores,
         )
+
 
         cosmo_params = p21c.CosmoParams(
             SIGMA_8=cosmo.sigma_8,
@@ -156,7 +215,7 @@ class Py21cmFastLoader(BaseLoader):
         IC = p21c.initial_conditions(
             user_params=user_params,
             cosmo_params=cosmo_params,
-            random_seed=sim.random_seed,
+            random_seed=cosmo_sim.random_seed,
             direc=str(file_root),
         )
         logger.info(f'Initial conditions done in {time.process_time() - ic_start:.1f}s.')
@@ -206,6 +265,7 @@ class Py21cmFastLoader(BaseLoader):
             positions=positions * scaling,
             parameters=self.parameters,
             redshift_index=redshift_index,
+            redshift=float(redshift),
         )
 
     def load_density_field(self, redshift_index: int) -> np.ndarray:

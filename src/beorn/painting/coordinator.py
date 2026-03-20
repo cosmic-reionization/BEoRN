@@ -84,6 +84,7 @@ class PaintingCoordinator:
             TemporalCube: HDF5-backed collection of painted 3D snapshots.
         """
 
+        self.logger.info(self.parameters.summary_str())
         # if MPI is being used, use a central dispatcher to assign redshift indices to different processes
         if MPI_ENABLED:
             return self.paint_mpi(radiation_profiles)
@@ -241,13 +242,24 @@ class PaintingCoordinator:
         halo_catalog = self.loader.load_halo_catalog(z_index)
         delta_b = self.loader.load_density_field(z_index)
 
-        # find matching redshift between solver output and simulation snapshot.
+        # Find the profile index whose redshift is nearest to this snapshot's redshift.
+        # When solver.redshifts and simulation.snapshot_redshifts are the same grid this is a
+        # direct lookup; when snapshot_redshifts is a coarser subset the nearest
+        # profile step is used.
+        snap_z = self.loader.redshifts[z_index]
+        profile_z_index = int(np.argmin(np.abs(profiles.z_history - snap_z)))
+        if abs(profiles.z_history[profile_z_index] - snap_z) > 0.5:
+            self.logger.warning(
+                f"Snapshot z={snap_z:.3f} is more than Δz=0.5 away from the nearest "
+                f"profile redshift z={profiles.z_history[profile_z_index]:.3f}. "
+                "Consider adding more steps to solver.redshifts."
+            )
 
-        zgrid = profiles.z_history[z_index]
-        mass_range = profiles.halo_mass_bins[..., z_index]
+        zgrid = profiles.z_history[profile_z_index]
+        mass_range = profiles.halo_mass_bins[..., profile_z_index]
 
         # log some information about the current "paintable range"
-        alphas = self.parameters.simulation.halo_mass_accretion_alpha
+        alphas = self.parameters.solver.halo_mass_accretion_alpha
         self.logger.debug(
             f"Got {mass_range.shape[0]}x{mass_range.shape[1]} profiles. Range: "
             f"alpha={alphas[0]:.2f} [{mass_range[...,0].min():.2e} - {mass_range[..., 0].max():.2e} Msun] and "
@@ -307,8 +319,8 @@ class PaintingCoordinator:
             ## iterate over the range of mass and alpha bins that the profiles are available for
             # the alpha bins are constant so we can use the ones from the parameters
             # the mass bins are more tricky - they follow the mass accretion history i.e. they shift with each redshift step
-            alpha_indices = range(len(self.parameters.simulation.halo_mass_accretion_alpha) - 1)
-            mass_indices = range(len(self.parameters.simulation.halo_mass_bins) - 1)
+            alpha_indices = range(len(self.parameters.solver.halo_mass_accretion_alpha) - 1)
+            mass_indices = range(len(self.parameters.solver.halo_mass_bins) - 1)
 
             # now each profile was computed for a precise mass/alpha value that we set to be the center points of the bins
             # => in the actual profile the shape is (l-1)x(m-1)x(n-1) where l,m,n are the number of bins in mass, alpha and redshift
@@ -321,8 +333,8 @@ class PaintingCoordinator:
             for alpha_index in alpha_indices:
                 # the alpha range is simply defined by the parameters
                 loop_alpha_range = [
-                    self.parameters.simulation.halo_mass_accretion_alpha[alpha_index],
-                    self.parameters.simulation.halo_mass_accretion_alpha[alpha_index + 1]
+                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index],
+                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index + 1]
                 ]
                 for mass_index in mass_indices:
 
@@ -338,7 +350,7 @@ class PaintingCoordinator:
                     total_halos += halo_indices.size
 
                     # since the profiles are large and copied in the multiprocessing approach, we only pass the relevant slice
-                    profiles_of_bin = profiles.profiles_of_halo_bin(z_index, alpha_index, mass_index)
+                    profiles_of_bin = profiles.profiles_of_halo_bin(profile_z_index, alpha_index, mass_index)
                     assert not np.any(np.isnan(profiles_of_bin[0])), "R_bubble at the current range seem to be malformed (got nan values)"
                     assert not np.any(np.isnan(profiles_of_bin[1])), "rho_alpha at the current range seem to be malformed (got nan values)"
                     assert not np.any(np.isnan(profiles_of_bin[2])), "rho_heat at the current range seem to be malformed (got nan values)"

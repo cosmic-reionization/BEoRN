@@ -30,15 +30,15 @@ def plot_halo_mass_evolution(
         mass_bin = profiles.halo_mass_bins.size // 2
 
 
-    m0_string = fr"$M_0 = {profiles.parameters.simulation.halo_mass_bin_centers[mass_bin]:.2g} M_{{\odot}}$"
+    m0_string = fr"$M_0 = {profiles.parameters.solver.halo_mass_bin_centers[mass_bin]:.2g} M_{{\odot}}$"
 
     masses, mass_derivatives = mass_accretion(
         profiles.parameters,
         profiles.z_history,
-        profiles.parameters.simulation.halo_mass_bin_centers,
-        profiles.parameters.simulation.halo_mass_accreation_alpha_bin_centers
+        profiles.parameters.solver.halo_mass_bin_centers,
+        profiles.parameters.solver.halo_mass_accretion_alpha_bin_centers
     )
-    alphas = profiles.parameters.simulation.halo_mass_accretion_alpha
+    alphas = profiles.parameters.solver.halo_mass_accretion_alpha
 
     plt.figure()
     plt.xscale('log')

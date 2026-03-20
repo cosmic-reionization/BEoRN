@@ -3,6 +3,7 @@
 FUNCTIONS RELATED TO COSMOLOGY
 """
 import os.path
+from pathlib import Path
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
 
@@ -54,20 +55,20 @@ def T_smooth_radio(z,parameters):
     return Tcmb0*(1+z)*(Ar*(nu/78)**Beta_Rad)
 
 
-def read_powerspectrum(parameters: Parameters):
+def read_powerspectrum(ps_path: Path):
     """
     Linear power spectrum from file
     """
     names='k, P'
-    PS = np.genfromtxt(parameters.cosmology.ps,usecols=(0,1),comments='#',dtype=None, names=names)
+    PS = np.genfromtxt(ps_path,usecols=(0,1),comments='#',dtype=None, names=names)
     return PS
 
 
 def T_adiab(z, parameters: Parameters):
     """
-    Temperature of the gas assuming it decoupled from CMB at z = parameters.cosmology.z_decoupl and then cooled adiabatically.
+    Temperature of the gas assuming it decoupled from CMB at z = parameters.solver.z_decoupling and then cooled adiabatically.
     """
-    return Tcmb0 * (1 + z) ** 2 / (1 + parameters.cosmology.z_decoupling)
+    return Tcmb0 * (1 + z) ** 2 / (1 + parameters.solver.z_decoupling)
 
 def T_adiab_fluctu(z, parameters: Parameters, delta_b):
     """

@@ -15,7 +15,7 @@ class PKDGravLoader(BaseLoader):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.file_root = self.parameters.simulation.file_root
+        self.file_root = self.parameters.cosmo_sim.file_root
 
 
         logs = np.loadtxt(self.file_root / "CDM_200Mpc_2048.log")
@@ -103,6 +103,8 @@ class PKDGravLoader(BaseLoader):
             # shift to center the box
             positions = catalog_array[:, 1:] + self.parameters.simulation.Lbox / 2,
             parameters = self.parameters,
+            redshift_index = redshift_index,
+            redshift = float(self.redshifts[redshift_index]),
         )
 
 
