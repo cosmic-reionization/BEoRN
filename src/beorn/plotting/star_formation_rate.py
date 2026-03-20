@@ -25,7 +25,7 @@ def draw_star_formation_rate(ax: plt.Axes, parameters: Parameters, label=None, c
     mass_range = [parameters.source.halo_mass_min, parameters.source.halo_mass_max]
 
     # restrict the simulated mass range
-    bins = parameters.simulation.halo_mass_bins
+    bins = parameters.solver.halo_mass_bins
 
     keep = (bins > mass_range[0]) & (bins <= mass_range[1])
     keep_bins = bins[keep]
@@ -56,7 +56,7 @@ def draw_f_esc(ax: plt.Axes, parameters: Parameters, label=None, color=None):
     mass_range = [parameters.source.halo_mass_min, parameters.source.halo_mass_max]
 
     # restrict the simulated mass range
-    bins = parameters.simulation.halo_mass_bins
+    bins = parameters.solver.halo_mass_bins
 
     keep = (bins >= mass_range[0]) & (bins <= mass_range[1])
     keep_bins = bins[keep]

@@ -101,7 +101,7 @@ def mean_gamma_ion_xray(parameters: Parameters, sfrd, zz):
     N_mu = NE
     nu = np.logspace(np.log(nu_min), np.log(nu_max), N_mu, base=np.e)
 
-    f_He_bynumb = 1 - parameters.cosmology.HI_frac
+    f_He_bynumb = 1 - parameters.solver.HI_frac
     # hydrogen
     nH0 = (1 - f_He_bynumb) * nb0
     # helium
@@ -178,7 +178,7 @@ def solve_xe(parameters: Parameters, mean_G_ion, mean_Gsec_ion, zz: np.ndarray):
     logger.info('Computing x_e(z) from the sfrd, including first and secondary ionisations....')
     h0 = parameters.cosmology.h
     Ob = parameters.cosmology.Ob
-    f_He_bynumb = 1 - parameters.cosmology.HI_frac
+    f_He_bynumb = 1 - parameters.solver.HI_frac
 
     xe0 = 2e-4
     aa = list((1 / (1 + zz)))
@@ -243,7 +243,7 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
     nu_n = nu_LL * (1 - 1 / rec['n'] ** 2)
     nu_n[nu_n == 0] = np.inf
 
-    rho_alpha = np.zeros((len(r_grid), parameters.simulation.halo_mass_bin_n - 1, len(parameters.simulation.halo_mass_accretion_alpha) - 1, len(z_bins)))
+    rho_alpha = np.zeros((len(r_grid), parameters.solver.halo_mass_nbin - 1, len(parameters.solver.halo_mass_accretion_alpha) - 1, len(z_bins)))
 
     # eps_lyal is a pure power law: eps_lyal(nu) = eps_lyal_C * nu^(-alS_lyal).
     # Precompute the scalar prefactor and exponent once — avoids recomputing Anorm
@@ -278,7 +278,7 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
         # Compute rcom_prime for all k
         rcom_primes = [comoving_distance(z_prime, parameters) * h0 for z_prime in z_primes]
 
-        flux = np.zeros((len(r_grid), parameters.simulation.halo_mass_bin_n - 1, len(parameters.simulation.halo_mass_accretion_alpha) - 1))
+        flux = np.zeros((len(r_grid), parameters.solver.halo_mass_nbin - 1, len(parameters.solver.halo_mass_accretion_alpha) - 1))
         for k, (z_prime, rcom_prime) in enumerate(zip(z_primes, rcom_primes)):
             nu_prime = nu_n[k + 2] * (1 + z_prime) / (1 + z)
             eps_al = (eps_lyal_C * nu_prime ** (-alS_lyal))[None, None, :] * dMdt_star_int(z_prime)
@@ -327,7 +327,7 @@ def cum_optical_depth(zz, E, parameters: Parameters):
 
     nb0 = rhoc0*Ob/(m_p_in_Msun*h0)                    # [h/Mpc]^3
 
-    f_He_bynumb = 1 - parameters.cosmology.HI_frac
+    f_He_bynumb = 1 - parameters.solver.HI_frac
 
     #H and He abundances
     nHI = (1-f_He_bynumb)*nb0 *(1+zz)**3       # [h/Mpc]^3

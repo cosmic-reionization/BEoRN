@@ -47,7 +47,12 @@ def plot_halo_mass_function(
         return
 
     cosmo = halo_catalog.parameters.cosmology
-    z = halo_catalog.parameters.solver.redshifts[halo_catalog.redshift_index]
+    z = halo_catalog.redshift
+    if z is None:
+        raise ValueError(
+            "HaloCatalog.redshift is not set — cannot compute the analytical HMF. "
+            "Pass analytical=False or use a loader that sets HaloCatalog.redshift."
+        )
     mf = hmf_pkg.MassFunction(
         z = z,
         Mmin = np.log10(bin_edges[0]),

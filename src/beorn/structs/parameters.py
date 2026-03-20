@@ -105,21 +105,15 @@ class SolverParameters:
     """
     Solver parameters for the simulation.
     """
-    # TODO - rename to the redshift range
     redshifts: np.ndarray = field(default_factory=lambda: np.arange(25, 6, -0.5))
-    """Array of redshifts for the simulation. This should exactly match the redshifts of the halo catalogs. This should also be monotonically decreasing."""
+    """High-resolution redshift grid used by the 1D RT profile solver.
+    Should span the full redshift range of interest at fine enough resolution for accurate profile integration.
+    Stored inside the RadiationProfiles cache — does not need to be written to igm_data/igm_params.yaml."""
 
     fXh: Literal['constant', 'variable'] = 'constant'
     """if fXh is constant here, it will take the value 0.11. Otherwise, we will compute the free e- fraction in neutral medium and take the fit fXh = xe**0.225"""
 
-
-
-@dataclass(slots = True)
-class SimulationParameters:
-    """
-    Parameters that are used to run the simulation. These are used in the generation of the halo profiles and when converting the halo profiles to a grid.
-    """
-    halo_mass_accretion_alpha: np.ndarray = field(default_factory = lambda: np.linspace(0.1, 0.9, 10))
+    halo_mass_accretion_alpha: np.ndarray = field(default_factory=lambda: np.linspace(0.1, 0.9, 10))
     """Coefficient for exponential mass accretion. Since beorn distinguishes between accretion rates a range should be specified"""
 
     halo_mass_bin_min: float = 1e5
@@ -128,16 +122,47 @@ class SimulationParameters:
     halo_mass_bin_max: float = 1e14
     """Maximum halo mass bin in solar masses."""
 
-    halo_mass_bin_n: int = 100
+    halo_mass_nbin: int = 100
     """Number of mass bins."""
+
+    HI_frac: float = 1 - 0.08
+    """HI number fraction. Only used when running H_He_Final."""
+
+    clumping: int = 1
+    """Rescale the background density. Set to 1 to get the normal 2h profile term."""
+
+    z_decoupling: int = 135
+    """Redshift at which the gas decouples from CMB and starts cooling adiabatically."""
+
+    # derived properties that are directly related to the parameters
+    @property
+    def halo_mass_bins(self) -> np.ndarray:
+        return np.logspace(np.log10(self.halo_mass_bin_min), np.log10(self.halo_mass_bin_max), self.halo_mass_nbin, base=10)
+
+    @property
+    def halo_mass_bin_centers(self) -> np.ndarray:
+        return bin_centers(self.halo_mass_bins)
+
+    @property
+    def halo_mass_accretion_alpha_bin_centers(self) -> np.ndarray:
+        return bin_centers(self.halo_mass_accretion_alpha)
+
+    def __post_init__(self):
+        if isinstance(self.redshifts, list):
+            self.redshifts = np.array(self.redshifts)
+        if isinstance(self.halo_mass_accretion_alpha, list):
+            self.halo_mass_accretion_alpha = np.array(self.halo_mass_accretion_alpha)
+
+
+
+@dataclass(slots = True)
+class SimulationParameters:
+    """
+    Parameters that are used to run the simulation. These are used in the generation of the halo profiles and when converting the halo profiles to a grid.
+    """
 
     Ncell: int = 128
     """Number of pixels of the final grid. This is the number of pixels in each dimension. The total number of pixels will be Ncell^3."""
-
-    py21cmfast_high_res_factor: int = 3
-    """Resolution enhancement factor for py21cmfast internal grid (DIM = Ncell * py21cmfast_high_res_factor).
-    A larger factor resolves lower halo masses at the cost of more memory and compute time.
-    The minimum resolvable halo mass scales roughly as (Lbox / DIM)^3."""
 
     Lbox: float = 100
     """Box length, in [Mpc/h]. This is the length of the box in each dimension. The total volume will be Lbox^3."""
@@ -163,27 +188,11 @@ class SimulationParameters:
     minimum_grid_size_lyal: int = 16
     """Minimum grid size used when computing the lyal kernel from its associated profile."""
 
-    random_seed: int = 12345
-    """Random seed for the random number generator. This is used to generate the random numbers for the halo catalogs and the density fields when using 21cmfast."""
-
     compute_s_alpha_fluctuations: bool = True
     """Whether or not to include the fluctuations in the suppression factor S_alpha when computing the x_al fraction."""
 
     compute_x_coll_fluctuations: bool = True
     """Whether or not to include the fluctuations in the collisional coupling coefficient x_coll when computing the x_tot fraction."""
-
-    # derived properties that are directly related to the parameters
-    @property
-    def halo_mass_bins(self) -> np.ndarray:
-        return np.logspace(np.log10(self.halo_mass_bin_min), np.log10(self.halo_mass_bin_max), self.halo_mass_bin_n, base=10)
-
-    @property
-    def halo_mass_bin_centers(self) -> np.ndarray:
-        return bin_centers(self.halo_mass_bins)
-
-    @property
-    def halo_mass_accreation_alpha_bin_centers(self) -> np.ndarray:
-        return bin_centers(self.halo_mass_accretion_alpha)
 
     @property
     def kbins(self) -> np.ndarray:
@@ -198,23 +207,7 @@ class SimulationParameters:
 
         return np.logspace(np.log10(k_min), np.log10(k_max), bin_count, base=10)
 
-
-    # halo_catalogs_thesan_tree: Path = None
-    # halo_catalogs_thesan_offsets: Path = None
-    # TODO rename since this is actually the mass assignment used for the background density field. For assigning the halos to the grid we always use NGP
-    halo_catalogs_thesan_mass_assignment: Literal['NGP', 'CIC'] = 'CIC'
-    """Method used to assign the halo mass to the grid. Can be either NGP (Nearest Grid Point) or CIC (Cloud In Cell)."""
-
-    file_root: Path = None
-
     def __post_init__(self):
-        # ensure the the np.ndarray fields are numpy arrays
-        if isinstance(self.halo_mass_accretion_alpha, list):
-            self.halo_mass_accretion_alpha = np.array(self.halo_mass_accretion_alpha)
-
-        if isinstance(self.file_root, str):
-            self.file_root = Path(self.file_root)
-
         # ensure the items of the store_grids are strings. When loading from hdf5 they might be bytes
         self.store_grids = [s.decode() if isinstance(s, bytes) else s for s in self.store_grids]
 
@@ -233,11 +226,6 @@ class CosmologyParameters:
         h: Dimensionless Hubble parameter.
         sigma_8: Amplitude of the matter power spectrum on 8 Mpc/h scales.
         ns: Scalar spectral index.
-        ps: Path to the input Linear Power Spectrum.
-        correlation_function: Path where the corresponding correlation function will be stored.
-        HI_frac: HI number fraction. Only used when running H_He_Final.
-        clumping: Rescale the background density. Set to 1 to get the normal 2h profile term.
-        z_decoupling: Redshift at which the gas decouples from CMB and starts cooling adiabatically.
     """
 
     # TODO - remove and set an astropy cosmology object instead of individual parameters
@@ -248,13 +236,36 @@ class CosmologyParameters:
     h: float = 0.68
     sigma_8: float = 0.83
     ns: float = 0.96
-    ps: Path = Path(importlib.util.find_spec('beorn').origin).parent / 'files' / 'PCDM_Planck.dat'
-    correlation_function: Path = Path(importlib.util.find_spec('beorn').origin).parent / 'files' / 'corr_fct.dat'
-    HI_frac: float = 1 - 0.08
-    clumping: int = 1
-    z_decoupling: int = 135
 
 
+@dataclass(slots = True)
+class CosmoSimParameters:
+    """Parameters specific to N-body/cosmo-sim inputs (py21cmfast, Thesan, PKDGrav, etc.)."""
+
+    py21cmfast_high_res_factor: int = 3
+    """Resolution enhancement factor for py21cmfast internal grid (DIM = Ncell * py21cmfast_high_res_factor).
+    A larger factor resolves lower halo masses at the cost of more memory and compute time.
+    The minimum resolvable halo mass scales roughly as (Lbox / DIM)^3."""
+
+    random_seed: int = 12345
+    """Random seed for the random number generator. This is used to generate the random numbers for the halo catalogs and the density fields when using 21cmfast."""
+
+    halo_catalogs_thesan_mass_assignment: Literal['NGP', 'CIC'] = 'CIC'
+    """Method used to assign the halo mass to the grid. Can be either NGP (Nearest Grid Point) or CIC (Cloud In Cell)."""
+
+    snapshot_redshifts: np.ndarray = None
+    """Redshifts of the cosmo-sim snapshots that will be painted (e.g. py21cmfast outputs).
+    Can be a coarse subset of ``solver.redshifts`` — even 1–2 values.
+    If ``None``, the full ``solver.redshifts`` profile grid is used for painting too (backward-compatible default).
+    Inferred from filenames on disk; not written to igm_data/igm_params.yaml."""
+
+    file_root: Path = None
+
+    def __post_init__(self):
+        if isinstance(self.snapshot_redshifts, list):
+            self.snapshot_redshifts = np.array(self.snapshot_redshifts)
+        if isinstance(self.file_root, str):
+            self.file_root = Path(self.file_root)
 
 
 @dataclass(slots = True)
@@ -270,6 +281,8 @@ class Parameters:
     """cosmological parameters"""
     simulation: SimulationParameters = field(default_factory = SimulationParameters)
     """simulation parameters"""
+    cosmo_sim: CosmoSimParameters = field(default_factory = CosmoSimParameters)
+    """cosmo-sim input parameters (py21cmfast, Thesan, PKDGrav, etc.)"""
 
 
     def unique_hash(self) -> str:
@@ -298,12 +311,73 @@ class Parameters:
             'cosmology': to_dict(self.cosmology),
             'redshifts': list(self.solver.redshifts),
             'fXh': self.solver.fXh,
-            'halo_mass_bin_min': self.simulation.halo_mass_bin_min,
-            'halo_mass_bin_max': self.simulation.halo_mass_bin_max,
-            'halo_mass_bin_n': self.simulation.halo_mass_bin_n,
-            'halo_mass_accretion_alpha': list(self.simulation.halo_mass_accretion_alpha),
+            'halo_mass_bin_min': self.solver.halo_mass_bin_min,
+            'halo_mass_bin_max': self.solver.halo_mass_bin_max,
+            'halo_mass_nbin': self.solver.halo_mass_nbin,
+            'halo_mass_accretion_alpha': list(self.solver.halo_mass_accretion_alpha),
+            'HI_frac': self.solver.HI_frac,
+            'clumping': self.solver.clumping,
+            'z_decoupling': self.solver.z_decoupling,
         }
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
+
+    def to_yaml(self, path: Path, exclude_keys: "set[str] | None" = None) -> None:
+        """Write parameters to a human-readable YAML file at *path*.
+
+        Args:
+            path: Destination file path.
+            exclude_keys: Optional set of ``"section.field"`` strings to omit,
+                e.g. ``{"solver.redshifts", "cosmo_sim.snapshot_redshifts"}``.
+        """
+        def _yaml_safe(obj):
+            if isinstance(obj, dict):
+                return {k: _yaml_safe(v) for k, v in obj.items()}
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, Path):
+                return obj.as_posix()
+            return obj
+
+        safe = _yaml_safe(to_dict(self))
+        if exclude_keys:
+            for dotted in exclude_keys:
+                section, _, key = dotted.partition('.')
+                if section in safe and key in safe[section]:
+                    del safe[section][key]
+        with Path(path).open('w') as f:
+            yaml.dump(safe, f, default_flow_style=False, sort_keys=False)
+
+    def summary_str(self) -> str:
+        """Return a concise human-readable summary of the key model parameters."""
+        src = self.source
+        cos = self.cosmology
+        sim = self.simulation
+        slv = self.solver
+        cosmo_sim = self.cosmo_sim
+        z_min = slv.redshifts.min()
+        lines = [
+            "=" * 60,
+            "BEoRN model summary",
+            "=" * 60,
+            f"  Cosmology   : Om={cos.Om}, Ob={cos.Ob}, h={cos.h}, sigma_8={cos.sigma_8}",
+            f"  Grid        : Ncell={sim.Ncell}, Lbox={sim.Lbox} Mpc/h",
+            f"  Profile z   : z={slv.redshifts[0]:.1f} -> {slv.redshifts[-1]:.1f} ({slv.redshifts.size} steps)",
+            *(
+                [f"  Snapshot z  : z={cosmo_sim.snapshot_redshifts[0]:.1f} -> {cosmo_sim.snapshot_redshifts[-1]:.1f} ({cosmo_sim.snapshot_redshifts.size} snapshots)"]
+                if cosmo_sim.snapshot_redshifts is not None else []
+            ),
+            f"  1D RT bins  : {slv.halo_mass_bin_min:.1e} - {slv.halo_mass_bin_max:.1e} Msun at z={z_min:.1f} ({slv.halo_mass_nbin} bins, traced back via exp. accretion)",
+            f"  Source      : f_st={src.f_st}, Nion={src.Nion}, f0_esc={src.f0_esc}",
+            f"  X-ray       : norm={src.xray_normalisation:.2e}, E=[{src.energy_cutoff_min_xray}, {src.energy_cutoff_max_xray}] eV",
+            f"  Lyman-alpha : n_phot={src.n_lyman_alpha_photons}, star-forming above {src.halo_mass_min:.1e} Msun",
+            f"  Beorn hash  : {self.beorn_hash()}",
+            "=" * 60,
+        ]
+        return "\n".join(lines)
 
     def beorn_hash(self) -> str:
         """Short MD5 hash of BEoRN-specific parameters (source, solver, simulation).
@@ -312,6 +386,10 @@ class Parameters:
         input data directory name (e.g. the py21cmfast subdirectory).  This
         hash therefore differentiates astrophysical models applied to the
         same underlying density/halo data.
+
+        ``cosmo_sim`` is also excluded: it controls *which* input data is used
+        but does not affect the underlying physics model — it is already encoded
+        in the input_tag.
         """
         d = {
             'source': to_dict(self.source),
