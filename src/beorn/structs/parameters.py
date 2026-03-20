@@ -4,7 +4,6 @@ Slots are used to prevent the creation of new attributes. This is useful to avoi
 """
 
 from pathlib import Path
-import importlib.util
 import hashlib
 from dataclasses import dataclass, field, is_dataclass, fields
 from typing import Literal
