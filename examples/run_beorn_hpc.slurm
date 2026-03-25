@@ -4,8 +4,8 @@
 #SBATCH --error=/xdisk/timeifler/yhhuang/BEoRN-v2/log/full_run_%A.err
 #SBATCH --time=24:00:00
 #SBATCH --nodes=4
-#SBATCH --ntasks-per-node=2
-#SBATCH --cpus-per-task=4
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=6G
 #SBATCH --partition=standard
 #SBATCH --account=timeifler
@@ -68,7 +68,7 @@ esac
 #   - set simulation.cores=1 in the YAML when running under MPI (avoid MPI * multiprocessing)
 #   - consider reducing Ncell or store_grids in the YAML
 
-# Total number of MPI processes = nodes * ntasks-per-node = 4 * 2 = 8
+# Total number of MPI processes = nodes * ntasks-per-node = 4 * 1 = 4
 # The fallback keeps the command usable outside SLURM, but under SLURM
 # `SLURM_NTASKS` should already be set to the correct total rank count.
 mpirun -np ${SLURM_NTASKS:-32} python "$RUN_SCRIPT"
