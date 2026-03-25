@@ -4,9 +4,9 @@
 #SBATCH --error=/xdisk/timeifler/yhhuang/BEoRN-v2/log/full_run_%A.err
 #SBATCH --time=24:00:00
 #SBATCH --nodes=4
-#SBATCH --ntasks-per-node=4
-#SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=8G
+#SBATCH --ntasks-per-node=2
+#SBATCH --cpus-per-task=4
+#SBATCH --mem-per-cpu=6G
 #SBATCH --partition=standard
 #SBATCH --account=timeifler
 #SBATCH --mail-type=ALL
