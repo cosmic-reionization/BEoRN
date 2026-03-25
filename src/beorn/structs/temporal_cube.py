@@ -127,7 +127,7 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
             hdf5_file.attrs["snapshot_directory"] = str(snapshot_dir)
             hdf5_file.attrs["simulation_name"] = cls.simulation_name(parameters)
 
-        return cls.read(file_path=path, parameters=parameters)
+        return cls.read(file_path=path)
 
 
     def append(self, grid_snapshot: CoevalCube, index: int) -> None:
