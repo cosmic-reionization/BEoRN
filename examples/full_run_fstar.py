@@ -1,4 +1,5 @@
 from pathlib import Path
+import gc
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,17 +43,39 @@ output_handler.save_logs(parameters)
 ### In a first step, we compute the radiation profiles around sources at all redshifts of interest
 # Use the f_st-grid solver so profiles are precomputed on (mass, alpha, f_st, z)
 from beorn.precomputation.solver import RadiationProfileFstSolver
+from beorn.structs.radiation_profiles import RadiationProfilesFStarGrid
 solver = RadiationProfileFstSolver(parameters, loader.redshifts)
 # the computation does not depend on the spatial information, so the profiles are reusable
 # instead of recomputing them every time, we can reuse a cached version if available
+
+profile_cache_namespace = solver.profile_cache_namespace()
+profile_cache_dir = cache_handler.file_root / profile_cache_namespace
+expected_profiles_path = RadiationProfilesFStarGrid.get_file_path(
+    profile_cache_dir,
+    parameters,
+    cache_namespace=profile_cache_namespace,
+)
+
 if _rank == 0:
-    profiles_full = solver.get_or_compute_profiles(cache_handler)
-    profiles_path = str(profiles_full._file_path)
+    cache_exists = expected_profiles_path.exists()
+    logger.info("Profile cache path is %s", expected_profiles_path)
+    logger.info("Profile cache exists: %s", cache_exists)
 else:
-    profiles_path = None
+    cache_exists = None
 
 if _comm is not None:
-    profiles_path = _comm.bcast(profiles_path, root=0)
+    cache_exists = _comm.bcast(cache_exists, root=0)
+
+if cache_exists:
+    profiles_path = str(expected_profiles_path)
+    logger.info("Using cached f_st-grid radiation profiles from %s", profiles_path)
+else:
+    logger.info("Profile cache miss. Entering collective profile generation.")
+    profiles_full = solver.get_or_compute_profiles(cache_handler)
+    profiles_path = str(profiles_full._file_path)
+    del profiles_full
+    gc.collect()
+    logger.info("Profile generation finished. Using %s", profiles_path)
 
 # Pass only the file path into painting on all ranks to avoid OOM.
 profiles = SimpleNamespace(_file_path=Path(profiles_path))
