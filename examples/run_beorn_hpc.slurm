@@ -47,9 +47,11 @@ cd /home/u15/yhhuang/cosmology/BEoRN-v2/examples
 case "$RUN_MODE" in
   legacy)
     RUN_SCRIPT="full_run.py"
+    POSTPROCESS_SCRIPT=""
     ;;
   fstar)
     RUN_SCRIPT="full_run_fstar.py"
+    POSTPROCESS_SCRIPT="postprocess_dtb_fstar.py"
     ;;
   *)
     echo "ERROR: Unknown RUN_MODE='$RUN_MODE'. Use 'legacy' or 'fstar'." >&2
@@ -66,15 +68,33 @@ esac
 #   - set simulation.cores=1 in the YAML when running under MPI (avoid MPI * multiprocessing)
 #   - consider reducing Ncell or store_grids in the YAML
 
-# Total number of MPI processes = nodes * ntasks-per-node = 4 * 4 = 16 (default is 32 if SLURM_NTASKS unset)
+# Total number of MPI processes = nodes * ntasks-per-node = 4 * 2 = 8
+# The fallback keeps the command usable outside SLURM, but under SLURM
+# `SLURM_NTASKS` should already be set to the correct total rank count.
 mpirun -np ${SLURM_NTASKS:-32} python "$RUN_SCRIPT"
+MAIN_EXIT_CODE=$?
 
-# Capture exit status
-EXIT_CODE=$?
+POSTPROCESS_EXIT_CODE=0
+if [ $MAIN_EXIT_CODE -eq 0 ] && [ -n "$POSTPROCESS_SCRIPT" ]; then
+  echo "Main run completed successfully. Starting postprocessing with $POSTPROCESS_SCRIPT"
+  python "$POSTPROCESS_SCRIPT"
+  POSTPROCESS_EXIT_CODE=$?
+fi
+
+if [ $MAIN_EXIT_CODE -ne 0 ]; then
+  EXIT_CODE=$MAIN_EXIT_CODE
+else
+  EXIT_CODE=$POSTPROCESS_EXIT_CODE
+fi
 
 # Print summary
 echo "=================================================="
 echo "BEoRN Full Run Completed ($RUN_MODE -> $RUN_SCRIPT)"
+if [ -n "$POSTPROCESS_SCRIPT" ]; then
+  echo "Postprocess script: $POSTPROCESS_SCRIPT"
+  echo "Postprocess exit code: $POSTPROCESS_EXIT_CODE"
+fi
+echo "Main run exit code: $MAIN_EXIT_CODE"
 echo "Exit code: $EXIT_CODE"
 echo "Job ID: $SLURM_JOB_ID"
 echo "=================================================="
