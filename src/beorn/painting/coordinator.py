@@ -193,7 +193,17 @@ class PaintingCoordinator:
                     for future in as_completed(futures):
                         loop_index = futures[future]
                         grid_data = future.result()
+                        self.logger.info(
+                            "Received finished snapshot from worker for z_index=%d (z=%.2f). Appending to temporal output.",
+                            loop_index,
+                            float(grid_data.z),
+                        )
                         cube.append(grid_data, loop_index)
+                        self.logger.info(
+                            "Appended snapshot to temporal output for z_index=%d (z=%.2f).",
+                            loop_index,
+                            float(grid_data.z),
+                        )
 
                     self.logger.info(f"Painting of {self.snapshot_count} snapshots done.")
 
@@ -490,11 +500,21 @@ class PaintingCoordinator:
         )
 
         if self.cache_handler:
+            self.logger.info(
+                "Writing painted snapshot to cache for z_index=%d (z=%.2f).",
+                z_index,
+                float(zgrid),
+            )
             self.cache_handler.write_file(
                 self.parameters, 
                 grid_data, 
                 z_index=z_index,
                 cache_namespace=self._paint_cache_namespace(profiles)
+            )
+            self.logger.info(
+                "Finished writing painted snapshot to cache for z_index=%d (z=%.2f).",
+                z_index,
+                float(zgrid),
             )
         return grid_data
     
@@ -702,11 +722,21 @@ class PaintingCoordinator:
         )
 
         if self.cache_handler:
+            self.logger.info(
+                "Writing painted snapshot to cache for z_index=%d (z=%.2f).",
+                z_index,
+                float(zgrid),
+            )
             self.cache_handler.write_file(
                 self.parameters, 
                 grid_data, 
                 z_index=z_index,
                 cache_namespace=self._paint_cache_namespace(profiles)
+            )
+            self.logger.info(
+                "Finished writing painted snapshot to cache for z_index=%d (z=%.2f).",
+                z_index,
+                float(zgrid),
             )
 
         return grid_data
