@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
 from ..structs import RadiationProfiles, Parameters
 from ..cosmo import T_adiab
@@ -20,13 +21,15 @@ Mh_z_3 = np.array([172274291.4769941, 218063348.75063255, 368917395.4438236, 775
 
 
 
-def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_index: int, redshifts: list, alphas: list, label: str = None) -> None:
+def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_index: int, redshifts: list, alphas: list, label: str = None, figsize: tuple = (14, 9), fontsize: int = None, labelsize: int = None, **gridspec_kw) -> None:
     """Plot 1D radiation profiles for selected masses, redshifts and alphas.
 
-    The function draws Lyman-alpha, temperature and ionization profiles
-    for the requested mass index across a list of redshifts and alpha
-    values. Different redshifts use color hues and different alphas use
-    line styles.
+    The figure has two rows:
+    - Top row: halo mass accretion history (left) and legend (right).
+    - Bottom row: Lyman-alpha flux, kinetic temperature, and ionisation fraction profiles.
+
+    Different redshifts are shown in different colours (blue → red); different
+    alpha values vary in opacity.
 
     Args:
         parameters (Parameters): Simulation parameters used for axis labels and lookups.
@@ -35,9 +38,25 @@ def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_i
         redshifts (list): Sequence of redshifts to plot (closest match is used).
         alphas (list): Sequence of alpha values to plot (closest match is used).
         label (str, optional): Optional suptitle for the figure.
+        figsize (tuple, optional): Figure size as (width, height) in inches. Default is (14, 9).
+        fontsize (int, optional): Font size for axis labels and legends.
+            When ``None`` (default) the current ``rcParams`` values are used.
+        labelsize (int, optional): Font size for tick labels.
+            When ``None`` (default) the current ``rcParams`` values are used.
+        **gridspec_kw: Extra keyword arguments forwarded to :class:`matplotlib.gridspec.GridSpec`
+            (e.g. ``hspace=0.4``, ``wspace=0.3``).  When ``hspace`` or ``wspace`` is supplied,
+            ``constrained_layout`` is automatically disabled so the manual spacing takes effect.
     """
-    fig, axs = plt.subplots(1, 4, figsize=(17, 5))
+    use_constrained_layout = 'hspace' not in gridspec_kw and 'wspace' not in gridspec_kw
+    fig = plt.figure(figsize=figsize, constrained_layout=use_constrained_layout)
     fig.suptitle(label)
+
+    gs = gridspec.GridSpec(2, 3, figure=fig, **gridspec_kw)
+    ax_mar    = fig.add_subplot(gs[0, 0])
+    ax_legend = fig.add_subplot(gs[0, 1:])
+    ax_lyal   = fig.add_subplot(gs[1, 0])
+    ax_temp   = fig.add_subplot(gs[1, 1])
+    ax_xhii   = fig.add_subplot(gs[1, 2])
 
     # since these are hdf5 datasets, we need to copy it to a numpy array first
     co_radial_grid = profiles.r_grid_cell[:]
@@ -77,73 +96,67 @@ def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_i
             # for increasing alpha values the opacity is changing from faint to strong
             color = plt.cm.coolwarm((len(redshifts) - i) / len(redshifts))
             # TODO - this does not yet look good
-            alpha = 1 - 0.5 * j / len(alphas)
+            opacity = 1 - 0.5 * j / len(alphas)
 
             # the label is the same for all profiles
-            label = f"$z \\sim$ {z_val:.1f}\n$M_{{h}}= {Mh_list[i]:.2e}$\n$\\alpha = {alpha_val:.2}$"
+            entry_label = f"$z \\sim$ {z_val:.1f},  $M_{{h}}= {Mh_list[i]:.2e}\\,M_\\odot$,  $\\alpha = {alpha_val:.3f}$"
 
-
-            ax = axs[0]
-            ax.scatter(z_val, Mh_i / 0.68, s=150, marker='*', color=color, alpha=alpha)
-
-            ax = axs[1]
-            ax.loglog(r_lyal_phys * (1 + z_val) / 0.68, lyal_profile, lw=1.7, color=color, alpha=alpha, label=label)
-
-            ax = axs[2]
-            ax.loglog(co_radial_grid / 0.68, Temp_profile, lw=1.7, color=color, alpha=alpha)
-
-            ax = axs[3]
-            ax.semilogx(co_radial_grid / 0.68, x_HII_profile, lw=1.7, color=color, alpha=alpha)
-
+            ax_mar.scatter(z_val, Mh_i / 0.68, s=150, marker='*', color=color, alpha=opacity)
+            ax_lyal.loglog(r_lyal_phys * (1 + z_val) / 0.68, lyal_profile, lw=1.7, color=color, alpha=opacity, label=entry_label)
+            ax_temp.loglog(co_radial_grid / 0.68, Temp_profile, lw=1.7, color=color, alpha=opacity)
+            ax_xhii.semilogx(co_radial_grid / 0.68, x_HII_profile, lw=1.7, color=color, alpha=opacity)
 
     # plot the simulation data (and add one legend)
-    ax = axs[0]
-    ax.semilogy(z_array_1, Mh_z_1 / 0.68, color='gold', ls='--', lw=3, alpha=0.8)
-    ax.semilogy(z_array_2, Mh_z_2 / 0.68, color='gold', ls='--', lw=3, alpha=0.8)
-    ax.semilogy(z_array_3, Mh_z_3 / 0.68, color='gold', ls='--', lw=3, alpha=0.8, label='Simulation (Behroozi +20)')
+    ax_mar.semilogy(z_array_1, Mh_z_1 / 0.68, color='gold', ls='--', lw=3, alpha=0.8)
+    ax_mar.semilogy(z_array_2, Mh_z_2 / 0.68, color='gold', ls='--', lw=3, alpha=0.8)
+    ax_mar.semilogy(z_array_3, Mh_z_3 / 0.68, color='gold', ls='--', lw=3, alpha=0.8, label='Simulation (Behroozi +20)')
 
     # plot our analytical data (and add one legend)
-    ax.semilogy(zz, profiles.halo_mass_bins[mass_index, ind_alpha, :] / 0.68, color='gray', alpha=1, lw=2, label=f'analytical MAR\n$M_0 = {Mh_list[0]:.2e}$, $\\alpha = {actual_alpha_list[0]:.2}$')
+    ax_mar.semilogy(zz, profiles.halo_mass_bins[mass_index, ind_alpha, :] / 0.68, color='gray', alpha=1, lw=2, label=f'Analytical MAR\n$M_0 = {Mh_list[0]:.2e}\\,M_\\odot$,  $\\alpha = {actual_alpha_list[0]:.3f}$')
 
-    # style the plot
-    ax.set_xlim(15, 5)
-    ax.set_ylim(1.5e8, 8e12)
-    ax.set_xlabel('z')
-    ax.set_ylabel(r'$M_h$ [$M_{\odot}$]')
-    ax.tick_params(axis="both")
-    # ax.legend(loc='upper left')
+    # Build kwargs dicts: only pass values when explicitly set, otherwise let rcParams govern.
+    label_kw  = {'fontsize': fontsize} if fontsize is not None else {}
+    tick_kw   = {'labelsize': labelsize} if labelsize is not None else {}
+    legend_kw = {'fontsize': fontsize} if fontsize is not None else {}
 
-    # style the other subplots and distribute the legend across all subplots by plotting an empty line
-    ax = axs[1]
-    ax.set_xlim(2e-1, 1e3)
-    ax.set_ylim(2e-17, 1e-5)
-    # ax.loglog([], [], color='C0', label=fr'$z \sim$ {z_liste[0]}, $M_{{h}}= {Mh_list[0]:.2e}$')
-    ax.set_xlabel('r [cMpc]')
-    ax.tick_params(axis="both")
-    ax.set_ylabel(r'$\rho_{\alpha}$ [$\mathrm{pcm}^{-2}\, \mathrm{s}^{-1} \, \mathrm{Hz}^{-1}$]')
-    # ax.legend()
+    # style the MAR panel (no legend inside — everything goes to ax_legend)
+    ax_mar.set_xlim(15, 5)
+    ax_mar.set_ylim(1.5e8, 8e12)
+    ax_mar.set_xlabel('z', **label_kw)
+    ax_mar.set_ylabel(r'$M_h$ [$M_{\odot}$]', **label_kw)
+    ax_mar.tick_params(axis='both', **tick_kw)
 
-    ax = axs[2]
-    ax.set_xlim(2e-2, 1e2)
-    ax.set_ylim(0.8, 5e6)
-    # ax.loglog([], [], color='C1', label=fr'$z \sim$ {z_liste[1]}, $M_{{h}} = {Mh_list[1]:.2e}$')
-    ax.set_xlabel('r [cMpc]')
-    ax.set_ylabel(r'$\rho_{h}$ [K]')
-    ax.tick_params(axis="both")
-    # ax.legend()
+    # legend panel: two stacked legends — MAR model on top, redshift snapshots below
+    ax_legend.axis('off')
 
-    ax = axs[3]
-    ax.set_xlim(2e-2, 1e2)
-    ax.set_ylim(0, 1.2)
-    # ax.semilogx([], [], color='C2', label=fr'$z \sim$ {z_liste[2]}, $M_{{h}} = {Mh_list[2]:.2e}$')
-    ax.set_xlabel('r [cMpc]')
-    ax.tick_params(axis="both")
-    ax.set_ylabel(r'$x_{\mathrm{HII}}$')
-    # ax.legend()
+    mar_handles, mar_labels = ax_mar.get_legend_handles_labels()
+    leg_mar = ax_legend.legend(mar_handles, mar_labels, loc='upper center',
+                               frameon=True, title='Halo accretion model', **legend_kw)
+    ax_legend.add_artist(leg_mar)  # pin it so the second legend doesn't replace it
 
-    fig.legend(loc=7)
-    fig.tight_layout()
-    fig.subplots_adjust(right=0.8)
+    snap_handles, snap_labels = ax_lyal.get_legend_handles_labels()
+    ax_legend.legend(snap_handles, snap_labels, loc='lower center',
+                     frameon=True, title='Redshift snapshots', **legend_kw)
+
+    # style the profile panels
+    ax_lyal.set_xlim(2e-1, 1e3)
+    ax_lyal.set_ylim(2e-17, 1e-5)
+    ax_lyal.set_xlabel('r [cMpc]', **label_kw)
+    ax_lyal.set_ylabel(r'$\rho_{\alpha}$ [$\mathrm{pcm}^{-2}\, \mathrm{s}^{-1} \, \mathrm{Hz}^{-1}$]', **label_kw)
+    ax_lyal.tick_params(axis='both', **tick_kw)
+
+    ax_temp.set_xlim(2e-2, 1e2)
+    ax_temp.set_ylim(0.8, 5e6)
+    ax_temp.set_xlabel('r [cMpc]', **label_kw)
+    ax_temp.set_ylabel(r'$T_k$ [K]', **label_kw)
+    ax_temp.tick_params(axis='both', **tick_kw)
+
+    ax_xhii.set_xlim(2e-2, 1e2)
+    ax_xhii.set_ylim(0, 1.2)
+    ax_xhii.set_xlabel('r [cMpc]', **label_kw)
+    ax_xhii.set_ylabel(r'$x_{\mathrm{HII}}$', **label_kw)
+    ax_xhii.tick_params(axis='both', **tick_kw)
+
     fig.show()
 
 
