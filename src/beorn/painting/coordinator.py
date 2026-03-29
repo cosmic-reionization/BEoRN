@@ -72,34 +72,79 @@ class PaintingCoordinator:
         self.force_repaint = force_repaint
 
 
-    def paint_full(self, radiation_profiles: RadiationProfiles) -> TemporalCube:
-        """Paint all redshift snapshots and return a :class:`TemporalCube`.
+    def paint_full(
+        self,
+        radiation_profiles: RadiationProfiles,
+        redshift_subset: "list[float] | None" = None,
+    ) -> TemporalCube:
+        """Paint redshift snapshots and return a :class:`TemporalCube`.
 
-        The method chooses an MPI-enabled execution path when MPI is available; otherwise it runs a local loop.
+        By default all snapshots known to the loader are painted.  Pass
+        ``redshift_subset`` to paint only the snapshots nearest to the
+        requested redshifts — useful when data is sparse or you want a
+        quick run at a few selected epochs.
+
+        The method chooses an MPI-enabled execution path when MPI is available;
+        otherwise it runs a local loop.
 
         Args:
             radiation_profiles (RadiationProfiles): Precomputed 1D profiles.
+            redshift_subset (list[float] | None): If given, only the loader
+                snapshots whose redshift is closest to each value in this list
+                are painted.  A warning is emitted if the nearest snapshot is
+                more than Δz=0.5 away.  ``None`` (default) paints all snapshots.
 
         Returns:
             TemporalCube: HDF5-backed collection of painted 3D snapshots.
         """
-
+        active_indices = self._resolve_painting_indices(redshift_subset)
         self.logger.info(self.parameters.summary_str())
-        # if MPI is being used, use a central dispatcher to assign redshift indices to different processes
-        if MPI_ENABLED:
-            return self.paint_mpi(radiation_profiles)
-        # no mpi - simply run each iteration consecutively in a single loop
+        # Use MPI only when there are actually multiple ranks; a single-rank
+        # MPICommExecutor runs futures in the main process, which causes HDF5
+        # file-handle conflicts with the already-open TemporalCube file.
+        if MPI_ENABLED and MPI.COMM_WORLD.Get_size() > 1:
+            return self.paint_mpi(radiation_profiles, active_indices)
         else:
-            return self.paint_simple_loop(radiation_profiles)
+            return self.paint_simple_loop(radiation_profiles, active_indices)
+
+    def _resolve_painting_indices(
+        self, redshift_subset: "list[float] | None"
+    ) -> list:
+        """Return the loader snapshot indices to paint.
+
+        If ``redshift_subset`` is ``None`` every snapshot is included.
+        Otherwise, for each requested redshift the nearest loader snapshot is
+        selected; duplicates are removed and the result is sorted.
+        """
+        if redshift_subset is None:
+            return list(range(self.snapshot_count))
+        all_z = self.loader.redshifts
+        indices = []
+        for z_target in redshift_subset:
+            i = int(np.argmin(np.abs(all_z - z_target)))
+            if abs(all_z[i] - z_target) > 0.5:
+                self.logger.warning(
+                    f"Requested z={z_target:.3f} has no snapshot within Δz=0.5 "
+                    f"(nearest is z={all_z[i]:.3f}) — skipping."
+                )
+            elif i not in indices:
+                indices.append(i)
+        indices = sorted(indices)
+        self.logger.info(
+            f"redshift_subset: painting {len(indices)} of {self.snapshot_count} "
+            f"available snapshot(s)."
+        )
+        return indices
 
 
-    def paint_mpi(self, radiation_profiles: RadiationProfiles) -> TemporalCube|None:
+    def paint_mpi(self, radiation_profiles: RadiationProfiles, active_indices: list) -> TemporalCube|None:
         """MPI-enabled painting: distribute redshift snapshots across ranks.
 
         Only the master rank writes and returns the final HDF5 dataset; worker ranks perform painting and send partial results to be appended by the master. This function assumes an MPI communicator is available.
 
         Args:
             radiation_profiles (RadiationProfiles): Precomputed profiles.
+            active_indices (list): Snapshot indices to paint (subset of range(snapshot_count)).
 
         Returns:
             TemporalCube: The assembled temporal cube (returned only on master).
@@ -120,22 +165,22 @@ class PaintingCoordinator:
                 **self.output_handler.write_kwargs
             )
             if self.force_repaint:
-                missing_indices = list(range(self.snapshot_count))
+                missing_indices = list(active_indices)
                 n_cached = sum(
-                    1 for i in range(self.snapshot_count)
+                    1 for i in active_indices
                     if cube.snapshot_path(self.loader.redshifts[i]).exists()
                 )
                 if n_cached:
                     self.logger.info(
                         f"force_repaint=True: repainting {n_cached} already-present snapshot(s) "
-                        f"plus {self.snapshot_count - n_cached} new snapshot(s)."
+                        f"plus {len(active_indices) - n_cached} new snapshot(s)."
                     )
             else:
                 missing_indices = [
-                    i for i in range(self.snapshot_count)
+                    i for i in active_indices
                     if not cube.snapshot_path(self.loader.redshifts[i]).exists()
                 ]
-                n_cached = self.snapshot_count - len(missing_indices)
+                n_cached = len(active_indices) - len(missing_indices)
                 if n_cached:
                     self.logger.info(
                         f"Found {n_cached} already-painted snapshot(s) — skipping "
@@ -172,7 +217,7 @@ class PaintingCoordinator:
         return None
 
 
-    def paint_simple_loop(self, radiation_profiles: RadiationProfiles) -> TemporalCube:
+    def paint_simple_loop(self, radiation_profiles: RadiationProfiles, active_indices: list) -> TemporalCube:
         """Paint snapshots in a single (possibly multi-process) loop.
 
         Creates the ``igm_data_*/`` output directory and iterates over
@@ -182,6 +227,7 @@ class PaintingCoordinator:
 
         Args:
             radiation_profiles (RadiationProfiles): Precomputed profiles.
+            active_indices (list): Snapshot indices to paint (subset of range(snapshot_count)).
 
         Returns:
             TemporalCube: The assembled temporal cube loaded from the output directory.
@@ -192,9 +238,13 @@ class PaintingCoordinator:
             **self.output_handler.write_kwargs
         )
 
-        self.logger.info(f"Painting profiles onto grid for {self.snapshot_count} redshift snapshots. Using {self.parameters.simulation.cores} processes on a single node.")
+        self.logger.info(
+            f"Painting profiles onto grid for {len(active_indices)} of "
+            f"{self.snapshot_count} redshift snapshots. "
+            f"Using {self.parameters.simulation.cores} processes on a single node."
+        )
 
-        with tqdm(range(self.snapshot_count), **TQDM_KWARGS) as pbar:
+        with tqdm(active_indices, **TQDM_KWARGS) as pbar:
             for loop_index in pbar:
                 z = self.loader.redshifts[loop_index]
                 pbar.set_postfix(z=f"{z:.3f}", refresh=False)
@@ -207,7 +257,7 @@ class PaintingCoordinator:
                 grid_data = self.paint_single(loop_index, radiation_profiles)
                 cube.append(grid_data, loop_index)
 
-        self.logger.info(f"Painting of {self.snapshot_count} snapshots done.")
+        self.logger.info(f"Painting of {len(active_indices)} snapshots done.")
         return TemporalCube.read(file_path=cube._file_path, parameters=self.parameters)
 
 
