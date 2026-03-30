@@ -22,7 +22,8 @@ FILE_ROOT = Path("/xdisk/timeifler/yhhuang/Thesan/")
 CACHE_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "cache"
 OUTPUT_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "output"
 
-PARAMETER_FILE = Path(".") / "parameters_fstar.yaml"
+# PARAMETER_FILE = Path(".") / "parameters_fstar.yaml"
+PARAMETER_FILE = Path(".") / "coarse_grid.yaml"  # for a quick test run with a coarse grid - this is not meant to produce accurate results, just to test the workflow and the f_st-grid solver.
 
 
 ### Parameter setup
