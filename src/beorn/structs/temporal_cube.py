@@ -183,7 +183,18 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
             # the CoevalCube_z*.h5 filenames on disk.
             parameters.to_yaml(
                 path / "igm_params.yaml",
-                exclude_keys={"solver.redshifts", "cosmo_sim.snapshot_redshifts"},
+                exclude_keys={
+                    # Redshifts are redundant: profile z lives in the RadiationProfiles
+                    # cache; snapshot z is inferrable from CoevalCube_z*.h5 filenames.
+                    "solver.redshifts",
+                    "cosmo_sim.snapshot_redshifts",
+                    # Simulator-specific fields that don't belong in a generic IGM output:
+                    # py21cmfast internals (seed and high-res factor are in the dir name)
+                    "cosmo_sim.py21cmfast_high_res_factor",
+                    "cosmo_sim.random_seed",
+                    # Thesan-specific mass-assignment method
+                    "cosmo_sim.halo_catalogs_thesan_mass_assignment",
+                },
             )
         ret = cls(z_snapshots=None, parameters=parameters, delta_b=None, Grid_Temp=None, Grid_xHII=None, Grid_xal=None)
         ret._file_path = path

@@ -325,8 +325,13 @@ class Parameters:
 
         Args:
             path: Destination file path.
-            exclude_keys: Optional set of ``"section.field"`` strings to omit,
-                e.g. ``{"solver.redshifts", "cosmo_sim.snapshot_redshifts"}``.
+            exclude_keys: Optional set of strings to omit.  Two forms are
+                supported:
+
+                - ``"section"`` — remove the entire top-level section,
+                  e.g. ``{"simulation", "cosmo_sim"}``.
+                - ``"section.field"`` — remove a single field within a
+                  section, e.g. ``{"solver.redshifts"}``.
         """
         def _yaml_safe(obj):
             if isinstance(obj, dict):
@@ -345,7 +350,9 @@ class Parameters:
         if exclude_keys:
             for dotted in exclude_keys:
                 section, _, key = dotted.partition('.')
-                if section in safe and key in safe[section]:
+                if not key:
+                    safe.pop(section, None)
+                elif section in safe and key in safe[section]:
                     del safe[section][key]
         with Path(path).open('w') as f:
             yaml.dump(safe, f, default_flow_style=False, sort_keys=False)
