@@ -242,13 +242,11 @@ class PKDGravLoader(NBodyLoader):
             numpy.ndarray: 3D baryonic overdensity field
             :math:`\\delta_b = \\rho / \\langle\\rho\\rangle - 1`.
         """
-        Ncell = self.parameters.simulation.Ncell
+        # Always reshape to the native file size — the base class applies
+        # degrade_resolution block-averaging afterwards if requested.
         density_array = np.fromfile(path, dtype=np.float32)
-        assert Ncell ** 3 == density_array.size, (
-            f"Density file size {density_array.size} does not match "
-            f"Ncell³ = {Ncell}³ = {Ncell**3}. Check simulation.Ncell."
-        )
-        density = density_array.reshape(Ncell, Ncell, Ncell).T
+        n = round(density_array.size ** (1 / 3))
+        density = density_array.reshape(n, n, n).T
         return density / np.mean(density, dtype=np.float64) - 1
 
     def load_rsd_fields(self, redshift_index: int):

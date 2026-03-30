@@ -51,7 +51,7 @@ class PaintingCoordinator:
             loader: type[BaseLoader],
             output_handler: Handler,
             cache_handler: Handler = None,
-            force_repaint: bool = False,
+            force_recompute: bool = False,
         ):
         """
         Initialize the Painter class with the given parameters.
@@ -61,7 +61,7 @@ class PaintingCoordinator:
             loader (BaseLoader): The loader class responsible for providing halo catalogs and density fields.
             output_handler (Handler): The handler for saving the painted output data.
             cache_handler (Handler, optional): The handler for loading and saving cache data that can be reused between runs.
-            force_repaint (bool): If True, repaint all snapshots even when output files already exist.
+            force_recompute (bool): If True, repaint all snapshots even when output files already exist.
                 Defaults to False (existing snapshots are reused).
         """
         self.parameters = parameters
@@ -69,7 +69,7 @@ class PaintingCoordinator:
         self.cache_handler = cache_handler
         self.loader = loader
         self.snapshot_count = self.loader.redshifts.size
-        self.force_repaint = force_repaint
+        self.force_recompute = force_recompute
 
 
     def paint_full(
@@ -89,10 +89,12 @@ class PaintingCoordinator:
 
         Args:
             radiation_profiles (RadiationProfiles): Precomputed 1D profiles.
-            redshift_subset (list[float] | None): If given, only the loader
-                snapshots whose redshift is closest to each value in this list
-                are painted.  A warning is emitted if the nearest snapshot is
-                more than Δz=0.5 away.  ``None`` (default) paints all snapshots.
+            redshift_subset (list[float] | None): If given, only the
+                **halo-bearing** snapshots nearest to each requested redshift
+                are painted.  Density-only snapshots are excluded from
+                matching.  A warning is emitted and the entry skipped when no
+                halo snapshot is within Δz=1.  ``None`` (default) paints all
+                snapshots.
 
         Returns:
             TemporalCube: HDF5-backed collection of painted 3D snapshots.
@@ -113,26 +115,42 @@ class PaintingCoordinator:
         """Return the loader snapshot indices to paint.
 
         If ``redshift_subset`` is ``None`` every snapshot is included.
-        Otherwise, for each requested redshift the nearest loader snapshot is
-        selected; duplicates are removed and the result is sorted.
+        Otherwise, for each requested redshift the nearest **halo-bearing**
+        snapshot is selected (density-only snapshots are excluded from
+        matching).  A warning is emitted and the entry is skipped when no
+        halo snapshot is within Δz=1.  Duplicates are removed and the result
+        is sorted.
         """
         if redshift_subset is None:
             return list(range(self.snapshot_count))
+
         all_z = self.loader.redshifts
+        # Indices that actually have a halo catalog attached.
+        halo_indices = [
+            i for i, cat in enumerate(self.loader.catalogs) if cat is not None
+        ]
+        if not halo_indices:
+            self.logger.warning(
+                "redshift_subset provided but the loader has no halo catalogs at any snapshot."
+            )
+            return []
+
+        halo_z = all_z[halo_indices]
         indices = []
         for z_target in redshift_subset:
-            i = int(np.argmin(np.abs(all_z - z_target)))
-            if abs(all_z[i] - z_target) > 0.5:
+            nearest_pos = int(np.argmin(np.abs(halo_z - z_target)))
+            i = halo_indices[nearest_pos]
+            if abs(halo_z[nearest_pos] - z_target) > 1.0:
                 self.logger.warning(
-                    f"Requested z={z_target:.3f} has no snapshot within Δz=0.5 "
-                    f"(nearest is z={all_z[i]:.3f}) — skipping."
+                    f"Requested z={z_target:.3f} has no halo snapshot within Δz=1.0 "
+                    f"(nearest halo snapshot is z={halo_z[nearest_pos]:.3f}) — skipping."
                 )
             elif i not in indices:
                 indices.append(i)
         indices = sorted(indices)
         self.logger.info(
             f"redshift_subset: painting {len(indices)} of {self.snapshot_count} "
-            f"available snapshot(s)."
+            f"available snapshot(s) ({len(halo_indices)} have halo catalogs)."
         )
         return indices
 
@@ -164,7 +182,7 @@ class PaintingCoordinator:
                 self.output_handler.file_root,
                 **self.output_handler.write_kwargs
             )
-            if self.force_repaint:
+            if self.force_recompute:
                 missing_indices = list(active_indices)
                 n_cached = sum(
                     1 for i in active_indices
@@ -172,7 +190,7 @@ class PaintingCoordinator:
                 )
                 if n_cached:
                     self.logger.info(
-                        f"force_repaint=True: repainting {n_cached} already-present snapshot(s) "
+                        f"force_recompute=True: repainting {n_cached} already-present snapshot(s) "
                         f"plus {len(active_indices) - n_cached} new snapshot(s)."
                     )
             else:
@@ -184,7 +202,7 @@ class PaintingCoordinator:
                 if n_cached:
                     self.logger.info(
                         f"Found {n_cached} already-painted snapshot(s) — skipping "
-                        f"(set force_repaint=True to repaint them)."
+                        f"(set force_recompute=True to repaint them)."
                     )
             self.logger.info(
                 f"Submitting {len(missing_indices)}/{self.snapshot_count} snapshot(s) to MPI workers."
@@ -222,7 +240,7 @@ class PaintingCoordinator:
 
         Creates the ``igm_data_*/`` output directory and iterates over
         redshift snapshots.  Snapshots whose ``CoevalCube_z{z:.3f}.h5`` file
-        already exists are skipped unless ``force_repaint=True`` was passed
+        already exists are skipped unless ``force_recompute=True`` was passed
         to the constructor, allowing interrupted runs to resume automatically.
 
         Args:
@@ -249,10 +267,10 @@ class PaintingCoordinator:
                 z = self.loader.redshifts[loop_index]
                 pbar.set_postfix(z=f"{z:.3f}", refresh=False)
                 if cube.snapshot_path(z).exists():
-                    if self.force_repaint:
-                        self.logger.info(f"Found painted output for z={z:.3f} — repainting (force_repaint=True).")
+                    if self.force_recompute:
+                        self.logger.info(f"Found painted output for z={z:.3f} — repainting (force_recompute=True).")
                     else:
-                        self.logger.info(f"Found painted output for z={z:.3f} — skipping (set force_repaint=True to repaint).")
+                        self.logger.info(f"Found painted output for z={z:.3f} — skipping (set force_recompute=True to repaint).")
                         continue
                 grid_data = self.paint_single(loop_index, radiation_profiles)
                 cube.append(grid_data, loop_index)

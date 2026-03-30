@@ -99,6 +99,10 @@ class RadiationProfileSolver:
             logger.info(self.parameters.summary_str())
 
         # we need to consider that this is likely being run in MPI mode. Only a single rank should perform the computation and save the results, others should wait and then load the results
+        # Sections that do not affect 1D profile shapes — excluded from the
+        # sidecar YAML so it only documents what the profiles actually depend on.
+        _PROFILES_YAML_EXCLUDE = {"simulation", "cosmo_sim"}
+
         if MPI_ENABLED:
             comm = MPI.COMM_WORLD
             rank = comm.Get_rank()
@@ -106,7 +110,10 @@ class RadiationProfileSolver:
                 profiles = self.solve()
                 handler.write_file(self.parameters, profiles)
                 if profiles._file_path is not None:
-                    self.parameters.to_yaml(profiles._file_path.with_suffix('.yaml'))
+                    self.parameters.to_yaml(
+                        profiles._file_path.with_suffix('.yaml'),
+                        exclude_keys=_PROFILES_YAML_EXCLUDE,
+                    )
                 logger.info(f"Rank {rank} computed profiles and saved them to cache.")
                 # notify other ranks that computation is done
                 comm.Barrier()
@@ -119,7 +126,10 @@ class RadiationProfileSolver:
             profiles = self.solve()
             handler.write_file(self.parameters, profiles)
             if profiles._file_path is not None:
-                self.parameters.to_yaml(profiles._file_path.with_suffix('.yaml'))
+                self.parameters.to_yaml(
+                    profiles._file_path.with_suffix('.yaml'),
+                    exclude_keys=_PROFILES_YAML_EXCLUDE,
+                )
             logger.info("Radiation profiles computed and saved to cache.")
         return profiles
 
