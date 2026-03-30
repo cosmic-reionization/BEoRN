@@ -497,7 +497,7 @@ class NBodyLoader(BaseLoader):
 
         logger.info(
             "\n" + "=" * 62 + "\n"
-            f"  BEoRN N-body snapshot inventory\n"
+            "  BEoRN N-body snapshot inventory\n"
             + "=" * 62 + "\n"
             f"  Simulation code  :  {self.simulation_code}\n"
             f"  Halo finder      :  {self.halo_finder}\n"
