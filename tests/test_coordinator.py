@@ -10,7 +10,10 @@ import pytest
 from types import SimpleNamespace
 
 from beorn.painting.coordinator import PaintingCoordinator
+from beorn.structs.coeval_cube import CoevalCube
+from beorn.structs.parameters import Parameters
 from beorn.structs.radiation_profiles import RadiationProfilesFStarGrid
+from beorn.structs.temporal_cube import TemporalCube
 
 
 class DummyHaloCatalog:
@@ -260,6 +263,32 @@ def test_sample_f_st_for_halos_uniform_distribution_respects_bounds():
     assert np.all(sampled >= 0.03)
     assert np.all(sampled <= 0.07)
     assert np.unique(sampled).size > 10
+
+
+def test_temporal_cube_append_works_after_reloading_manifest(tmp_path):
+    params = Parameters()
+    params.simulation.Ncell = 4
+    params.simulation.Lbox = 10.0
+    params.simulation.store_grids = ["Grid_xHII", "Grid_Temp", "Grid_xal"]
+    output_dir = tmp_path / "output"
+    cube = TemporalCube.create_empty(params, output_dir, snapshot_number=2)
+
+    # Reopen from disk to reproduce the MPI master append path.
+    reloaded = TemporalCube.read(file_path=cube._file_path)
+    snapshot = CoevalCube(
+        z=10.0,
+        parameters=params,
+        delta_b=np.zeros((4, 4, 4), dtype=float),
+        Grid_Temp=np.ones((4, 4, 4), dtype=float),
+        Grid_xHII=np.full((4, 4, 4), 0.25, dtype=float),
+        Grid_xal=np.full((4, 4, 4), 2.0, dtype=float),
+    )
+
+    reloaded.append(snapshot, 0)
+
+    snapshot_dir = TemporalCube.snapshot_directory(cube._file_path)
+    snapshot_file = snapshot_dir / TemporalCube.snapshot_file_name(params, "Grid_xHII", 0)
+    assert snapshot_file.exists()
 
 
 def test_sample_f_st_for_halos_normal_distribution_is_clipped():

@@ -127,7 +127,42 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
             hdf5_file.attrs["snapshot_directory"] = str(snapshot_dir)
             hdf5_file.attrs["simulation_name"] = cls.simulation_name(parameters)
 
-        return cls.read(file_path=path)
+        cube = cls(
+            z=None,
+            parameters=parameters,
+            delta_b=None,
+            Grid_Temp=None,
+            Grid_xHII=None,
+            Grid_xal=None,
+        )
+        cube._file_path = path
+        return cube
+
+
+    def _release_manifest_handles(self) -> None:
+        """Close any read-only HDF5 handles attached to this manifest instance."""
+        open_files = {}
+        for field_name in ("z", *type(self).grid_field_names(self.parameters)):
+            value = getattr(self, field_name, None)
+            if not isinstance(value, h5py.Dataset):
+                continue
+
+            try:
+                file_handle = value.file
+            except Exception:
+                setattr(self, field_name, None)
+                continue
+
+            file_name = getattr(file_handle, "filename", None)
+            if file_name == str(self._file_path):
+                open_files[id(file_handle)] = file_handle
+                setattr(self, field_name, None)
+
+        for file_handle in open_files.values():
+            try:
+                file_handle.close()
+            except Exception:
+                pass
 
 
     def append(self, grid_snapshot: CoevalCube, index: int) -> None:
@@ -145,7 +180,9 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
         if self._file_path is None:
             raise ValueError("File path is not set. Cannot append data.")
 
-        snapshot_dir = self.snapshot_directory(self._file_path)
+        cls = type(self)
+        self._release_manifest_handles()
+        snapshot_dir = cls.snapshot_directory(self._file_path)
         snapshot_dir.mkdir(parents=True, exist_ok=True)
 
         # NB: this could in theory have been made mpi-compatible: the h5py context can handle calls from different mpi ranks
@@ -169,14 +206,14 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
                 logger.debug(f"Not appending {f} to {self._file_path.name} because type {type(value)} is not appendable.")
                 continue
 
-            snapshot_path = snapshot_dir / self.snapshot_file_name(self.parameters, f, index)
+            snapshot_path = snapshot_dir / cls.snapshot_file_name(self.parameters, f, index)
             with h5py.File(snapshot_path, "w") as snapshot_file:
                 snapshot_file.create_dataset(f, data=value)
                 snapshot_file.attrs["field"] = f
                 snapshot_file.attrs["snapshot_index"] = int(index)
                 snapshot_file.attrs["redshift"] = float(grid_snapshot.z)
                 snapshot_file.attrs["grid_size"] = int(self.parameters.simulation.Ncell)
-                snapshot_file.attrs["simulation_name"] = self.simulation_name(self.parameters)
+                snapshot_file.attrs["simulation_name"] = cls.simulation_name(self.parameters)
 
 
     def power_spectrum(self, quantity: np.ndarray, parameters: Parameters) -> tuple[np.ndarray, np.ndarray]:
