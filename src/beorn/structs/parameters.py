@@ -94,8 +94,27 @@ class SourceParameters:
     min_xHII_value: int = 0
     """lower limit for the ionization fraction. All pixels with xHII < min_xHII_value will be set to this value."""
 
-    mass_accretion_lookback: int = 5
-    """number of snapshots to consider when computing the mass accretion rate of the halos. The halo mass grow will affect the star formation rate and thus the radiative properties of the halos."""
+    mass_accretion_lookback: int = 10
+    """Number of snapshots to look back when fitting the per-halo accretion rate alpha from merger trees.
+    The thesis by Moll (2025) shows that the mean alpha stabilises at n=10 lookback snapshots,
+    corresponding to a causal timescale of ~300 Myr (Δz≈4 from z=8). Values below 5 give
+    unstable fits; going beyond 10 only marginally reduces scatter."""
+
+    alpha_fallback: "float | str" = "mean"
+    """Fallback alpha value for halos not found in the merger tree, or whose mass history
+    is too short to fit reliably.  Options:
+    - float  : fixed value (e.g. 0.6, the typical mean from THESAN-DARK 2 at z~8)
+    - 'mean' : mean of the fitted alphas at that snapshot (default — adapts with redshift)
+    - 'median': median of the fitted alphas at that snapshot
+    """
+
+    t_source_age: float = None
+    """Maximum source age in Myr.  When set, the X-ray and ionisation integrals
+    are limited to a lookback window of this duration rather than integrating
+    all the way back to ``solver.z_source_start``.  This prevents unphysically
+    old emission histories for halos that formed recently.  ``None`` (default)
+    preserves the original behaviour (integrate back to ``solver.z_source_start``).
+    """
 
 
 
@@ -132,6 +151,13 @@ class SolverParameters:
 
     z_decoupling: int = 135
     """Redshift at which the gas decouples from CMB and starts cooling adiabatically."""
+
+    z_source_start: float = 35.0
+    """Maximum lookback redshift for X-ray and ionisation integrals.  Sources are
+    assumed to have started emitting no earlier than this redshift.  When
+    ``source.source_age`` is ``None`` (default), the integral extends all the way
+    back to ``z_source_start``.  When ``source_age`` is set, the window is further
+    capped by the finite age — whichever limit is reached first applies."""
 
     # derived properties that are directly related to the parameters
     @property
@@ -192,6 +218,12 @@ class SimulationParameters:
 
     compute_x_coll_fluctuations: bool = True
     """Whether or not to include the fluctuations in the collisional coupling coefficient x_coll when computing the x_tot fraction."""
+
+    degrade_resolution: int = 1
+    """Downsample density grids read from N-body files by this integer factor before painting.
+    A value of 1 (default) applies no degradation. A value of N block-averages each N³ voxel
+    into one, e.g. degrade_resolution=4 turns a 256³ grid into 64³.
+    Set Ncell to the native grid size divided by degrade_resolution."""
 
     @property
     def kbins(self) -> np.ndarray:
@@ -317,6 +349,8 @@ class Parameters:
             'HI_frac': self.solver.HI_frac,
             'clumping': self.solver.clumping,
             'z_decoupling': self.solver.z_decoupling,
+            'z_source_start': self.solver.z_source_start,
+            't_source_age': self.source.t_source_age,
         }
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 

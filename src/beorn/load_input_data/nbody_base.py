@@ -71,12 +71,12 @@ class NBodyLoader(BaseLoader):
             ``"AHF"``).  Stored in the YML metadata.  Default: ``"unknown"``.
         n_particles (int | None): Total simulation particle count.  Stored in
             YML metadata.  ``None`` → ``"unknown"``.
-        degrade_resolution (int | False): Downsample density grids by this
-            integer factor before returning them from :meth:`load_density_field`.
-            For example, ``degrade_resolution=2`` turns a 512³ grid into 256³
-            by block-averaging.  ``False`` (default) applies no degradation.
-            Set ``parameters.simulation.Ncell`` to the *degraded* grid size so
-            that the rest of BEoRN uses the correct resolution.
+        degrade_resolution: Read from ``parameters.simulation.degrade_resolution``
+            (default 1 = no degradation).  Values > 1 block-average each density
+            grid by that factor before returning it, e.g. ``degrade_resolution=4``
+            turns a 256³ grid into 64³.  Set ``parameters.simulation.Ncell`` to
+            the *degraded* grid size so that the rest of BEoRN uses the correct
+            resolution.
 
     Class attributes (override in subclasses):
         simulation_code (str): Name of the N-body code, e.g. ``"PKDGrav3"``.
@@ -93,7 +93,6 @@ class NBodyLoader(BaseLoader):
         snapshots: Optional[list] = None,
         halo_finder: str = "unknown",
         n_particles: Optional[int] = None,
-        degrade_resolution: "int | bool" = False,
     ):
         super().__init__(parameters)
         self.file_root = Path(self.parameters.cosmo_sim.file_root)
@@ -103,19 +102,18 @@ class NBodyLoader(BaseLoader):
         self.n_particles = n_particles
 
         # ── Resolution degradation ────────────────────────────────────────────
-        if degrade_resolution is False or degrade_resolution == 1:
-            self._degrade_factor = 1
-        elif isinstance(degrade_resolution, int) and degrade_resolution > 1:
-            self._degrade_factor = degrade_resolution
+        degrade_resolution = self.parameters.simulation.degrade_resolution
+        if not isinstance(degrade_resolution, int) or degrade_resolution < 1:
+            raise ValueError(
+                f"parameters.simulation.degrade_resolution must be an integer >= 1, "
+                f"got {degrade_resolution!r}."
+            )
+        self._degrade_factor = degrade_resolution
+        if degrade_resolution > 1:
             logger.info(
                 f"Resolution degradation enabled: density grids will be "
                 f"block-averaged by factor {degrade_resolution} "
                 f"(e.g. N³ → (N/{degrade_resolution})³)."
-            )
-        else:
-            raise ValueError(
-                f"degrade_resolution must be False or an integer > 1, "
-                f"got {degrade_resolution!r}."
             )
 
         yml_path = Path(catalog_yml) if catalog_yml is not None else None
@@ -149,6 +147,19 @@ class NBodyLoader(BaseLoader):
 
         self._build_snapshot_lists(all_snapshots)
         self.remove_duplicates()
+
+        # ── Auto-set Ncell from the first density file ────────────────────────
+        if self.density_paths:
+            native_n = self._peek_grid_size(self.density_paths[0])
+            effective_n = native_n // self._degrade_factor
+            self.parameters.simulation.Ncell = effective_n
+            if self._degrade_factor > 1:
+                logger.info(
+                    f"Auto-set Ncell={effective_n} "
+                    f"(native {native_n}³ ÷ {self._degrade_factor})."
+                )
+            else:
+                logger.info(f"Auto-set Ncell={effective_n} from density file.")
 
     # ── Abstract interface for subclasses ─────────────────────────────────────
 
@@ -206,6 +217,22 @@ class NBodyLoader(BaseLoader):
             :math:`\\delta_b = \\rho_b / \\langle\\rho_b\\rangle - 1`
             with shape ``(Ncell, Ncell, Ncell)``.
         """
+
+    def _peek_grid_size(self, path: Path) -> int:
+        """Return the native cubic grid dimension without fully reading the file.
+
+        The default implementation assumes a flat binary file of 32-bit floats
+        (N³ elements → N = cbrt(file_size / 4)).  Override this in subclasses
+        for other formats (HDF5, netCDF, FITS, …).
+
+        Args:
+            path (Path): Absolute path to a density file.
+
+        Returns:
+            int: Native grid dimension N (file stores an N×N×N cube).
+        """
+        n_elements = path.stat().st_size // 4  # float32 = 4 bytes
+        return round(n_elements ** (1 / 3))
 
     # ── Concrete BaseLoader implementations ───────────────────────────────────
 

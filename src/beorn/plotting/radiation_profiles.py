@@ -21,15 +21,20 @@ Mh_z_3 = np.array([172274291.4769941, 218063348.75063255, 368917395.4438236, 775
 
 
 
-def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_index: int, redshifts: list, alphas: list, label: str = None, figsize: tuple = (14, 9), fontsize: int = None, labelsize: int = None, **gridspec_kw) -> None:
+def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_index: int, redshifts: list, alphas: list, label: str = None, figsize: tuple = (14, 9), fontsize: int = None, labelsize: int = None, cmap: str = 'plasma', **gridspec_kw) -> None:
     """Plot 1D radiation profiles for selected masses, redshifts and alphas.
 
     The figure has two rows:
     - Top row: halo mass accretion history (left) and legend (right).
     - Bottom row: Lyman-alpha flux, kinetic temperature, and ionisation fraction profiles.
 
-    Different redshifts are shown in different colours (blue → red); different
-    alpha values vary in opacity.
+    In the profile panels **colour encodes redshift** (blue → red, high z → low z)
+    and **linestyle encodes alpha** (solid / dashed / dotted / dash-dot).
+
+    In the MAR panel the Behroozi+20 simulation tracks are solid black curves;
+    the analytical exponential MAR model is shown as dashed curves, one per
+    alpha value, using the same colour palette as the profile panels' alpha
+    linestyle legend (tab10).
 
     Args:
         parameters (Parameters): Simulation parameters used for axis labels and lookups.
@@ -43,10 +48,15 @@ def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_i
             When ``None`` (default) the current ``rcParams`` values are used.
         labelsize (int, optional): Font size for tick labels.
             When ``None`` (default) the current ``rcParams`` values are used.
+        cmap (str, optional): Colormap name used to colour redshift curves in the
+            profile panels and scatter points in the MAR panel.  Default is
+            ``'plasma'``.
         **gridspec_kw: Extra keyword arguments forwarded to :class:`matplotlib.gridspec.GridSpec`
             (e.g. ``hspace=0.4``, ``wspace=0.3``).  When ``hspace`` or ``wspace`` is supplied,
             ``constrained_layout`` is automatically disabled so the manual spacing takes effect.
     """
+    import matplotlib.lines as mlines
+
     use_constrained_layout = 'hspace' not in gridspec_kw and 'wspace' not in gridspec_kw
     fig = plt.figure(figsize=figsize, constrained_layout=use_constrained_layout)
     fig.suptitle(label)
@@ -58,87 +68,110 @@ def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_i
     ax_temp   = fig.add_subplot(gs[1, 1])
     ax_xhii   = fig.add_subplot(gs[1, 2])
 
-    # since these are hdf5 datasets, we need to copy it to a numpy array first
     co_radial_grid = profiles.r_grid_cell[:]
-    r_lyal_phys = profiles.r_lyal[:]
-    zz = profiles.z_history[:]
+    r_lyal_phys    = profiles.r_lyal[:]
+    zz             = profiles.z_history[:]
 
-    Mh_list = []
-    actual_alpha_list = []
+    n_z = len(redshifts)
+    n_a = len(alphas)
+
+    # Colour encodes redshift — sampled from the requested colormap
+    _cmap = plt.get_cmap(cmap)
+    colors_z = [_cmap(0.15 + 0.7 * i / max(n_z - 1, 1)) for i in range(n_z)]
+    # Linestyle encodes alpha — shared between profile panels and MAR analytical curves
+    ls_cycle = ['-', '--', ':', '-.']
+    # Colours for the analytical MAR curves: C0, C1, C2, …
+    colors_a = [f'C{j}' for j in range(n_a)]
+
+    actual_z_vals    = []
+    actual_alpha_vals = []
 
     for i, zi in enumerate(redshifts):
-        for j, alpha_j in enumerate(alphas):
-            # the user specifies the redshifts and alpha values - here we find the index lying closest to these values in the profile
-            ind_z = np.argmin(np.abs(zz - zi))
-            z_val = zz[ind_z]
+        ind_z = np.argmin(np.abs(zz - zi))
+        z_val = zz[ind_z]
+        actual_z_vals.append(z_val)
 
+        for j, alpha_j in enumerate(alphas):
             ind_alpha = np.argmin(np.abs(parameters.solver.halo_mass_accretion_alpha - alpha_j))
             alpha_val = parameters.solver.halo_mass_accretion_alpha[ind_alpha]
+            if i == 0:
+                actual_alpha_vals.append(alpha_val)
 
-            # the mass history is now uniquely defined:
             Mh_i = profiles.halo_mass_bins[mass_index, ind_alpha, ind_z]
-            # TODO - why the 0.68 factor? is this h?
-            Mh_list.append(Mh_i / 0.68)
-            actual_alpha_list.append(alpha_val)
-
-            # some quantities are required to plot sensible profiles
-            T_adiab_z = T_adiab(z_val, parameters)
+            T_adiab_z    = T_adiab(z_val, parameters)
             Temp_profile = profiles.rho_heat[:, mass_index, ind_alpha, ind_z] + T_adiab_z
 
-            x_HII_profile = np.zeros((len(co_radial_grid)))
-            x_HII_profile[np.where(co_radial_grid < profiles.R_bubble[mass_index, ind_alpha, ind_z])] = 1
+            x_HII_profile = np.zeros(len(co_radial_grid))
+            x_HII_profile[co_radial_grid < profiles.R_bubble[mass_index, ind_alpha, ind_z]] = 1
 
-            lyal_profile = profiles.rho_alpha[:, mass_index, ind_alpha, ind_z]  # *1.81e11/(1+zzi)
+            lyal_profile = profiles.rho_alpha[:, mass_index, ind_alpha, ind_z]
 
-            ## plot each profile on its own axis
-            # the color is determined by the redshift and alpha values
-            # for increasing redshifts the color is changing from blue to red
-            # for increasing alpha values the opacity is changing from faint to strong
-            color = plt.cm.coolwarm((len(redshifts) - i) / len(redshifts))
-            # TODO - this does not yet look good
-            opacity = 1 - 0.5 * j / len(alphas)
+            color = colors_z[i]
+            ls    = ls_cycle[j % len(ls_cycle)]
 
-            # the label is the same for all profiles
-            entry_label = f"$z \\sim$ {z_val:.1f},  $M_{{h}}= {Mh_list[i]:.2e}\\,M_\\odot$,  $\\alpha = {alpha_val:.3f}$"
+            ax_mar.scatter(z_val, Mh_i / 0.68, s=150, marker='*', color=color)
+            ax_lyal.loglog(r_lyal_phys * (1 + z_val) / 0.68, lyal_profile, lw=1.7, color=color, ls=ls)
+            ax_temp.loglog(co_radial_grid / 0.68, Temp_profile, lw=1.7, color=color, ls=ls)
+            ax_xhii.semilogx(co_radial_grid / 0.68, x_HII_profile, lw=1.7, color=color, ls=ls)
 
-            ax_mar.scatter(z_val, Mh_i / 0.68, s=150, marker='*', color=color, alpha=opacity)
-            ax_lyal.loglog(r_lyal_phys * (1 + z_val) / 0.68, lyal_profile, lw=1.7, color=color, alpha=opacity, label=entry_label)
-            ax_temp.loglog(co_radial_grid / 0.68, Temp_profile, lw=1.7, color=color, alpha=opacity)
-            ax_xhii.semilogx(co_radial_grid / 0.68, x_HII_profile, lw=1.7, color=color, alpha=opacity)
+    # MAR panel: Behroozi+20 simulation tracks — faint thick gray solid curves
+    ax_mar.semilogy(z_array_1, Mh_z_1 / 0.68, color='gray', ls='-', lw=3, alpha=0.7)
+    ax_mar.semilogy(z_array_2, Mh_z_2 / 0.68, color='gray', ls='-', lw=3, alpha=0.7)
+    ax_mar.semilogy(z_array_3, Mh_z_3 / 0.68, color='gray', ls='-', lw=3, alpha=0.7)
 
-    # plot the simulation data (and add one legend)
-    ax_mar.semilogy(z_array_1, Mh_z_1 / 0.68, color='gold', ls='--', lw=3, alpha=0.8)
-    ax_mar.semilogy(z_array_2, Mh_z_2 / 0.68, color='gold', ls='--', lw=3, alpha=0.8)
-    ax_mar.semilogy(z_array_3, Mh_z_3 / 0.68, color='gold', ls='--', lw=3, alpha=0.8, label='Simulation (Behroozi +20)')
+    # MAR panel: analytical exponential MAR — one coloured curve per alpha,
+    # linestyle matches the profile panels (ls_cycle[j])
+    for j, alpha_j in enumerate(alphas):
+        ind_alpha = np.argmin(np.abs(parameters.solver.halo_mass_accretion_alpha - alpha_j))
+        ax_mar.semilogy(
+            zz, profiles.halo_mass_bins[mass_index, ind_alpha, :] / 0.68,
+            color=colors_a[j], ls=ls_cycle[j % len(ls_cycle)], lw=2,
+        )
 
-    # plot our analytical data (and add one legend)
-    ax_mar.semilogy(zz, profiles.halo_mass_bins[mass_index, ind_alpha, :] / 0.68, color='gray', alpha=1, lw=2, label=f'Analytical MAR\n$M_0 = {Mh_list[0]:.2e}\\,M_\\odot$,  $\\alpha = {actual_alpha_list[0]:.3f}$')
-
-    # Build kwargs dicts: only pass values when explicitly set, otherwise let rcParams govern.
+    # Build kwargs dicts
     label_kw  = {'fontsize': fontsize} if fontsize is not None else {}
     tick_kw   = {'labelsize': labelsize} if labelsize is not None else {}
     legend_kw = {'fontsize': fontsize} if fontsize is not None else {}
 
-    # style the MAR panel (no legend inside — everything goes to ax_legend)
+    # Style the MAR panel
     ax_mar.set_xlim(15, 5)
     ax_mar.set_ylim(1.5e8, 8e12)
     ax_mar.set_xlabel('z', **label_kw)
     ax_mar.set_ylabel(r'$M_h$ [$M_{\odot}$]', **label_kw)
     ax_mar.tick_params(axis='both', **tick_kw)
 
-    # legend panel: two stacked legends — MAR model on top, redshift snapshots below
+    # Legend panel: two stacked legends built from proxy artists
     ax_legend.axis('off')
 
-    mar_handles, mar_labels = ax_mar.get_legend_handles_labels()
-    leg_mar = ax_legend.legend(mar_handles, mar_labels, loc='upper center',
+    # Top legend: MAR model (Behroozi + one entry per alpha)
+    mar_handles = [mlines.Line2D([], [], color='gray', ls='-', lw=3, alpha=0.7, label='Simulation (Behroozi+2020)')]
+    for j, (alpha_val, ca) in enumerate(zip(actual_alpha_vals, colors_a)):
+        mar_handles.append(
+            mlines.Line2D([], [], color=ca, ls=ls_cycle[j % len(ls_cycle)], lw=2,
+                          label=f'Analytical MAR  $\\alpha={alpha_val:.2f}$')
+        )
+    leg_mar = ax_legend.legend(handles=mar_handles, loc='upper center',
                                frameon=True, title='Halo accretion model', **legend_kw)
-    ax_legend.add_artist(leg_mar)  # pin it so the second legend doesn't replace it
+    ax_legend.add_artist(leg_mar)
 
-    snap_handles, snap_labels = ax_lyal.get_legend_handles_labels()
-    ax_legend.legend(snap_handles, snap_labels, loc='lower center',
-                     frameon=True, title='Redshift snapshots', **legend_kw)
+    # Bottom legend: two-column layout — redshifts (left) | alphas (right)
+    # Build each column separately, then interleave so ncol=2 fills them cleanly.
+    _empty = mlines.Line2D([], [], color='none', label='')
+    col_z = [mlines.Line2D([], [], color=cz, ls='-', lw=2, label=f'$z \\sim {z_val:.1f}$')
+             for z_val, cz in zip(actual_z_vals, colors_z)]
+    col_a = [mlines.Line2D([], [], color='k', ls=ls_cycle[j % len(ls_cycle)], lw=2,
+                           label=f'$\\alpha = {alpha_val:.2f}$')
+             for j, alpha_val in enumerate(actual_alpha_vals)]
+    # Pad the shorter column with invisible entries so rows line up.
+    # matplotlib ncol=2 fills the left column top-to-bottom first, then right.
+    n = max(len(col_z), len(col_a))
+    col_z += [_empty] * (n - len(col_z))
+    col_a += [_empty] * (n - len(col_a))
+    profile_handles = col_z + col_a
+    ax_legend.legend(handles=profile_handles, ncol=2, loc='lower center',
+                     frameon=True, title='colour = z  |  style = α', **legend_kw)
 
-    # style the profile panels
+    # Style the profile panels
     ax_lyal.set_xlim(2e-1, 1e3)
     ax_lyal.set_ylim(2e-17, 1e-5)
     ax_lyal.set_xlabel('r [cMpc]', **label_kw)
