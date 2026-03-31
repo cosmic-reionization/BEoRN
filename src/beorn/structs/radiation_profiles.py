@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from pathlib import Path
 import numpy as np
 
 from .base_struct import BaseStruct
+from .parameters import Parameters
 
 
 @dataclass(slots = True)
@@ -9,6 +11,16 @@ class RadiationProfiles(BaseStruct):
     """
     Flux profiles around star forming halos, computed for a range of halo masses and accretion rates (alpha). The central assumption is that each halo with given key properties (mass, alpha) produces the same radiation profile, meaning these profiles can be reused for multiple halos in the painting step of the simulation.
     """
+
+    @classmethod
+    def get_file_path(cls, directory: Path, parameters: Parameters, **kwargs) -> Path:
+        """Cache key covers only the parameters that shape the 1D profiles.
+
+        Random seed and grid dimensions (Ncell, Lbox, DIM) are excluded so
+        that profiles computed for one py21cmfast realisation are reused when
+        painting a different seed or grid resolution with the same physics.
+        """
+        return directory / f"RadiationProfiles_{parameters.profiles_hash()}.h5"
 
     z_history: np.ndarray
     """redshift range for which the profiles have been computed. Corresponds to the parameters.solver.redshifts parameter"""
@@ -49,24 +61,35 @@ class RadiationProfiles(BaseStruct):
             stored profiles for the requested bin.
         """
         return(
-            self.R_bubble[mass_index, alpha_index, z_index].copy(),
-            self.rho_alpha[:, mass_index, alpha_index, z_index].copy(),
-            self.rho_heat[:, mass_index, alpha_index, z_index].copy(),
+            self.R_bubble[mass_index, alpha_index, z_index],
+            self.rho_alpha[:, mass_index, alpha_index, z_index],
+            self.rho_heat[:, mass_index, alpha_index, z_index],
         )
 
 
-    def __post_init__(self):
-        BaseStruct.__post_init__(self)
-        assert self.z_history.ndim == 1, "z_history must be a 1D array"
-        assert self.r_grid_cell.ndim == 1, "r_grid_cell must be a 1D array"
+    def validate(self):
+        """Check all profile arrays for NaN/Inf values.
 
-        # nan value in any of the profiles indicates a miscalculation
+        Called automatically after fresh computation. When loading from disk the
+        data was already validated at write time, so this is skipped to avoid
+        loading the entire (potentially multi-GB) HDF5 dataset into RAM.
+        Call explicitly if you need to re-validate a loaded profile.
+        """
         assert np.all(np.isfinite(self.rho_xray)), "rho_xray contains invalid values"
         assert np.all(np.isfinite(self.rho_heat)), "rho_heat contains invalid values"
         assert np.all(np.isfinite(self.rho_alpha)), "rho_alpha contains invalid values"
         assert np.all(np.isfinite(self.R_bubble)), "R_bubble contains invalid values"
         assert np.all(np.isfinite(self.r_lyal)), "r_lyal contains invalid values"
 
+    def __post_init__(self):
+        BaseStruct.__post_init__(self)
+        assert self.z_history.ndim == 1, "z_history must be a 1D array"
+        assert self.r_grid_cell.ndim == 1, "r_grid_cell must be a 1D array"
+        # Only validate when profiles are freshly computed (not when loaded from disk).
+        # np.isfinite forces full materialisation of h5py.Dataset arrays into RAM, which
+        # is wasteful (and slow) when the data was already validated at write time.
+        if self._file_path is None:
+            self.validate()
 
 
 @dataclass(slots = True)
@@ -127,15 +150,19 @@ class RadiationProfilesFStarGrid(BaseStruct):
             self.rho_heat[:, mass_index, alpha_index, f_st_index, z_index].copy(),
         )
 
+    def validate(self):
+        """Check all profile arrays for NaN/Inf values."""
+        assert np.all(np.isfinite(self.rho_xray)), "rho_xray contains invalid values"
+        assert np.all(np.isfinite(self.rho_heat)), "rho_heat contains invalid values"
+        assert np.all(np.isfinite(self.rho_alpha)), "rho_alpha contains invalid values"
+        assert np.all(np.isfinite(self.R_bubble)), "R_bubble contains invalid values"
+        assert np.all(np.isfinite(self.r_lyal)), "r_lyal contains invalid values"
+
     def __post_init__(self):
         BaseStruct.__post_init__(self)
         assert self.z_history.ndim == 1, "z_history must be a 1D array"
         assert self.r_grid_cell.ndim == 1, "r_grid_cell must be a 1D array"
         assert self.f_st_grid.ndim == 1, "f_st_grid must be a 1D array"
 
-        # nan value in any of the profiles indicates a miscalculation
-        assert np.all(np.isfinite(self.rho_xray)), "rho_xray contains invalid values"
-        assert np.all(np.isfinite(self.rho_heat)), "rho_heat contains invalid values"
-        assert np.all(np.isfinite(self.rho_alpha)), "rho_alpha contains invalid values"
-        assert np.all(np.isfinite(self.R_bubble)), "R_bubble contains invalid values"
-        assert np.all(np.isfinite(self.r_lyal)), "r_lyal contains invalid values"
+        if self._file_path is None:
+            self.validate()

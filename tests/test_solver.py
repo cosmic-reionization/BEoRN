@@ -206,7 +206,7 @@ def test_get_or_compute_profiles_legacy_uses_legacy_cache_namespace():
     captured = {}
 
     class DummyProfiles:
-        pass
+        z_history = np.array([15.0, 12.0])
 
     class DummyHandler:
         def load_file(self, parameters, cls, **kwargs):

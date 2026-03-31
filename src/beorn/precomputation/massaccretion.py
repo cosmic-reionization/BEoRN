@@ -3,10 +3,11 @@ Mass Accretion Model
 """
 import numpy as np
 import logging
-logger = logging.getLogger(__name__)
 
 from ..cosmo import Hubble
 from ..structs.parameters import Parameters
+
+logger = logging.getLogger(__name__)
 
 
 def mass_accretion(parameters: Parameters, z_bins: np.ndarray, m_bins: np.ndarray, alpha_bins: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

@@ -7,7 +7,7 @@ import importlib.util
 from pathlib import Path
 
 from scipy.interpolate import splrep,splev
-from .constants import *
+from .constants import Tstar, A10, rhoc0, M_sun, cm_per_Mpc, m_H, nu_al, nu_LL, m_p_in_Msun
 from .cosmo import T_cmb
 from .structs import Parameters
 
@@ -38,6 +38,13 @@ def kappa_coll():
     return HH, eH
 
 
+# Splines computed once at import time — kappa_coll() reads two .dat files and
+# fits splines; doing this per x_coll() call is pure waste.
+_kappa_HH_raw, _kappa_eH_raw = kappa_coll()
+_kappa_eH_tck = splrep(_kappa_eH_raw['T'], _kappa_eH_raw['kappa'])
+_kappa_HH_tck = splrep(_kappa_HH_raw['T'], _kappa_HH_raw['kappa'])
+
+
 def x_coll(z, Tk, xHI, rho_b):
     """
     Parameters
@@ -59,11 +66,8 @@ def x_coll(z, Tk, xHI, rho_b):
     Tcmb = T_cmb(z)
     prefac = Tstar / A10 / Tcmb  # [s]
 
-    HH, eH = kappa_coll()
-    kappa_eH_tck = splrep(eH['T'], eH['kappa'])
-    kappa_eH = splev(Tk, kappa_eH_tck, ext=3)  # [cm^3/s]
-    kappa_HH_tck = splrep(HH['T'], HH['kappa'])
-    kappa_HH = splev(Tk, kappa_HH_tck, ext=3)
+    kappa_eH = splev(Tk, _kappa_eH_tck, ext=3)  # [cm^3/s]
+    kappa_HH = splev(Tk, _kappa_HH_tck, ext=3)
 
     x_HH = prefac * kappa_HH * n_HI
     x_eH = prefac * kappa_eH * n_HII
@@ -73,7 +77,7 @@ def x_coll_coef(z,param):
     """
     Coefficient to turn rho/rho_mean into a baryon density in nbr of H atoms per physical cm**3 [1/pcm**3]
     """
-    Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
+    _Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
     coef = rhoc0 * h0 ** 2 * Ob * (1 + z) ** 3 * M_sun / cm_per_Mpc ** 3 / m_H
     return coef
 
@@ -123,7 +127,8 @@ def eps_lyal(nu, parameters: Parameters):
     nu_max_norm  = nu_LL
 
     Anorm = (1-alS)/(nu_max_norm**(1-alS) - nu_min_norm**(1-alS))
-    Inu   = lambda nu: Anorm * nu**(-alS)
+    def Inu(nu):
+        return Anorm * nu**(-alS)
 
     eps_alpha = Inu(nu)*N_al/(m_p_in_Msun * h0)
 

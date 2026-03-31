@@ -287,8 +287,7 @@ def test_temporal_cube_append_works_after_reloading_manifest(tmp_path):
 
     reloaded.append(snapshot, 0)
 
-    snapshot_dir = TemporalCube.snapshot_directory(cube._file_path)
-    snapshot_file = snapshot_dir / TemporalCube.snapshot_file_name(params, "Grid_xHII", 0)
+    snapshot_file = cube.snapshot_path(10.0)
     assert snapshot_file.exists()
 
 

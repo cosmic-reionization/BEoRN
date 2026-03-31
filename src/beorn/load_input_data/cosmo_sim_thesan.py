@@ -20,7 +20,7 @@ class ThesanLoader(BaseLoader):
         is_high_res = kwargs.pop("is_high_res", False)
 
         super().__init__(*args, **kwargs)
-        self.thesan_root = self.parameters.simulation.file_root
+        self.thesan_root = self.parameters.cosmo_sim.file_root
         self.tree_root = self.thesan_root / "postprocessing"/ "trees"/ "LHaloTree"
         self.snapshot_path_root = self.thesan_root / "output"
         self.offset_path_root = self.thesan_root / "postprocessing" / "offsets"
@@ -151,7 +151,7 @@ class ThesanLoader(BaseLoader):
         # snapshot_halo_count = f["Header"]["Ngroups_Total"]
         # in practice this key does not exist, so we need the offset file to estimate the number of halos
         snapshot_group_count = int(group_offset_indices[-1]  * 1.5)
-        snapshot_subhalo_count = int(subhalo_start_index[-1] * 1.5)
+        snapshot_subhalo_count = int(subhalo_start_index[-1] * 1.5)  # noqa: F841
 
         current_halo_positions = np.zeros((snapshot_group_count, 3))
         current_halo_masses = np.zeros((snapshot_group_count))
@@ -226,7 +226,7 @@ class ThesanLoader(BaseLoader):
         # - all values should lie in the "paintable" range, i.e. not be too high
         # note that the upper limit is above the paintable range, so we use the -2 index to make sure that the halos are "paintable"
 
-        alpha_range = self.parameters.simulation.halo_mass_accretion_alpha
+        alpha_range = self.parameters.solver.halo_mass_accretion_alpha
         below = full_alphas < alpha_range[0]
         above = full_alphas > alpha_range[-2]
         full_alphas[below] = alpha_range[0]
@@ -239,7 +239,9 @@ class ThesanLoader(BaseLoader):
             positions = current_halo_positions * 1e-3 / self.thesan_h, # convert from kpc/h to Mpc/h to Mpc
             masses = current_halo_masses * 1e10 / self.thesan_h, # convert to Msun/h to Msun
             alphas = full_alphas,
-            parameters = self.parameters
+            parameters = self.parameters,
+            redshift_index = redshift_index,
+            redshift = float(self.redshifts[redshift_index]),
         )
 
         self.logger.debug(f"Catalog alphas: min={catalog.alphas.min(initial=0):.2f}, max={catalog.alphas.max(initial=0):.2f}, mean={catalog.alphas.mean():.2f}, std={catalog.alphas.std():.2f}")
@@ -275,7 +277,7 @@ class ThesanLoader(BaseLoader):
         # logger.debug(f"Particle information, ended at {start_index=} => {np.sum(particle_positions == 0)} empty fields, {particle_positions[:, 0].min():.2f} - {particle_positions[:, 0].max():.2f} in the first dimension, {particle_positions[:, 1].min():.2f} - {particle_positions[:, 1].max():.2f} in the second dimension, {particle_positions[:, 2].min():.2f} - {particle_positions[:, 2].max():.2f} in the third dimension")
         physical_size = particle_positions.max()
 
-        mass_assignment = self.parameters.simulation.halo_catalogs_thesan_mass_assignment
+        mass_assignment = self.parameters.cosmo_sim.halo_catalogs_thesan_mass_assignment
         pylians.map_particles_to_mesh(mesh, physical_size, particle_positions, mass_assignment=mass_assignment)
 
         # Normalize the mesh to get the density field
@@ -315,7 +317,7 @@ class ThesanLoader(BaseLoader):
         scale_factor = 1 / (1 + self.redshifts[redshift_index])
         particle_velocities *= 1 / np.sqrt(scale_factor)
 
-        mass_assignment = self.parameters.simulation.halo_catalogs_thesan_mass_assignment
+        mass_assignment = self.parameters.cosmo_sim.halo_catalogs_thesan_mass_assignment
         pylians.map_particles_to_mesh(mesh_x, self.parameters.simulation.Lbox, particle_positions, mass_assignment=mass_assignment, weights = particle_velocities[:, 0])
         pylians.map_particles_to_mesh(mesh_y, self.parameters.simulation.Lbox, particle_positions, mass_assignment=mass_assignment, weights = particle_velocities[:, 1])
         pylians.map_particles_to_mesh(mesh_z, self.parameters.simulation.Lbox, particle_positions, mass_assignment=mass_assignment, weights = particle_velocities[:, 2])

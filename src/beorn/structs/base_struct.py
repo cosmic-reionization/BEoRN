@@ -6,9 +6,10 @@ from dataclasses import dataclass, fields
 import h5py
 import numpy as np
 import logging
-logger = logging.getLogger(__name__)
 
 from .parameters import Parameters, to_dict
+
+logger = logging.getLogger(__name__)
 
 
 # kw_only allows use to specify an optional field even though subclasses have required fields
@@ -95,7 +96,7 @@ class BaseStruct(ABC):
         """
         Reads the content of a specified HDF5 file and populate the dataclass. Can be called with a specific file path, or with a base directory and parameters to infer the file path.
         """
-        if file_path and (directory or parameters or kwargs):
+        if file_path and (directory or kwargs):
             raise ValueError("Either provide a file path or a directory and parameters, but not both.")
         if file_path is None:
             file_path = cls.get_file_path(directory, parameters, **kwargs)

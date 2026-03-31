@@ -11,13 +11,6 @@ import numpy as np
 from scipy.integrate import trapezoid, solve_ivp
 from scipy.interpolate import interp1d
 import logging
-logger = logging.getLogger(__name__)
-try:
-    from mpi4py import MPI
-    MPI_ENABLED = True
-except RuntimeError:
-    # mpi fails to import because the host system does not have it installed
-    MPI_ENABLED = False
 
 from ..cosmo import comoving_distance, hubble
 from ..cross_sections import alpha_HII
@@ -29,10 +22,16 @@ from .. import constants
 # TODO: replace these unit conversions by astropy units
 from ..constants import m_p_in_Msun, km_per_Mpc, h_eV_sec, cm_per_Mpc, E_HI, E_HeI, kb_eV_per_K, rhoc0
 from ..astro import f_Xh, f_star_Halo, eps_xray
-from .helpers import Ngdot_ion, mean_gamma_ion_xray, solve_xe, rho_alpha_profile, cum_optical_depth
+from .helpers import Ngdot_ion, rho_alpha_profile, cum_optical_depth
 from .massaccretion import mass_accretion
-
 from copy import deepcopy
+logger = logging.getLogger(__name__)
+try:
+    from mpi4py import MPI
+    MPI_ENABLED = True
+except RuntimeError:
+    # mpi fails to import because the host system does not have it installed
+    MPI_ENABLED = False
 
 
 class RadiationProfileSolver:
@@ -81,18 +80,44 @@ class RadiationProfileSolver:
         """
         try:
             profiles = handler.load_file(self.parameters, RadiationProfiles, cache_namespace=self.profile_cache_namespace())
-            logger.info("Loaded radiation profiles from cache.")
+            # Validate that the cached redshift grid matches what is currently requested.
+            # A hash mismatch would already produce FileNotFoundError above, but an
+            # explicit check here gives a clear diagnostic if the cache is somehow stale.
+            if not np.array_equal(profiles.z_history, self.z_bins):
+                raise ValueError(
+                    f"Cached radiation profiles cover "
+                    f"z={profiles.z_history[0]:.2f}→{profiles.z_history[-1]:.2f} "
+                    f"({len(profiles.z_history)} steps) but solver.redshifts requests "
+                    f"z={self.z_bins[0]:.2f}→{self.z_bins[-1]:.2f} "
+                    f"({len(self.z_bins)} steps). "
+                    "Delete the cached file or restore the matching solver.redshifts."
+                )
+            logger.info(
+                f"Loaded radiation profiles from cache "
+                f"(z={profiles.z_history[0]:.2f}→{profiles.z_history[-1]:.2f}, "
+                f"{len(profiles.z_history)} steps)."
+            )
             return profiles
         except FileNotFoundError:
             logger.info("Radiation profiles not found in cache. Launching a single computation process.")
+            logger.info(self.parameters.summary_str())
 
         # we need to consider that this is likely being run in MPI mode. Only a single rank should perform the computation and save the results, others should wait and then load the results
+        # Sections that do not affect 1D profile shapes — excluded from the
+        # sidecar YAML so it only documents what the profiles actually depend on.
+        _PROFILES_YAML_EXCLUDE = {"simulation", "cosmo_sim"}
+
         if MPI_ENABLED:
             comm = MPI.COMM_WORLD
             rank = comm.Get_rank()
             if rank == 0:
                 profiles = self.solve()
                 handler.write_file(self.parameters, profiles, cache_namespace=self.profile_cache_namespace())
+                if profiles._file_path is not None:
+                    self.parameters.to_yaml(
+                        profiles._file_path.with_suffix('.yaml'),
+                        exclude_keys=_PROFILES_YAML_EXCLUDE,
+                    )
                 logger.info(f"Rank {rank} computed profiles and saved them to cache.")
                 # notify other ranks that computation is done
                 comm.Barrier()
@@ -104,6 +129,11 @@ class RadiationProfileSolver:
         else:
             profiles = self.solve()
             handler.write_file(self.parameters, profiles, cache_namespace=self.profile_cache_namespace())
+            if profiles._file_path is not None:
+                self.parameters.to_yaml(
+                    profiles._file_path.with_suffix('.yaml'),
+                    exclude_keys=_PROFILES_YAML_EXCLUDE,
+                )
             logger.info("Radiation profiles computed and saved to cache.")
         return profiles
 
@@ -122,15 +152,15 @@ class RadiationProfileSolver:
         halo_mass_bins, _ = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bins,
-            self.parameters.simulation.halo_mass_accretion_alpha
+            self.parameters.solver.halo_mass_bins,
+            self.parameters.solver.halo_mass_accretion_alpha
         )
         # the halo mass for the bin centers is the one used throughout the profile computation
         halo_mass, halo_mass_derivative = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bin_centers,
-            self.parameters.simulation.halo_mass_accretion_alpha_bin_centers
+            self.parameters.solver.halo_mass_bin_centers,
+            self.parameters.solver.halo_mass_accretion_alpha_bin_centers
         )
         self.halo_mass_evolution = halo_mass
         self.halo_mass_derivative = halo_mass_derivative
@@ -140,14 +170,13 @@ class RadiationProfileSolver:
             logger.info('param.solver.fXh is set to constant. We will assume f_X,h = 2e-4**0.225')
             x_e = np.full(len(self.z_bins), 2e-4)
         else:
-            zz_, sfrd_ = global_qty.compute_sfrd(self.parameters, self.z_bins, halo_mass, halo_mass_derivative)
-            sfrd = np.interp(self.z_bins, zz_, sfrd_, right=0)
-            Gamma_ion, Gamma_sec_ion = mean_gamma_ion_xray(self.parameters, sfrd, self.z_bins)
+            raise NotImplementedError(
+                "Computing x_e from the SFRD (parameters.solver.fXh != 'constant') is not yet implemented. "
+                "The old global_qty.compute_sfrd() was removed during the v2 cleanup. "
+                "Set parameters.solver.fXh = 'constant' to use the default approximation (x_e = 2e-4)."
+            )
 
-            x_e = solve_xe(self.parameters, Gamma_ion, Gamma_sec_ion, self.z_bins)
-            logger.info('param.solver.fXh is not set to constant. We will compute the free e- fraction x_e and assume fXh = x_e**0.225.')
-
-        logger.info(f"Computing profiles for {self.z_bins.size} redshifts, {self.parameters.simulation.halo_mass_bins.size - 1} halo mass bins and {self.parameters.simulation.halo_mass_accretion_alpha.size - 1} alpha bins.")
+        logger.info(f"Computing profiles for {self.z_bins.size} redshifts, {self.parameters.solver.halo_mass_bins.size - 1} halo mass bins and {self.parameters.solver.halo_mass_accretion_alpha.size - 1} alpha bins.")
         r_bubble = self.R_bubble()
 
         rho_xray = self.rho_xray(self.r_grid, x_e)
@@ -199,7 +228,7 @@ class RadiationProfileSolver:
         # b_0(z) - physical baryon density
         physical_baryon_density = baryon_density / scale_factors** 3
         # clumping factor
-        clumping_factor = self.parameters.cosmology.clumping
+        clumping_factor = self.parameters.solver.clumping
 
         nb0_interp  = interp1d(scale_factors, physical_baryon_density, fill_value = 'extrapolate')
         Ngam_interp = interp1d(scale_factors, Ngam_dot, axis = -1, fill_value = 'extrapolate')
@@ -213,7 +242,7 @@ class RadiationProfileSolver:
             return km_per_Mpc / (hubble(z, self.parameters) * a) * (photon_number / baryon_density - alpha_HII(1e4) * clumping_factor / cm_per_Mpc ** 3 * h0 ** 3 * baryon_number * volume).flatten()  # eq 65 from barkana and loeb
 
         # the time dependence will be given by the redshifts (added later)
-        volume_shape = (self.parameters.simulation.halo_mass_bin_n - 1, len(self.parameters.simulation.halo_mass_accretion_alpha) - 1)
+        volume_shape = (self.parameters.solver.halo_mass_nbin - 1, len(self.parameters.solver.halo_mass_accretion_alpha) - 1)
         v0 = np.zeros(volume_shape)
 
         sol = solve_ivp(
@@ -265,7 +294,7 @@ class RadiationProfileSolver:
         N_mu = NE
         nu = np.logspace(np.log(nu_min), np.log(nu_max), N_mu, base=np.e)
 
-        f_He_bynumb = 1 - self.parameters.cosmology.HI_frac
+        f_He_bynumb = 1 - self.parameters.solver.HI_frac
         # hydrogen
         nH0 = (1-f_He_bynumb) * nb0
         # helium
@@ -282,7 +311,18 @@ class RadiationProfileSolver:
         # we cast to int later on because this gives the number of points
         N_prime = np.maximum(N_prime, 4).astype(int) # TODO explain why 4 exactly
 
-        rho_xray = np.zeros((len(rr), self.parameters.simulation.halo_mass_bin_n - 1, len(self.parameters.simulation.halo_mass_accretion_alpha) - 1, len(self.z_bins)))
+        rho_xray = np.zeros((len(rr), self.parameters.solver.halo_mass_nbin - 1, len(self.parameters.solver.halo_mass_accretion_alpha) - 1, len(self.z_bins)))
+
+        # Build dMdt_int once over the full redshift history.
+        # We anchor M_star_dot = 0 at z_star (no emission above the starting redshift) and
+        # include all z_bins. z_prime is always queried in [z_current, z_star], so the
+        # interpolator is never asked to extrapolate below the lowest z_bin.
+        dMdt_int = interp1d(
+            x = np.concatenate(([z_star], self.z_bins)),
+            y = np.concatenate((np.zeros_like(M_star_dot[..., :1]), M_star_dot), axis=-1),
+            axis = -1,
+            fill_value = 'extrapolate',
+        )
 
         for i, z in enumerate(self.z_bins):
             # it only makes sense to compute the profile for z < zstar
@@ -292,28 +332,6 @@ class RadiationProfileSolver:
             # lookback redshift
             z_prime = np.logspace(np.log(z), np.log(z_star), N_prime[i], base=np.e)
             rcom_prime = comoving_distance(z_prime, self.parameters) * h0  # comoving distance
-
-            # TODO: why do we interpolate here if we have the analytical expression?
-            if i == 0: # if zz[0]<zstar, then concatenate two numbers..
-                dMdt_int = interp1d(
-                    x = np.concatenate(([z_star], self.z_bins[:i+1])),
-                    y = np.stack(
-                        (
-                            np.zeros_like(M_star_dot[..., 0]),
-                            M_star_dot[..., 0]
-                        ),
-                        axis = -1
-                    ),
-                    axis = -1,
-                    fill_value='extrapolate'
-                )
-            else:
-                dMdt_int = interp1d(
-                    x = self.z_bins[:i + 1],
-                    y = M_star_dot[..., :i+1],
-                    axis = -1,
-                    fill_value = 'extrapolate'
-                )
 
             # as described in the paper, we express the emission of xrays as a function of distance
             # this is precomputed for a range of parameters: alpha, Mh, z
@@ -368,7 +386,7 @@ class RadiationProfileSolver:
             axes as the inputs.
         """
         # add the decoupling redshift as "initial condition"
-        z0 = self.parameters.cosmology.z_decoupling
+        z0 = self.parameters.solver.z_decoupling
         zz = np.insert(self.z_bins, 0, z0)
 
         # prepend 0 to the rho_xray array to account for the additional z bin

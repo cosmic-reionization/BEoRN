@@ -16,7 +16,7 @@ except RuntimeError:
     # mpi fails to import because the host system does not have it installed
     MPI_ENABLED = False
 
-from .helpers import TQDM_KWARGS
+from .helpers import TQDM_KWARGS, precompute_fft
 from .painters import paint_alpha_profile, paint_ionization_profile, paint_temperature_profile
 from .spread  import spreading_excess_fast
 from ..cosmo import T_adiab_fluctu
@@ -112,6 +112,7 @@ class PaintingCoordinator:
             loader: type[BaseLoader],
             output_handler: Handler,
             cache_handler: Handler = None,
+            force_recompute: bool = False,
         ):
         """
         Initialize the Painter class with the given parameters.
@@ -121,41 +122,108 @@ class PaintingCoordinator:
             loader (BaseLoader): The loader class responsible for providing halo catalogs and density fields.
             output_handler (Handler): The handler for saving the painted output data.
             cache_handler (Handler, optional): The handler for loading and saving cache data that can be reused between runs.
+            force_recompute (bool): If True, repaint all snapshots even when output files already exist.
+                Defaults to False (existing snapshots are reused).
         """
         self.parameters = parameters
         self.output_handler = output_handler
         self.cache_handler = cache_handler
         self.loader = loader
         self.snapshot_count = self.loader.redshifts.size
+        self.force_recompute = force_recompute
 
 
-    def paint_full(self, radiation_profiles: RadiationProfiles) -> TemporalCube:
-        """Paint all redshift snapshots and return a :class:`TemporalCube`.
+    def paint_full(
+        self,
+        radiation_profiles: RadiationProfiles,
+        redshift_subset: "list[float] | None" = None,
+    ) -> TemporalCube:
+        """Paint redshift snapshots and return a :class:`TemporalCube`.
 
-        The method chooses an MPI-enabled execution path when MPI is available; otherwise it runs a local loop.
+        By default all snapshots known to the loader are painted.  Pass
+        ``redshift_subset`` to paint only the snapshots nearest to the
+        requested redshifts — useful when data is sparse or you want a
+        quick run at a few selected epochs.
+
+        The method chooses an MPI-enabled execution path when MPI is available;
+        otherwise it runs a local loop.
 
         Args:
             radiation_profiles (RadiationProfiles): Precomputed 1D profiles.
+            redshift_subset (list[float] | None): If given, only the
+                **halo-bearing** snapshots nearest to each requested redshift
+                are painted.  Density-only snapshots are excluded from
+                matching.  A warning is emitted and the entry skipped when no
+                halo snapshot is within Δz=1.  ``None`` (default) paints all
+                snapshots.
 
         Returns:
             TemporalCube: HDF5-backed collection of painted 3D snapshots.
         """
-
-        # if MPI is being used, use a central dispatcher to assign redshift indices to different processes
-        if MPI_ENABLED:
-            return self.paint_mpi(radiation_profiles)
-        # no mpi - simply run each iteration consecutively in a single loop
+        active_indices = self._resolve_painting_indices(redshift_subset)
+        self.logger.info(self.parameters.summary_str())
+        # Use MPI only when there are actually multiple ranks; a single-rank
+        # MPICommExecutor runs futures in the main process, which causes HDF5
+        # file-handle conflicts with the already-open TemporalCube file.
+        if MPI_ENABLED and MPI.COMM_WORLD.Get_size() > 1:
+            return self.paint_mpi(radiation_profiles, active_indices)
         else:
-            return self.paint_simple_loop(radiation_profiles)
+            return self.paint_simple_loop(radiation_profiles, active_indices)
+
+    def _resolve_painting_indices(
+        self, redshift_subset: "list[float] | None"
+    ) -> list:
+        """Return the loader snapshot indices to paint.
+
+        If ``redshift_subset`` is ``None`` every snapshot is included.
+        Otherwise, for each requested redshift the nearest **halo-bearing**
+        snapshot is selected (density-only snapshots are excluded from
+        matching).  A warning is emitted and the entry is skipped when no
+        halo snapshot is within Δz=1.  Duplicates are removed and the result
+        is sorted.
+        """
+        if redshift_subset is None:
+            return list(range(self.snapshot_count))
+
+        all_z = self.loader.redshifts
+        # Indices that actually have a halo catalog attached.
+        halo_indices = [
+            i for i, cat in enumerate(self.loader.catalogs) if cat is not None
+        ]
+        if not halo_indices:
+            self.logger.warning(
+                "redshift_subset provided but the loader has no halo catalogs at any snapshot."
+            )
+            return []
+
+        halo_z = all_z[halo_indices]
+        indices = []
+        for z_target in redshift_subset:
+            nearest_pos = int(np.argmin(np.abs(halo_z - z_target)))
+            i = halo_indices[nearest_pos]
+            if abs(halo_z[nearest_pos] - z_target) > 1.0:
+                self.logger.warning(
+                    f"Requested z={z_target:.3f} has no halo snapshot within Δz=1.0 "
+                    f"(nearest halo snapshot is z={halo_z[nearest_pos]:.3f}) — skipping."
+                )
+            elif i not in indices:
+                indices.append(i)
+        indices = sorted(indices)
+        self.logger.info(
+            f"redshift_subset: painting {len(indices)} of {self.snapshot_count} "
+            f"available snapshot(s) ({len(halo_indices)} have halo catalogs)."
+        )
+        return indices
 
 
-    def paint_mpi(self, radiation_profiles: RadiationProfiles) -> TemporalCube|None:
+    def paint_mpi(self, radiation_profiles: RadiationProfiles, active_indices: list) -> TemporalCube|None:
         """MPI-enabled painting: distribute redshift snapshots across ranks.
 
         Only the master rank writes and returns the final HDF5 dataset; worker ranks perform painting and send partial results to be appended by the master. This function assumes an MPI communicator is available.
 
         Args:
             radiation_profiles (RadiationProfiles): Precomputed profiles.
+            active_indices (list): Snapshot indices to paint (subset of range(snapshot_count)).
 
         Returns:
             TemporalCube: The assembled temporal cube (returned only on master).
@@ -169,25 +237,52 @@ class PaintingCoordinator:
 
         self.logger.debug(f"Starting painter process on rank {rank}.")
         if rank == 0:
-
-            # this is the "master" process. it will handle writing to the main output file.
             self.logger.info(f"Setting up {comm.Get_size()} painting processes for MPI.")
-
             cube = TemporalCube.create_empty(
                 self.parameters,
                 self.output_handler.file_root,
-                snapshot_number = self.snapshot_count,
                 **self.output_handler.write_kwargs
             )
+            if self.force_recompute:
+                missing_indices = list(active_indices)
+                n_cached = sum(
+                    1 for i in active_indices
+                    if cube.snapshot_path(self.loader.redshifts[i]).exists()
+                )
+                if n_cached:
+                    self.logger.info(
+                        f"force_recompute=True: repainting {n_cached} already-present snapshot(s) "
+                        f"plus {len(active_indices) - n_cached} new snapshot(s)."
+                    )
+            else:
+                missing_indices = [
+                    i for i in active_indices
+                    if not cube.snapshot_path(self.loader.redshifts[i]).exists()
+                ]
+                n_cached = len(active_indices) - len(missing_indices)
+                if n_cached:
+                    self.logger.info(
+                        f"Found {n_cached} already-painted snapshot(s) — skipping "
+                        f"(set force_recompute=True to repaint them)."
+                    )
+            self.logger.info(
+                f"Submitting {len(missing_indices)}/{self.snapshot_count} snapshot(s) to MPI workers."
+            )
+        else:
+            missing_indices = None
 
-        # since the other processes will need to load the radiation profiles from file, we ensure that the file exists
+        missing_indices = comm.bcast(missing_indices, root=0)
+
+        # since workers load radiation profiles from file, ensure the file exists
         if radiation_profiles._file_path is None:
             self.output_handler.write_file(self.parameters, radiation_profiles)
 
         with MPICommExecutor(comm) as executor:
             if executor is not None:
-                # use mpi to automatically assign it to workers
-                futures = {executor.submit(self.paint_single, index, profiles_path = radiation_profiles._file_path): index for index in range(self.snapshot_count)}
+                futures = {
+                    executor.submit(self.paint_single, index, profiles_path=radiation_profiles._file_path): index
+                    for index in missing_indices
+                }
 
                 if rank == 0:
                     for future in as_completed(futures):
@@ -206,46 +301,53 @@ class PaintingCoordinator:
                         )
 
                     self.logger.info(f"Painting of {self.snapshot_count} snapshots done.")
-
-                    # reinitialize the grid data to correctly create the attributes that are mapped from the hdf5 fields
-                    cube = self.output_handler.load_file(self.parameters, TemporalCube)
-                    return cube
+                    return TemporalCube.read(file_path=cube._file_path, parameters=self.parameters)
 
         return None
 
 
-    def paint_simple_loop(self, radiation_profiles: RadiationProfiles) -> TemporalCube:
+    def paint_simple_loop(self, radiation_profiles: RadiationProfiles, active_indices: list) -> TemporalCube:
         """Paint snapshots in a single (possibly multi-process) loop.
 
-        This routine creates an empty :class:`TemporalCube` and iterates
-        over the redshift snapshots, calling :meth:`paint_single` for
-        each index and appending the resulting :class:`CoevalCube`.
+        Creates the ``igm_data_*/`` output directory and iterates over
+        redshift snapshots.  Snapshots whose ``CoevalCube_z{z:.3f}.h5`` file
+        already exists are skipped unless ``force_recompute=True`` was passed
+        to the constructor, allowing interrupted runs to resume automatically.
 
         Args:
             radiation_profiles (RadiationProfiles): Precomputed profiles.
+            active_indices (list): Snapshot indices to paint (subset of range(snapshot_count)).
 
         Returns:
-            TemporalCube: The assembled temporal cube.
+            TemporalCube: The assembled temporal cube loaded from the output directory.
         """
         cube = TemporalCube.create_empty(
             self.parameters,
             self.output_handler.file_root,
-            snapshot_number = self.snapshot_count,
             **self.output_handler.write_kwargs
         )
 
-        self.logger.info(f"Painting profiles onto grid for {self.snapshot_count} redshift snapshots. Using {self.parameters.simulation.cores} processes on a single node.")
+        self.logger.info(
+            f"Painting profiles onto grid for {len(active_indices)} of "
+            f"{self.snapshot_count} redshift snapshots. "
+            f"Using {self.parameters.simulation.cores} processes on a single node."
+        )
 
-        for loop_index in tqdm(range(self.snapshot_count), **TQDM_KWARGS):
-            grid_data = self.paint_single(loop_index, radiation_profiles)
-            # write the painted output to the file (append mode)
-            cube.append(grid_data, loop_index)
+        with tqdm(active_indices, **TQDM_KWARGS) as pbar:
+            for loop_index in pbar:
+                z = self.loader.redshifts[loop_index]
+                pbar.set_postfix(z=f"{z:.3f}", refresh=False)
+                if cube.snapshot_path(z).exists():
+                    if self.force_recompute:
+                        self.logger.info(f"Found painted output for z={z:.3f} — repainting (force_recompute=True).")
+                    else:
+                        self.logger.info(f"Found painted output for z={z:.3f} — skipping (set force_recompute=True to repaint).")
+                        continue
+                grid_data = self.paint_single(loop_index, radiation_profiles)
+                cube.append(grid_data, loop_index)
 
-        self.logger.info(f"Painting of {self.snapshot_count} snapshots done.")
-
-        # reinitialize the grid data to create the attributes that are mapped from the hdf5 fields
-        cube = self.output_handler.load_file(self.parameters, TemporalCube)
-        return cube
+        self.logger.info(f"Painting of {len(active_indices)} snapshots done.")
+        return TemporalCube.read(file_path=cube._file_path, parameters=self.parameters)
 
 
     def paint_single(self, z_index: int, profiles: RadiationProfiles = None, profiles_path: Path = None) -> CoevalCube:
@@ -306,15 +408,28 @@ class PaintingCoordinator:
         halo_catalog = self.loader.load_halo_catalog(z_index)
         delta_b = self.loader.load_density_field(z_index)
 
-        # Use z_local=0 for single-z slice objects, otherwise z_index
-        z_local = 0 if profiles.z_history.size == 1 else z_index
+        if profiles.z_history.size == 1:
+            profile_z_index = 0
+            snap_z = self.loader.redshifts[z_index]
+        else:
+            # Find the profile index whose redshift is nearest to this snapshot's redshift.
+            # When solver.redshifts and simulation.snapshot_redshifts are the same grid this is a
+            # direct lookup; when snapshot_redshifts is a coarser subset the nearest
+            # profile step is used.
+            snap_z = self.loader.redshifts[z_index]
+            profile_z_index = int(np.argmin(np.abs(profiles.z_history - snap_z)))
+        if abs(profiles.z_history[profile_z_index] - snap_z) > 0.5:
+            self.logger.warning(
+                f"Snapshot z={snap_z:.3f} is more than Δz=0.5 away from the nearest "
+                f"profile redshift z={profiles.z_history[profile_z_index]:.3f}. "
+                "Consider adding more steps to solver.redshifts."
+            )
 
-        # find matching redshift between solver output and simulation snapshot.
-        zgrid = profiles.z_history[z_local]
-        mass_range = profiles.halo_mass_bins[..., z_local]
+        zgrid = profiles.z_history[profile_z_index]
+        mass_range = profiles.halo_mass_bins[..., profile_z_index]
 
         # log some information about the current "paintable range"
-        alphas = self.parameters.simulation.halo_mass_accretion_alpha
+        alphas = self.parameters.solver.halo_mass_accretion_alpha
         self.logger.debug(
             f"Got {mass_range.shape[0]}x{mass_range.shape[1]} profiles. Range: "
             f"alpha={alphas[0]:.2f} [{mass_range[...,0].min():.2e} - {mass_range[..., 0].max():.2e} Msun] and "
@@ -329,6 +444,18 @@ class PaintingCoordinator:
         # but there are a few short-circuits:
         # 1. if there are no halos at all -> skip the painting
         # 2. if there are halos but they lie outside the mass range -> raise an error
+
+        if halo_catalog.masses.size == 0:
+            self.logger.info(f'No halos at z={zgrid:.2f}. Returning empty grids.')
+            grid_data = CoevalCube(
+                parameters=self.parameters,
+                z=zgrid,
+                delta_b=delta_b,
+                Grid_Temp=T_adiab_fluctu(zgrid, self.parameters, delta_b),
+                Grid_xHII=zero_grid.copy(),
+                Grid_xal=zero_grid.copy(),
+            )
+            return grid_data
 
         if halo_catalog.masses.max() > mass_range.max() or halo_catalog.masses.min() < mass_range.min():
             raise RuntimeError(f"The current halo catalog at z={zgrid} has a higher masse range ({halo_catalog.masses.max():.2e} - {halo_catalog.masses.min():.2e}) than the mass range of the precomputed profiles ({mass_range.max():.2e} - {mass_range.min():.2e}). You need to adjust your parameters: either increase the mass range of the profile simulation (parameters.simulation) or decrease the mass range of star forming halos (parameters.source).")
@@ -362,8 +489,8 @@ class PaintingCoordinator:
             ## iterate over the range of mass and alpha bins that the profiles are available for
             # the alpha bins are constant so we can use the ones from the parameters
             # the mass bins are more tricky - they follow the mass accretion history i.e. they shift with each redshift step
-            alpha_indices = range(len(self.parameters.simulation.halo_mass_accretion_alpha) - 1)
-            mass_indices = range(len(self.parameters.simulation.halo_mass_bins) - 1)
+            alpha_indices = range(len(self.parameters.solver.halo_mass_accretion_alpha) - 1)
+            mass_indices = range(len(self.parameters.solver.halo_mass_bins) - 1)
 
             # now each profile was computed for a precise mass/alpha value that we set to be the center points of the bins
             # => in the actual profile the shape is (l-1)x(m-1)x(n-1) where l,m,n are the number of bins in mass, alpha and redshift
@@ -376,8 +503,8 @@ class PaintingCoordinator:
             for alpha_index in alpha_indices:
                 # the alpha range is simply defined by the parameters
                 loop_alpha_range = [
-                    self.parameters.simulation.halo_mass_accretion_alpha[alpha_index],
-                    self.parameters.simulation.halo_mass_accretion_alpha[alpha_index + 1]
+                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index],
+                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index + 1]
                 ]
                 for mass_index in mass_indices:
 
@@ -393,7 +520,7 @@ class PaintingCoordinator:
                     total_halos += halo_indices.size
 
                     # since the profiles are large and copied in the multiprocessing approach, we only pass the relevant slice
-                    profiles_of_bin = profiles.profiles_of_halo_bin(z_local, alpha_index, mass_index)
+                    profiles_of_bin = profiles.profiles_of_halo_bin(profile_z_index, alpha_index, mass_index)
                     assert not np.any(np.isnan(profiles_of_bin[0])), "R_bubble at the current range seem to be malformed (got nan values)"
                     assert not np.any(np.isnan(profiles_of_bin[1])), "rho_alpha at the current range seem to be malformed (got nan values)"
                     assert not np.any(np.isnan(profiles_of_bin[2])), "rho_heat at the current range seem to be malformed (got nan values)"
@@ -544,14 +671,24 @@ class PaintingCoordinator:
         halo_catalog = self.loader.load_halo_catalog(z_index)
         delta_b = self.loader.load_density_field(z_index)
 
-        # Use z_local=0 for single-z slice objects, otherwise z_index
-        z_local = 0 if profiles.z_history.size == 1 else z_index
-        zgrid = profiles.z_history[z_local]
-        mass_range = profiles.halo_mass_bins[..., z_local]
+        if profiles.z_history.size == 1:
+            profile_z_index = 0
+            snap_z = self.loader.redshifts[z_index]
+        else:
+            snap_z = self.loader.redshifts[z_index]
+            profile_z_index = int(np.argmin(np.abs(profiles.z_history - snap_z)))
+        if abs(profiles.z_history[profile_z_index] - snap_z) > 0.5:
+            self.logger.warning(
+                f"Snapshot z={snap_z:.3f} is more than Δz=0.5 away from the nearest "
+                f"profile redshift z={profiles.z_history[profile_z_index]:.3f}. "
+                "Consider adding more steps to solver.redshifts."
+            )
+        zgrid = profiles.z_history[profile_z_index]
+        mass_range = profiles.halo_mass_bins[..., profile_z_index]
 
         rng = self._make_f_st_rng(z_index)  # create a random number generator for sampling f_st values, seeded by the redshift index to ensure reproducibility
 
-        alphas = self.parameters.simulation.halo_mass_accretion_alpha
+        alphas = self.parameters.solver.halo_mass_accretion_alpha
         self.logger.debug(
             f"Got {mass_range.shape[0]}x{mass_range.shape[1]} profile-bin edges. Range: "
             f"alpha={alphas[0]:.2f} [{mass_range[...,0].min():.2e} - {mass_range[..., 0].max():.2e} Msun] and "
@@ -589,16 +726,16 @@ class PaintingCoordinator:
             futures = []
             total_halos = 0
 
-            alpha_indices = range(len(self.parameters.simulation.halo_mass_accretion_alpha) - 1)
-            mass_indices = range(len(self.parameters.simulation.halo_mass_bins) - 1)
+            alpha_indices = range(len(self.parameters.solver.halo_mass_accretion_alpha) - 1)
+            mass_indices = range(len(self.parameters.solver.halo_mass_bins) - 1)
 
             self.logger.debug(f"Using {self.parameters.simulation.cores} processes for painting.")
             start_time = time.time()
 
             for alpha_index in alpha_indices:
                 loop_alpha_range = [
-                    self.parameters.simulation.halo_mass_accretion_alpha[alpha_index],
-                    self.parameters.simulation.halo_mass_accretion_alpha[alpha_index + 1]
+                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index],
+                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index + 1]
                 ]
 
                 for mass_index in mass_indices:
@@ -632,7 +769,7 @@ class PaintingCoordinator:
                         total_halos += subhalo_local_indices.size
 
                         profiles_of_bin = profiles.profiles_of_halo_bin(
-                            z_local,
+                            profile_z_index,
                             alpha_index,
                             mass_index,
                             int(f_st_index)
@@ -855,6 +992,8 @@ class PaintingCoordinator:
 
         # place the halos on the grid so that they can be used in a convolution
         halo_grid = halo_catalog.to_mesh()
+        # precompute the FFT of the halo grid once; all three paint functions reuse it
+        fft_halo_grid = precompute_fft(halo_grid)
 
         # Every halo in the mass bin i is assumed to have the mass M_bin[i].
         if buffer_xHII:
@@ -865,7 +1004,8 @@ class PaintingCoordinator:
 
             # modify Grid_xHII in place
             paint_ionization_profile(
-                output_grid_xHII, radial_grid, x_HII_profile, nGrid, LBox, z, halo_grid
+                output_grid_xHII, radial_grid, x_HII_profile, nGrid, LBox, z, halo_grid,
+                fft_halo_grid=fft_halo_grid,
             )
 
         if buffer_lyal:
@@ -877,7 +1017,8 @@ class PaintingCoordinator:
             # TODO - document how r_lyal is the physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
             # modify Grid_xal in place
             paint_alpha_profile(
-                output_grid_lyal, r_lyal, x_alpha_prof, nGrid, LBox, self.parameters.simulation.minimum_grid_size_lyal, z, truncate, halo_grid
+                output_grid_lyal, r_lyal, x_alpha_prof, nGrid, LBox, self.parameters.simulation.minimum_grid_size_lyal, z, truncate, halo_grid,
+                fft_halo_grid=fft_halo_grid,
             )
 
         if buffer_temp:
@@ -885,5 +1026,6 @@ class PaintingCoordinator:
             output_grid_temp = np.ndarray(output_shape, dtype=np.float64, buffer=buffer_temp.buf)
             # modify Grid_Temp in place
             paint_temperature_profile(
-                output_grid_temp, radial_grid, Temp_profile, nGrid, LBox, self.parameters.simulation.minimum_grid_size_heat, z, truncate, halo_grid
+                output_grid_temp, radial_grid, Temp_profile, nGrid, LBox, self.parameters.simulation.minimum_grid_size_heat, z, truncate, halo_grid,
+                fft_halo_grid=fft_halo_grid,
             )
