@@ -12,11 +12,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-SCRATCH_ROOT = Path("/xdisk/timeifler/yhhuang/BEoRN-v2/")
+SCRATCH_ROOT = Path("/xdisk/timeifler/yhhuang/BEoRN-v2/coarse_grid_test/")
 FILE_ROOT = Path("/xdisk/timeifler/yhhuang/Thesan/")
 
-CACHE_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "cache"
-DTB_OUTPUT_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "output_dtb"
+CACHE_ROOT = SCRATCH_ROOT / "cache"
+DTB_OUTPUT_ROOT = SCRATCH_ROOT / "output_dtb"
 
 DEFAULT_PARAMETER_FILE = "coarse_grid.yaml"
 PARAMETER_FILE = Path(os.environ.get("BEORN_PARAMETER_FILE", DEFAULT_PARAMETER_FILE))

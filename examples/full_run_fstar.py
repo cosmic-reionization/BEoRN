@@ -17,11 +17,11 @@ except Exception:
     _comm = None
     _rank = 0
 # change the simulation-related paths here
-SCRATCH_ROOT = Path("/xdisk/timeifler/yhhuang/BEoRN-v2/")
+SCRATCH_ROOT = Path("/xdisk/timeifler/yhhuang/BEoRN-v2/coarse_grid_test/")
 FILE_ROOT = Path("/xdisk/timeifler/yhhuang/Thesan/")
 
-CACHE_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "cache"
-OUTPUT_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "output"
+CACHE_ROOT = SCRATCH_ROOT / "cache"
+OUTPUT_ROOT = SCRATCH_ROOT / "output"
 
 DEFAULT_PARAMETER_FILE = "coarse_grid.yaml"
 PARAMETER_FILE = Path(os.environ.get("BEORN_PARAMETER_FILE", DEFAULT_PARAMETER_FILE))
