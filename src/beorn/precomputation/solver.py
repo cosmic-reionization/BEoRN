@@ -12,7 +12,7 @@ from scipy.integrate import trapezoid, solve_ivp
 from scipy.interpolate import interp1d
 import logging
 
-from ..cosmo import comoving_distance, hubble
+from ..cosmo import comoving_distance, hubble, Hubble
 from ..cross_sections import alpha_HII
 from ..cross_sections import sigma_HI, sigma_HeI
 from ..io import Handler
@@ -199,6 +199,40 @@ class RadiationProfileSolver:
 
 
 
+    def _z_star_at(self, z: float) -> float:
+        """Return the maximum lookback redshift for X-ray integration at redshift *z*.
+
+        When ``parameters.source.source_age`` is ``None`` (default), the
+        original hardcoded value of 35 is used.  Otherwise the lookback
+        window is capped at ``source_age`` Myr by integrating
+        dt = dz / ((1+z) H(z)) backward from *z*.
+
+        Args:
+            z (float): Current redshift at which the profile is evaluated.
+
+        Returns:
+            float: Maximum redshift to integrate back to (z_star).
+        """
+        z_source_start = self.parameters.solver.z_source_start
+        t_source_age   = self.parameters.source.t_source_age
+        if t_source_age is None:
+            return z_source_start
+
+        # Build a fine redshift grid from z up to z_source_start and integrate
+        # dt/dz = 1 / ((1+z') H(z')) to find where the accumulated lookback
+        # time equals t_source_age.
+        z_grid = np.linspace(z, z_source_start, 5000)
+        # H(z) in yr⁻¹ → dt in Myr per dz step
+        dt_dz  = 1e-6 / ((1 + z_grid) * Hubble(z_grid, self.parameters))  # Myr per unit z
+        dz     = np.diff(z_grid)
+        cumulative_age = np.concatenate(([0.0], np.cumsum(0.5 * (dt_dz[:-1] + dt_dz[1:]) * dz)))
+
+        # Find the redshift where the cumulative lookback time reaches t_source_age
+        idx = np.searchsorted(cumulative_age, t_source_age)
+        if idx >= len(z_grid):
+            return z_source_start
+        return float(z_grid[idx])
+
     def R_bubble(self):
         """Compute the ionized bubble radius evolution for each mass/alpha bin.
 
@@ -273,8 +307,6 @@ class RadiationProfileSolver:
         Om = self.parameters.cosmology.Om
         Ob = self.parameters.cosmology.Ob
         h0 = self.parameters.cosmology.h
-        # TODO: remove hardcoded values
-        z_star = 35
         Emin = self.parameters.source.energy_cutoff_min_xray
         Emax = self.parameters.source.energy_cutoff_max_xray
         NE = 50
@@ -299,34 +331,35 @@ class RadiationProfileSolver:
         M_star_dot = (Ob / Om) * f_star_Halo(self.parameters, self.halo_mass_evolution) * self.halo_mass_derivative
         M_star_dot[np.where(self.halo_mass_evolution < self.parameters.source.halo_mass_min)] = 0
 
-        # compute the N prime array before hand
-        # TODO what is N prime?
-        # for this computation we consider the maximum redshift to be z_star
-        z_range = z_star - self.z_bins
-        N_prime = z_range / dz_prime
-        # we cast to int later on because this gives the number of points
-        N_prime = np.maximum(N_prime, 4).astype(int) # TODO explain why 4 exactly
-
         rho_xray = np.zeros((len(rr), self.parameters.solver.halo_mass_nbin - 1, len(self.parameters.solver.halo_mass_accretion_alpha) - 1, len(self.z_bins)))
 
         # Build dMdt_int once over the full redshift history.
-        # We anchor M_star_dot = 0 at z_star (no emission above the starting redshift) and
-        # include all z_bins. z_prime is always queried in [z_current, z_star], so the
-        # interpolator is never asked to extrapolate below the lowest z_bin.
+        # We anchor M_star_dot = 0 at z_source_start (no emission above the starting
+        # redshift) and include all z_bins. z_prime is always queried in
+        # [z_current, z_star_i], so the interpolator is never extrapolated below
+        # the lowest z_bin.
+        _z_anchor = self.parameters.solver.z_source_start
         dMdt_int = interp1d(
-            x = np.concatenate(([z_star], self.z_bins)),
+            x = np.concatenate(([_z_anchor], self.z_bins)),
             y = np.concatenate((np.zeros_like(M_star_dot[..., :1]), M_star_dot), axis=-1),
             axis = -1,
             fill_value = 'extrapolate',
         )
 
         for i, z in enumerate(self.z_bins):
-            # it only makes sense to compute the profile for z < zstar
-            if z > z_star:
+            # Determine the maximum lookback redshift for this snapshot.
+            # When source_age is set, this caps the integration window to the
+            # halo's lifetime; otherwise the full history back to z=35 is used.
+            z_star_i = self._z_star_at(z)
+
+            if z > z_star_i:
                 continue
 
-            # lookback redshift
-            z_prime = np.logspace(np.log(z), np.log(z_star), N_prime[i], base=np.e)
+            # Number of integration points over the lookback window [z, z_star_i]
+            N_prime_i = max(4, int((z_star_i - z) / dz_prime))
+
+            # lookback redshift grid for this snapshot
+            z_prime = np.logspace(np.log(z), np.log(z_star_i), N_prime_i, base=np.e)
             rcom_prime = comoving_distance(z_prime, self.parameters) * h0  # comoving distance
 
             # as described in the paper, we express the emission of xrays as a function of distance

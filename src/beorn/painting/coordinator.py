@@ -265,12 +265,17 @@ class PaintingCoordinator:
         with tqdm(active_indices, **TQDM_KWARGS) as pbar:
             for loop_index in pbar:
                 z = self.loader.redshifts[loop_index]
-                pbar.set_postfix(z=f"{z:.3f}", refresh=False)
-                if cube.snapshot_path(z).exists():
+                # Use the profile-matched redshift for the filename check: paint_single
+                # writes CoevalCube with z=zgrid (nearest profile z), so we must look
+                # for that name rather than the raw loader redshift which may differ.
+                profile_z_index = int(np.argmin(np.abs(radiation_profiles.z_history - z)))
+                zgrid = float(radiation_profiles.z_history[profile_z_index])
+                pbar.set_postfix(z=f"{zgrid:.3f}", refresh=False)
+                if cube.snapshot_path(zgrid).exists():
                     if self.force_recompute:
-                        self.logger.info(f"Found painted output for z={z:.3f} — repainting (force_recompute=True).")
+                        self.logger.info(f"Found painted output for z={zgrid:.3f} — repainting (force_recompute=True).")
                     else:
-                        self.logger.info(f"Found painted output for z={z:.3f} — skipping (set force_recompute=True to repaint).")
+                        self.logger.info(f"Found painted output for z={zgrid:.3f} — skipping (set force_recompute=True to repaint).")
                         continue
                 grid_data = self.paint_single(loop_index, radiation_profiles)
                 cube.append(grid_data, loop_index)
