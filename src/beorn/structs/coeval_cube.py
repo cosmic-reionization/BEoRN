@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+import h5py
 
 from .base_struct import BaseStruct
 from .base_quantities import GridBasePropertiesMixin
@@ -22,6 +23,21 @@ class CoevalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMixin
         processes. This helper converts such datasets to numpy arrays in
         place.
         """
-        for field in self.__dataclass_fields__.values():
+        open_files = {}
+        for field in fields(self):
             value = getattr(self, field.name)
-            # TODO
+            if not isinstance(value, h5py.Dataset):
+                continue
+
+            try:
+                open_files[id(value.file)] = value.file
+            except Exception:
+                pass
+
+            setattr(self, field.name, value[:])
+
+        for file_handle in open_files.values():
+            try:
+                file_handle.close()
+            except Exception:
+                pass

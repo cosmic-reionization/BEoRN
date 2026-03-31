@@ -1,5 +1,6 @@
 import sys
 import types
+import pickle
 
 # Optional dependency stub: importing beorn may pull in the pylians backend.
 if "MAS_library" not in sys.modules:
@@ -289,6 +290,33 @@ def test_temporal_cube_append_works_after_reloading_manifest(tmp_path):
     snapshot_dir = TemporalCube.snapshot_directory(cube._file_path)
     snapshot_file = snapshot_dir / TemporalCube.snapshot_file_name(params, "Grid_xHII", 0)
     assert snapshot_file.exists()
+
+
+def test_coeval_cube_to_arrays_makes_cached_cube_picklable(tmp_path):
+    from beorn.io.handler import Handler
+
+    params = Parameters()
+    params.simulation.Ncell = 4
+    params.simulation.Lbox = 10.0
+    params.simulation.store_grids = ["Grid_xHII", "Grid_Temp", "Grid_xal"]
+
+    handler = Handler(file_root=tmp_path)
+    cube = CoevalCube(
+        z=10.0,
+        parameters=params,
+        delta_b=np.zeros((4, 4, 4), dtype=float),
+        Grid_Temp=np.ones((4, 4, 4), dtype=float),
+        Grid_xHII=np.full((4, 4, 4), 0.25, dtype=float),
+        Grid_xal=np.full((4, 4, 4), 2.0, dtype=float),
+    )
+    handler.write_file(params, cube, z_index=0)
+
+    cached = handler.load_file(params, CoevalCube, z_index=0)
+    cached.to_arrays()
+    payload = pickle.dumps(cached)
+
+    assert isinstance(payload, bytes)
+    assert isinstance(cached.Grid_xHII, np.ndarray)
 
 
 def test_sample_f_st_for_halos_normal_distribution_is_clipped():
