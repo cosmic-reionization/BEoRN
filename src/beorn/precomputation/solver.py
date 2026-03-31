@@ -552,7 +552,7 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
             getattr(
                 solver_cfg,
                 "halo_mass_accretion_alpha_bin_centers",
-                solver_cfg.halo_mass_accreation_alpha_bin_centers,
+                solver_cfg.halo_mass_accretion_alpha_bin_centers,
             )
         )
 
