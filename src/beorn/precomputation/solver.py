@@ -534,18 +534,26 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
                 )
                 return
 
+        solver_cfg = self.parameters.solver
+        if not hasattr(solver_cfg, "halo_mass_bins"):
+            solver_cfg = self.parameters.simulation
+
         halo_mass_bins, _ = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bins,
-            self.parameters.simulation.halo_mass_accretion_alpha
+            solver_cfg.halo_mass_bins,
+            solver_cfg.halo_mass_accretion_alpha
         )
 
         halo_mass, halo_mass_derivative = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bin_centers,
-            self.parameters.simulation.halo_mass_accreation_alpha_bin_centers
+            solver_cfg.halo_mass_bin_centers,
+            getattr(
+                solver_cfg,
+                "halo_mass_accretion_alpha_bin_centers",
+                solver_cfg.halo_mass_accreation_alpha_bin_centers,
+            )
         )
 
         self.halo_mass_evolution = halo_mass
@@ -563,13 +571,13 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
 
         logger.info(
             f"Computing profiles for {self.z_bins.size} redshifts, "
-            f"{self.parameters.simulation.halo_mass_bins.size - 1} halo mass bins, "
-            f"{self.parameters.simulation.halo_mass_accretion_alpha.size - 1} alpha bins and "
+            f"{solver_cfg.halo_mass_bins.size - 1} halo mass bins, "
+            f"{solver_cfg.halo_mass_accretion_alpha.size - 1} alpha bins and "
             f"{self.f_st_grid.size} f_st values."
         )
 
-        mass_n = self.parameters.simulation.halo_mass_bin_n - 1
-        alpha_n = len(self.parameters.simulation.halo_mass_accretion_alpha) - 1
+        mass_n = getattr(solver_cfg, "halo_mass_nbin", solver_cfg.halo_mass_bin_n) - 1
+        alpha_n = len(solver_cfg.halo_mass_accretion_alpha) - 1
         z_n = len(self.z_bins)
         f_n = self.f_st_grid.size
 

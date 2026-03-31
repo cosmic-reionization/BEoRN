@@ -29,7 +29,7 @@ PARAMETER_FILE = Path(os.environ.get("BEORN_PARAMETER_FILE", DEFAULT_PARAMETER_F
 
 ### Parameter setup
 parameters = beorn.structs.Parameters.from_yaml(PARAMETER_FILE)
-parameters.simulation.file_root = FILE_ROOT
+parameters.cosmo_sim.file_root = FILE_ROOT
 parameters.solver.redshifts = np.sort(parameters.solver.redshifts)
 
 ### IO setup
