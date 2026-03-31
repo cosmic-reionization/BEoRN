@@ -1,6 +1,7 @@
 import sys
 import types
 import pickle
+import h5py
 
 # Optional dependency stub: importing beorn may pull in the pylians backend.
 if "MAS_library" not in sys.modules:
@@ -543,6 +544,47 @@ def test_paint_single_fstar_cache_uses_fstar_namespace():
     assert calls["kwargs"]["cache_namespace"] == coordinator._paint_cache_namespace(profiles)
 
 
+def test_paint_single_fstar_profiles_path_uses_nearest_profile_redshift(tmp_path, monkeypatch):
+    coordinator = make_coordinator(seed=1003)
+    coordinator.loader.redshifts = np.array([15.0, 10.0])
+
+    profiles_path = tmp_path / "fstar_profiles.h5"
+    z_history = np.array([18.0, 15.0, 12.0, 9.0])
+    halo_mass_bins = np.zeros((3, 1, 4), dtype=float)
+    halo_mass_bins[..., 0] = 100.0
+    halo_mass_bins[..., 1] = 200.0
+    halo_mass_bins[..., 2] = 300.0
+    halo_mass_bins[..., 3] = 400.0
+
+    with h5py.File(profiles_path, "w") as h5:
+        h5.create_dataset("r_grid_cell", data=np.logspace(-2, 1, 3))
+        h5.create_dataset("r_lyal", data=np.logspace(-5, 2, 5))
+        h5.create_dataset("f_st_grid", data=np.array([0.01, 0.05]))
+        h5.create_dataset("z_history", data=z_history)
+        h5.create_dataset("halo_mass_bins", data=halo_mass_bins)
+        h5.create_dataset("R_bubble", data=np.ones((2, 1, 2, 4)))
+        h5.create_dataset("rho_xray", data=np.ones((3, 2, 1, 2, 4)))
+        h5.create_dataset("rho_heat", data=np.ones((3, 2, 1, 2, 4)))
+        h5.create_dataset("rho_alpha", data=np.ones((5, 2, 1, 2, 4)))
+
+    captured = {}
+
+    def fake_paint_single_fstar(self, z_index, profiles):
+        captured["z_index"] = z_index
+        captured["z_history"] = profiles.z_history.copy()
+        captured["halo_mass_bins"] = profiles.halo_mass_bins.copy()
+        return "fstar-from-path"
+
+    monkeypatch.setattr(PaintingCoordinator, "paint_single_fstar", fake_paint_single_fstar)
+
+    result = coordinator.paint_single(1, profiles_path=profiles_path)
+
+    assert result == "fstar-from-path"
+    assert captured["z_index"] == 1
+    np.testing.assert_allclose(captured["z_history"], np.array([9.0]))
+    np.testing.assert_allclose(captured["halo_mass_bins"], halo_mass_bins[..., 3][..., None])
+
+
 
 # Integration test for Handler cache namespace isolation
 def test_handler_cache_namespace_isolation_roundtrip(tmp_path):
@@ -612,6 +654,11 @@ def test_paint_single_fstar_end_to_end_cache_roundtrip(tmp_path, monkeypatch):
 
     paint_calls = {"count": 0}
 
+    def as_array(buffer):
+        if isinstance(buffer, np.ndarray):
+            return buffer
+        return np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer.buf)
+
     def fake_paint_single_mass_bin(
         self,
         halo_catalog,
@@ -625,14 +672,11 @@ def test_paint_single_fstar_end_to_end_cache_roundtrip(tmp_path, monkeypatch):
     ):
         paint_calls["count"] += 1
         if buffer_xHII is not None:
-            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_xHII.buf)
-            arr += 1.0
+            as_array(buffer_xHII)[:] += 1.0
         if buffer_temp is not None:
-            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_temp.buf)
-            arr += 2.0
+            as_array(buffer_temp)[:] += 2.0
         if buffer_lyal is not None:
-            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_lyal.buf)
-            arr += 3.0
+            as_array(buffer_lyal)[:] += 3.0
 
     monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_paint_single_mass_bin)
     monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_fast", lambda parameters, grid: grid)
@@ -724,6 +768,8 @@ def test_mpi_paint_single_fstar_cache_roundtrip(tmp_path, monkeypatch):
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
+    if comm.Get_size() < 2:
+        pytest.skip("MPI cache roundtrip test requires at least 2 ranks")
 
     # Under mpirun, each rank runs its own pytest process, so tmp_path may differ.
     # Create one shared cache directory on rank 0 and broadcast it.
@@ -747,6 +793,11 @@ def test_mpi_paint_single_fstar_cache_roundtrip(tmp_path, monkeypatch):
 
     paint_calls = {"count": 0}
 
+    def as_array(buffer):
+        if isinstance(buffer, np.ndarray):
+            return buffer
+        return np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer.buf)
+
     def fake_paint_single_mass_bin(
         self,
         halo_catalog,
@@ -760,14 +811,11 @@ def test_mpi_paint_single_fstar_cache_roundtrip(tmp_path, monkeypatch):
     ):
         paint_calls["count"] += 1
         if buffer_xHII is not None:
-            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_xHII.buf)
-            arr += 1.0
+            as_array(buffer_xHII)[:] += 1.0
         if buffer_temp is not None:
-            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_temp.buf)
-            arr += 2.0
+            as_array(buffer_temp)[:] += 2.0
         if buffer_lyal is not None:
-            arr = np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer_lyal.buf)
-            arr += 3.0
+            as_array(buffer_lyal)[:] += 3.0
 
     monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_paint_single_mass_bin)
     monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_fast", lambda parameters, grid: grid)

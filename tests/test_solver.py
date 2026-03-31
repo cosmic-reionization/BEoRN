@@ -256,6 +256,8 @@ def test_mpi_fstar_profile_cache_roundtrip(tmp_path, monkeypatch):
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
+    if comm.Get_size() < 2:
+        pytest.skip("MPI f_st profile cache roundtrip requires at least 2 ranks")
 
     # Under mpirun, each rank runs its own pytest process, so tmp_path may differ
     # between ranks. Build one shared cache directory on rank 0 and broadcast it.
