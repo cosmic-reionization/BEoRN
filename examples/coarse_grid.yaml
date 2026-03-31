@@ -55,6 +55,9 @@ solver:
   halo_mass_bin_max: 1.0e+15
   halo_mass_nbin: 200
   halo_mass_accretion_alpha: [0.3, 0.7, 1.1]
+  HI_frac: 0.92
+  clumping: 1
+  z_decoupling: 135
 
 cosmo_sim:
   random_seed: 12345
@@ -68,6 +71,3 @@ cosmology:
   h: 0.68
   sigma_8: 0.83
   ns: 0.96
-  HI_frac: 0.92
-  clumping: 1
-  z_decoupling: 135
