@@ -59,6 +59,11 @@ case "$RUN_MODE" in
     ;;
 esac
 
+# Keep the main run and postprocessing on the same parameter file.
+# Override this at submission time if needed, e.g.
+#   sbatch --export=BEORN_PARAMETER_FILE=parameters_fstar.yaml examples/run_beorn_hpc.slurm
+export BEORN_PARAMETER_FILE="${BEORN_PARAMETER_FILE:-coarse_grid.yaml}"
+
 # Memory note:
 # Each MPI rank allocates 3D grids of size Ncell^3 (float64) for Grid_xHII, Grid_Temp, Grid_xal
 # plus delta_b and intermediate arrays. For Ncell=512, one float64 grid is ~1.07 GiB.

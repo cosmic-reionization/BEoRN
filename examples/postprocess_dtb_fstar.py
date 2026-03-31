@@ -1,5 +1,6 @@
 from pathlib import Path
 import logging
+import os
 
 import h5py
 import numpy as np
@@ -17,7 +18,8 @@ FILE_ROOT = Path("/xdisk/timeifler/yhhuang/Thesan/")
 OUTPUT_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "output"
 DTB_OUTPUT_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "output_dtb"
 
-PARAMETER_FILE = Path(".") / "parameters_fstar.yaml"
+DEFAULT_PARAMETER_FILE = "coarse_grid.yaml"
+PARAMETER_FILE = Path(os.environ.get("BEORN_PARAMETER_FILE", DEFAULT_PARAMETER_FILE))
 
 
 def main() -> None:
