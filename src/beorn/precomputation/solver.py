@@ -555,16 +555,11 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
             logger.info('param.solver.fXh is set to constant. We will assume f_X,h = 2e-4**0.225')
             x_e = np.full(len(self.z_bins), 2e-4)
         else:
-            zz_, sfrd_ = global_qty.compute_sfrd(
-                self.parameters,
-                self.z_bins,
-                halo_mass,
-                halo_mass_derivative
+            raise NotImplementedError(
+                "Computing x_e from the SFRD (parameters.solver.fXh != 'constant') is not yet implemented. "
+                "The old global_qty.compute_sfrd() was removed during the v2 cleanup. "
+                "Set parameters.solver.fXh = 'constant' to use the default approximation (x_e = 2e-4)."
             )
-            sfrd = np.interp(self.z_bins, zz_, sfrd_, right=0)
-            Gamma_ion, Gamma_sec_ion = mean_gamma_ion_xray(self.parameters, sfrd, self.z_bins)
-            x_e = solve_xe(self.parameters, Gamma_ion, Gamma_sec_ion, self.z_bins)
-            logger.info('param.solver.fXh is not set to constant. We will compute the free e- fraction x_e and assume fXh = x_e**0.225.')
 
         logger.info(
             f"Computing profiles for {self.z_bins.size} redshifts, "
