@@ -1,0 +1,71 @@
+simulation:
+  cores: 1
+  halo_mass_bin_min: 1.0e+7
+  halo_mass_bin_max: 1.0e+15
+  halo_mass_bin_n: 200
+  halo_mass_accretion_alpha: [0.3, 0.7, 1.1]
+  Lbox: 95.5
+  Ncell: 8
+  store_grids: ['Grid_Temp', 'Grid_xHII', 'Grid_xal']
+  spreading_pixel_threshold: -1
+  spreading_subgrid_approximation: true
+  minimum_grid_size_heat: 4
+  minimum_grid_size_lyal: 16
+  random_seed: 12345
+  compute_s_alpha_fluctuations: true
+  compute_x_coll_fluctuations: true
+  halo_catalogs_thesan_mass_assignment: 'CIC'
+
+source:
+  source_type: 'SED'
+  Nion: 5000
+  energy_cutoff_min_xray: 500
+  energy_cutoff_max_xray: 2000
+  energy_min_sed_xray: 200
+  energy_max_sed_xray: 2000
+  alS_xray: 1.5
+  xray_normalisation: 3.4e+40
+  n_lyman_alpha_photons: 9690
+  lyman_alpha_power_law: 0.0
+  f0_esc: 0.26
+  pl_esc: 0.0
+  Mp_esc: 1.0e+10
+  min_xHII_value: 0
+  mass_accretion_lookback: 5
+
+  # --- f_st grid precomputation / painting ---
+  # 'f_st' can be treated as the “target” value for painting (e.g. nearest slice),
+  # while the solver precomputes the full grid below.
+  f_st: 0.1
+  f_st_grid_min: 0.01
+  f_st_grid_max: 0.2
+  f_st_grid_n: 5
+  f_st_paint_distribution: 'lognormal'
+  f_st_paint_sigma: 0.1
+  f_st_paint_min: 0.01
+  f_st_paint_max: 0.2
+  f_st_paint_seed: 12345
+
+  g1: 0.49
+  g2: -0.61
+  g3: 1
+  g4: 1
+  Mp: 2.8e+10
+  Mt: 7.35e+8
+  halo_mass_min: 5.0e+8
+  halo_mass_max: 1.0e+16
+
+solver:
+  fXh: 'constant'
+
+cosmology:
+  Om: 0.31
+  Ob: 0.045
+  Ol: 0.68
+  rho_c: 2.775e+11
+  h: 0.68
+  sigma_8: 0.83
+  ns: 0.96
+  HI_frac: 0.92
+  clumping: 1
+  z_decoupling: 135

@@ -17,14 +17,14 @@ from ..cross_sections import alpha_HII
 from ..cross_sections import sigma_HI, sigma_HeI
 from ..io import Handler
 from ..structs.parameters import Parameters
-from ..structs.radiation_profiles import RadiationProfiles
+from ..structs.radiation_profiles import RadiationProfiles, RadiationProfilesFStarGrid
 from .. import constants
 # TODO: replace these unit conversions by astropy units
 from ..constants import m_p_in_Msun, km_per_Mpc, h_eV_sec, cm_per_Mpc, E_HI, E_HeI, kb_eV_per_K, rhoc0
 from ..astro import f_Xh, f_star_Halo, eps_xray
 from .helpers import Ngdot_ion, rho_alpha_profile, cum_optical_depth
 from .massaccretion import mass_accretion
-
+from copy import deepcopy
 logger = logging.getLogger(__name__)
 try:
     from mpi4py import MPI
@@ -35,6 +35,10 @@ except RuntimeError:
 
 
 class RadiationProfileSolver:
+    def profile_cache_namespace(self) -> str:
+        """Return the cache namespace for the radiation profiles."""
+        return "radiation_profiles_legacy"
+    
     """Compute radiation, heating and ionization profiles around sources.
 
     The solver produces arrays of X-ray emissivity, heating rates and
@@ -75,7 +79,7 @@ class RadiationProfileSolver:
             RadiationProfiles: Loaded or freshly computed profiles.
         """
         try:
-            profiles = handler.load_file(self.parameters, RadiationProfiles)
+            profiles = handler.load_file(self.parameters, RadiationProfiles, cache_namespace=self.profile_cache_namespace())
             # Validate that the cached redshift grid matches what is currently requested.
             # A hash mismatch would already produce FileNotFoundError above, but an
             # explicit check here gives a clear diagnostic if the cache is somehow stale.
@@ -108,7 +112,7 @@ class RadiationProfileSolver:
             rank = comm.Get_rank()
             if rank == 0:
                 profiles = self.solve()
-                handler.write_file(self.parameters, profiles)
+                handler.write_file(self.parameters, profiles, cache_namespace=self.profile_cache_namespace())
                 if profiles._file_path is not None:
                     self.parameters.to_yaml(
                         profiles._file_path.with_suffix('.yaml'),
@@ -120,11 +124,11 @@ class RadiationProfileSolver:
             else:
                 # wait for rank 0 to finish computation and saving
                 comm.Barrier()
-                profiles = handler.load_file(self.parameters, RadiationProfiles)
+                profiles = handler.load_file(self.parameters, RadiationProfiles, cache_namespace=self.profile_cache_namespace())
                 logger.info(f"Rank {rank} loaded radiation profiles from cache after computation by rank 0.")
         else:
             profiles = self.solve()
-            handler.write_file(self.parameters, profiles)
+            handler.write_file(self.parameters, profiles, cache_namespace=self.profile_cache_namespace())
             if profiles._file_path is not None:
                 self.parameters.to_yaml(
                     profiles._file_path.with_suffix('.yaml'),
@@ -447,3 +451,192 @@ class RadiationProfileSolver:
         rho_heat_full = rho_heat.reshape((*single_rho_xray_shape, -1))
 
         return rho_heat_full
+
+class RadiationProfileFstSolver(RadiationProfileSolver):
+    def profile_cache_namespace(self) -> str:
+        """Return the cache namespace for f_st-grid radiation profiles."""
+        f_st_min = float(self.f_st_grid[0])
+        f_st_max = float(self.f_st_grid[-1])
+        f_st_n = int(self.f_st_grid.size)
+        return f"radiation_profiles_fstar_grid_fmin_{f_st_min:.6g}_fmax_{f_st_max:.6g}_n_{f_st_n}"
+
+    def get_or_compute_profiles(self, handler: Handler) -> "RadiationProfilesFStarGrid":
+        """Load f_st-grid profiles from cache or compute and save them if unavailable."""
+        try:
+            profiles = handler.load_file(
+                self.parameters,
+                RadiationProfilesFStarGrid,
+                cache_namespace=self.profile_cache_namespace(),
+            )
+            logger.info("Loaded f_st-grid radiation profiles from cache.")
+            return profiles
+        except FileNotFoundError:
+            logger.info("f_st-grid radiation profiles not found in cache. Launching a single computation process.")
+
+        if MPI_ENABLED:
+            comm = MPI.COMM_WORLD
+            rank = comm.Get_rank()
+            if rank == 0:
+                profiles = self.solve()
+                handler.write_file(
+                    self.parameters,
+                    profiles,
+                    cache_namespace=self.profile_cache_namespace(),
+                )
+                logger.info(f"Rank {rank} computed f_st-grid profiles and saved them to cache.")
+                comm.Barrier()
+            else:
+                comm.Barrier()
+                profiles = handler.load_file(
+                    self.parameters,
+                    RadiationProfilesFStarGrid,
+                    cache_namespace=self.profile_cache_namespace(),
+                )
+                logger.info(f"Rank {rank} loaded f_st-grid radiation profiles from cache after computation by rank 0.")
+        else:
+            profiles = self.solve()
+            handler.write_file(
+                self.parameters,
+                profiles,
+                cache_namespace=self.profile_cache_namespace(),
+            )
+            logger.info("f_st-grid radiation profiles computed and saved to cache.")
+        return profiles
+    """Compute radiation profiles on a (mass, alpha, f_st, z) grid.
+
+    This solver extends the legacy single-f_st solver without modifying its
+    behavior. It precomputes one profile cube per f_st value and stacks the
+    results into a :class:`RadiationProfilesFStarGrid` instance.
+    """
+
+    def __init__(self, parameters: Parameters, redshifts: np.ndarray):
+        super().__init__(parameters, redshifts)
+        self.f_st_grid = self._build_f_st_grid()
+
+    def _build_f_st_grid(self) -> np.ndarray:
+        source = self.parameters.source
+        f_st_min = getattr(source, 'f_st_grid_min', 0.01)
+        f_st_max = getattr(source, 'f_st_grid_max', 0.2)
+        f_st_n = getattr(source, 'f_st_grid_n', 30)
+        if f_st_n < 2:
+            raise ValueError("f_st_grid_n must be at least 2")
+        if f_st_min <= 0 or f_st_max <= 0:
+            raise ValueError("f_st grid values must be strictly positive")
+        if f_st_min >= f_st_max:
+            raise ValueError("f_st_grid_min must be smaller than f_st_grid_max")
+        return np.linspace(f_st_min, f_st_max, f_st_n)
+
+    def _parameters_with_f_st(self, f_st: float) -> Parameters:
+        parameters = deepcopy(self.parameters)
+        parameters.source.f_st = float(f_st)
+        return parameters
+
+    def _compute_single_f_st_profiles(
+        self,
+        parameters: Parameters,
+        x_e: np.ndarray,
+        halo_mass: np.ndarray,
+        halo_mass_derivative: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        r_lyal = np.logspace(-5, 2, 1000, base=10)
+        original_parameters = self.parameters
+        try:
+            self.parameters = parameters
+            r_bubble = self.R_bubble()
+            rho_xray = self.rho_xray(self.r_grid, x_e)
+            rho_heat = self.rho_heat(rho_xray)
+            rho_alpha = rho_alpha_profile(
+                parameters,
+                self.z_bins,
+                r_lyal,
+                halo_mass,
+                halo_mass_derivative,
+            )
+        finally:
+            self.parameters = original_parameters
+
+        return r_bubble, rho_xray, rho_heat, rho_alpha
+
+    def solve(self) -> RadiationProfilesFStarGrid:
+        if MPI_ENABLED:
+            comm = MPI.COMM_WORLD
+            rank = comm.Get_rank()
+            if rank != 0:
+                logger.warning(
+                    f"RadiationProfileFstSolver.solve() called on non-root MPI rank {rank=}. Only the root rank will perform the computation."
+                )
+                return
+
+        halo_mass_bins, _ = mass_accretion(
+            self.parameters,
+            self.z_bins,
+            self.parameters.simulation.halo_mass_bins,
+            self.parameters.simulation.halo_mass_accretion_alpha
+        )
+
+        halo_mass, halo_mass_derivative = mass_accretion(
+            self.parameters,
+            self.z_bins,
+            self.parameters.simulation.halo_mass_bin_centers,
+            self.parameters.simulation.halo_mass_accreation_alpha_bin_centers
+        )
+
+        self.halo_mass_evolution = halo_mass
+        self.halo_mass_derivative = halo_mass_derivative
+
+        if self.parameters.solver.fXh == 'constant':
+            logger.info('param.solver.fXh is set to constant. We will assume f_X,h = 2e-4**0.225')
+            x_e = np.full(len(self.z_bins), 2e-4)
+        else:
+            raise NotImplementedError(
+                "Computing x_e from the SFRD (parameters.solver.fXh != 'constant') is not yet implemented. "
+                "The old global_qty.compute_sfrd() was removed during the v2 cleanup. "
+                "Set parameters.solver.fXh = 'constant' to use the default approximation (x_e = 2e-4)."
+            )
+
+        logger.info(
+            f"Computing profiles for {self.z_bins.size} redshifts, "
+            f"{self.parameters.simulation.halo_mass_bins.size - 1} halo mass bins, "
+            f"{self.parameters.simulation.halo_mass_accretion_alpha.size - 1} alpha bins and "
+            f"{self.f_st_grid.size} f_st values."
+        )
+
+        mass_n = self.parameters.simulation.halo_mass_bin_n - 1
+        alpha_n = len(self.parameters.simulation.halo_mass_accretion_alpha) - 1
+        z_n = len(self.z_bins)
+        f_n = self.f_st_grid.size
+
+        r_bubble = np.zeros((mass_n, alpha_n, f_n, z_n))
+        rho_xray = np.zeros((len(self.r_grid), mass_n, alpha_n, f_n, z_n))
+        rho_heat = np.zeros_like(rho_xray)
+        r_lyal = np.logspace(-5, 2, 1000, base=10)
+        rho_alpha = np.zeros((len(r_lyal), mass_n, alpha_n, f_n, z_n))
+
+        for f_index, f_st in enumerate(self.f_st_grid):
+            logger.info("Computing radiation profiles for f_st=%.5f (%d/%d)", f_st, f_index + 1, f_n)
+            parameters_f_st = self._parameters_with_f_st(f_st)
+
+            rb, rx, rh, ra = self._compute_single_f_st_profiles(
+                parameters_f_st,
+                x_e,
+                halo_mass,
+                halo_mass_derivative,
+            )
+
+            r_bubble[:, :, f_index, :] = rb
+            rho_xray[:, :, :, f_index, :] = rx
+            rho_heat[:, :, :, f_index, :] = rh
+            rho_alpha[:, :, :, f_index, :] = ra
+
+        return RadiationProfilesFStarGrid(
+            parameters=self.parameters,
+            z_history=self.z_bins,
+            halo_mass_bins=halo_mass_bins,
+            f_st_grid=self.f_st_grid,
+            rho_xray=rho_xray,
+            rho_heat=rho_heat,
+            rho_alpha=rho_alpha,
+            R_bubble=r_bubble,
+            r_lyal=r_lyal,
+            r_grid_cell=self.r_grid,
+        )

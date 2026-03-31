@@ -61,6 +61,32 @@ class SourceParameters:
     f_st: float = 0.05
     """the prefactor of the star formation efficiency f_star which is a function of halo mass"""
 
+    # --- f_st grid precomputation (used by RadiationProfileFstSolver) ---
+    f_st_grid_min: float = 0.01
+    """Minimum f_st value for precomputing (mass, alpha, f_st, z) radiation profiles."""
+
+    f_st_grid_max: float = 0.2
+    """Maximum f_st value for precomputing (mass, alpha, f_st, z) radiation profiles."""
+
+    f_st_grid_n: int = 30
+    """Number of f_st grid points for precomputing (mass, alpha, f_st, z) radiation profiles."""
+
+    # --- stochastic f_st painting controls (used by PaintingCoordinator.paint_single_fstar) ---
+    f_st_paint_distribution: Literal['lognormal', 'normal', 'uniform'] = 'lognormal'
+    """Distribution used to sample per-halo f_st during painting."""
+
+    f_st_paint_sigma: float = 0.5
+    """Width parameter for the f_st sampling distribution (log-space sigma for lognormal)."""
+
+    f_st_paint_min: float = 0.01
+    """Lower clipping bound for sampled f_st during painting."""
+
+    f_st_paint_max: float = 0.2
+    """Upper clipping bound for sampled f_st during painting."""
+
+    f_st_paint_seed: int | None = None
+    """Optional RNG seed for reproducible per-snapshot f_st sampling."""
+
     Mp: float = 2.8e11 * 0.68
     """pivot mass of the double power law describing the star formation rate"""
 

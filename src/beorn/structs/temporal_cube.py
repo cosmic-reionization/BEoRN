@@ -4,6 +4,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import logging
+import re
 import tools21cm as t2c
 from tqdm.auto import tqdm
 
@@ -161,6 +162,44 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
     # Construction                                                         #
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _sanitize_component(value: str) -> str:
+        """Return a path-safe identifier fragment."""
+        sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip())
+        return sanitized.strip("._-") or "simulation"
+
+    @classmethod
+    def simulation_name(cls, parameters: Parameters) -> str:
+        """Infer a stable simulation name for snapshot file names."""
+        file_root = getattr(parameters.simulation, "file_root", None)
+        if isinstance(file_root, Path):
+            candidate = file_root.name or file_root.stem
+            if candidate:
+                return cls._sanitize_component(candidate)
+        return "simulation"
+
+    @classmethod
+    def snapshot_directory(cls, cube_path: Path) -> Path:
+        """Return the directory containing per-snapshot field files."""
+        return cube_path.parent / f"{cube_path.stem}_snapshots"
+
+    @classmethod
+    def snapshot_file_name(cls, parameters: Parameters, field: str, snapshot_index: int) -> str:
+        """Build the per-snapshot field file name."""
+        simulation_name = cls.simulation_name(parameters)
+        ncell = int(parameters.simulation.Ncell)
+        field_name = cls._sanitize_component(field)
+        return f"{simulation_name}_snapshot_{snapshot_index:03d}_{field_name}_N{ncell}.h5"
+
+    @classmethod
+    def grid_field_names(cls, parameters: Parameters) -> list[str]:
+        """Return all grid-like fields stored in the temporal cube manifest."""
+        fields = ["delta_b", "Grid_Temp", "Grid_xHII", "Grid_xal"]
+        for field_name in parameters.simulation.store_grids:
+            if field_name not in fields:
+                fields.append(field_name)
+        return fields
+
     @classmethod
     def create_empty(cls, parameters: Parameters, directory: Path, snapshot_number: int = None, **kwargs) -> "TemporalCube":
         """Create an empty :class:`TemporalCube` output directory.
@@ -216,7 +255,6 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
             raise TypeError("grid_snapshot must be an instance of CoevalCube")
         if self._file_path is None:
             raise ValueError("Output directory is not set. Call create_empty() first.")
-
         path = self.snapshot_path(grid_snapshot.z)
         grid_snapshot.write(file_path=path)
 

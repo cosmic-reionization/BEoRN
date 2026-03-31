@@ -1,6 +1,9 @@
 import numpy as np
 import logging
-from MAS_library import MASL
+try:
+    from MAS_library import MASL
+except ImportError:
+    MASL = None
 
 logger = logging.getLogger(__name__)
 
