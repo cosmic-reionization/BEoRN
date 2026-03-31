@@ -18,8 +18,8 @@ FILE_ROOT = Path("/xdisk/timeifler/yhhuang/Thesan/")
 CACHE_ROOT = SCRATCH_ROOT / "cache"
 DTB_OUTPUT_ROOT = SCRATCH_ROOT / "output_dtb"
 
-DEFAULT_PARAMETER_FILE = "coarse_grid.yaml"
-PARAMETER_FILE = Path(os.environ.get("BEORN_PARAMETER_FILE", DEFAULT_PARAMETER_FILE))
+DEFAULT_PARAMETER_FILE = Path(__file__).with_name("coarse_grid.yaml")
+PARAMETER_FILE = Path(os.environ.get("BEORN_PARAMETER_FILE", str(DEFAULT_PARAMETER_FILE)))
 
 
 def _format_cache_value(value) -> str:
@@ -68,7 +68,7 @@ def ensure_all_painted_snapshots_available(loader, cache_handler, parameters, ca
 
 def main() -> None:
     parameters = beorn.structs.Parameters.from_yaml(PARAMETER_FILE)
-    parameters.simulation.file_root = FILE_ROOT
+    parameters.cosmo_sim.file_root = FILE_ROOT
     parameters.solver.redshifts = np.sort(parameters.solver.redshifts)
 
     loader = beorn.load_input_data.ThesanLoader(parameters, is_high_res=False)
