@@ -110,7 +110,7 @@ class GridDerivedPropertiesMixin:
         if self._is_grid_data_multi_z():
             z = z[:]
 
-        return constants.rhoc0 * self.parameters.cosmology.h ** 2 * self.parameters.cosmology.Ob * (1 + z) ** 3 * constants.M_sun / constants.cm_per_Mpc ** 3 / constants.m_H
+        return constants.rhoc0 * self.parameters.cosmology.h0 ** 2 * self.parameters.cosmology.Ob * (1 + z) ** 3 * constants.M_sun / constants.cm_per_Mpc ** 3 / constants.m_H
 
 
     @cached_property

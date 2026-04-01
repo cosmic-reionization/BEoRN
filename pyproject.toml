@@ -1,6 +1,6 @@
 [project]
 name = "BEoRN"
-version = "1.2.0"
+version = "2.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,7 +13,6 @@ dependencies = [
     "mpi4py>=4.1.1",
     "astropy>=7.0.1",
     "matplotlib>=3.10.1",
-    "pylians>=0.12",
     "tools21cm>=2.2.10",
     "tqdm>=4.0",
 ]
@@ -24,6 +23,18 @@ dependencies = [
 extra = [
     "21cmfast>=3.4.0,<4",
     "hmf>=3.4",
+]
+numba = [
+    "numba",
+]
+pylians = [
+    "pylians>=0.12",
+]
+torch = [
+    "torch",
+]
+jax = [
+    "jax",
 ]
 
 

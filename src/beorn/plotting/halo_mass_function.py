@@ -58,6 +58,6 @@ def plot_halo_mass_function(
         Mmin = np.log10(bin_edges[0]),
         Mmax = np.log10(bin_edges[-1]),
         hmf_model = analytical_model,
-        cosmo_params = dict(Om0=cosmo.Om, Ob0=cosmo.Ob, H0=cosmo.h * 100),
+        cosmo_params = dict(Om0=cosmo.Om, Ob0=cosmo.Ob, H0=cosmo.h0 * 100),
     )
     ax.plot(mf.m, mf.dndlnm, ls='--', color='grey', label=f'{analytical_model} (analytical)')

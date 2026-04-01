@@ -25,9 +25,11 @@ git pull
 rm -rf dist/ build/
 
 # 3. Build source + wheel
+pip install build
 python -m build
 
 # 4. Upload to PyPI (will prompt for credentials)
+pip install twine
 twine upload dist/*
 
 # 5. Re-tag current main commit and push

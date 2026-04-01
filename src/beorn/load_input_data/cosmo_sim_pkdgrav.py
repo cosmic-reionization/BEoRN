@@ -224,7 +224,7 @@ class PKDGravLoader(NBodyLoader):
                 return np.array([]), np.zeros((0, 3))
             catalog_array = catalog_array[np.newaxis, :]
 
-        masses = catalog_array[:, 0] * self.parameters.cosmology.h
+        masses = catalog_array[:, 0] * self.parameters.cosmology.h0
         positions = catalog_array[:, 1:] + self.parameters.simulation.Lbox / 2
         return masses, positions
 

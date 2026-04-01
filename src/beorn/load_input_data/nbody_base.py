@@ -449,7 +449,7 @@ class NBodyLoader(BaseLoader):
                 "Om": cosmo.Om,
                 "Ob": cosmo.Ob,
                 "Ol": cosmo.Ol,
-                "h": cosmo.h,
+                "h0": cosmo.h0,
             },
             "halo_mass_stats": mass_stats,
             "snapshots": all_snapshots,
