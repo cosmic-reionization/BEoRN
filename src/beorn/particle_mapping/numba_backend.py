@@ -61,12 +61,18 @@ if _NUMBA_AVAILABLE:
     @njit(cache=True)
     def _cic_loop(mesh, N, pos, wt):
         for p in range(pos.shape[0]):
-            i0x = int(pos[p, 0]) % N;  i1x = (i0x + 1) % N
-            i0y = int(pos[p, 1]) % N;  i1y = (i0y + 1) % N
-            i0z = int(pos[p, 2]) % N;  i1z = (i0z + 1) % N
-            d1x = pos[p, 0] - int(pos[p, 0]);  d0x = 1.0 - d1x
-            d1y = pos[p, 1] - int(pos[p, 1]);  d0y = 1.0 - d1y
-            d1z = pos[p, 2] - int(pos[p, 2]);  d0z = 1.0 - d1z
+            i0x = int(pos[p, 0]) % N
+            i1x = (i0x + 1) % N
+            i0y = int(pos[p, 1]) % N
+            i1y = (i0y + 1) % N
+            i0z = int(pos[p, 2]) % N
+            i1z = (i0z + 1) % N
+            d1x = pos[p, 0] - int(pos[p, 0])
+            d0x = 1.0 - d1x
+            d1y = pos[p, 1] - int(pos[p, 1])
+            d0y = 1.0 - d1y
+            d1z = pos[p, 2] - int(pos[p, 2])
+            d0z = 1.0 - d1z
             w = wt[p]
             mesh[i0x, i0y, i0z] += w * d0x * d0y * d0z
             mesh[i0x, i0y, i1z] += w * d0x * d0y * d1z
@@ -89,7 +95,9 @@ if _NUMBA_AVAILABLE:
     @njit(cache=True)
     def _tsc_loop(mesh, N, pos, wt):
         for p in range(pos.shape[0]):
-            icx = int(pos[p, 0]);  icy = int(pos[p, 1]);  icz = int(pos[p, 2])
+            icx = int(pos[p, 0])
+            icy = int(pos[p, 1])
+            icz = int(pos[p, 2])
             w = wt[p]
             for kx in (-1, 0, 1):
                 ix = (icx + kx) % N
@@ -114,7 +122,9 @@ if _NUMBA_AVAILABLE:
     @njit(cache=True)
     def _pcs_loop(mesh, N, pos, wt):
         for p in range(pos.shape[0]):
-            icx = int(pos[p, 0]);  icy = int(pos[p, 1]);  icz = int(pos[p, 2])
+            icx = int(pos[p, 0])
+            icy = int(pos[p, 1])
+            icz = int(pos[p, 2])
             w = wt[p]
             for kx in (-1, 0, 1, 2):
                 ix = (icx + kx) % N
