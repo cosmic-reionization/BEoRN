@@ -55,10 +55,9 @@ pip install -e ".[extra]"
 ```
 
 ## Dependencies
-The dependencies are listed in `pyproject.toml`.
-The core dependencies include [numpy](https://numpy.org/), [scipy](https://scipy.org/), [h5py](https://www.h5py.org/), [mpi4py](https://mpi4py.readthedocs.io/en/stable/), [astropy](https://www.astropy.org/), [matplotlib](https://matplotlib.org/), [pylians](https://pylians3.readthedocs.io), and [tools21cm](https://github.com/sambit-giri/tools21cm).
+The core dependencies are listed in `pyproject.toml` and include [numpy](https://numpy.org/), [scipy](https://scipy.org/), [h5py](https://www.h5py.org/), [mpi4py](https://mpi4py.readthedocs.io/en/stable/), [astropy](https://www.astropy.org/), [matplotlib](https://matplotlib.org/), and [tools21cm](https://github.com/sambit-giri/tools21cm).
 
-⚠️ **Note on pylians**: This package may sometimes fail during automatic installation of dependencies. If you encounter issues, we recommend installing `pylians` separately before installing `BEoRN`.
+Optional extras (`numba`, `pylians`, `torch`, `jax`) enable faster or GPU-accelerated particle-to-mesh mapping backends but are not required for standard use.
 
 ## Project Layout
 - `src/beorn/`: Package source code.
