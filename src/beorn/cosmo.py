@@ -16,7 +16,7 @@ def hubble(z, parameters: Parameters):
     """
     Om = parameters.cosmology.Om
     Ol = 1.0-Om
-    H0 = 100.0*parameters.cosmology.h
+    H0 = 100.0*parameters.cosmology.h0
     return H0 * (Om*(1+z)**3 + (1.0 - Om - Ol)*(1+z)**2 + Ol)**0.5
 
 
@@ -25,7 +25,7 @@ def Hubble(z, parameters: Parameters):
     Hubble parameter [yr-1]
     """
     Om, Ol = parameters.cosmology.Om, parameters.cosmology.Ol
-    return parameters.cosmology.h * 100.0 * sec_per_year / km_per_Mpc * np.sqrt(Om*(1+z)**3 + (1.0-Om-Ol)*(1+z)**2+Ol)
+    return parameters.cosmology.h0 * 100.0 * sec_per_year / km_per_Mpc * np.sqrt(Om*(1+z)**3 + (1.0-Om-Ol)*(1+z)**2+Ol)
 
 
 def comoving_distance(z, parameters: Parameters):
@@ -110,7 +110,7 @@ def rhoc_of_z(parameters: Parameters,z):
     Outputs is in Msol/cMpc**3
     """
     Om = parameters.cosmology.Om
-    rhoc = 2.775e11 * parameters.cosmology.h**2  ## in Msol/cMpc**3
+    rhoc = 2.775e11 * parameters.cosmology.h0**2  ## in Msol/cMpc**3
     return rhoc * (Om * (1.0 + z) ** 3.0 + (1.0 - Om)) / (1.0 + z) ** 3.0
 
 
@@ -166,7 +166,7 @@ def dTb_factor(parameters: Parameters):
     """
     Constant factor in dTb formula
     """
-    Om, h0, Ob = parameters.cosmology.Om, parameters.cosmology.h, parameters.cosmology.Ob
+    Om, h0, Ob = parameters.cosmology.Om, parameters.cosmology.h0, parameters.cosmology.Ob
     return 27 * Ob * h0 ** 2 / 0.023 * np.sqrt(0.15 / Om / h0 ** 2 / 10)
 
 
@@ -189,7 +189,7 @@ def Tvir_to_M(Tvir, z, param):
     Delc = 18 * np.pi ** 2 + 82 * d - 39 * d ** 2
     mu = 0.6  # 0.59 for fully ionized primordial gas, 0.61 for a gas with ionized H and singly ionized He, 1.22 for neutral primordial gas.
     conv_fact = 1.98e4 * (mu / 0.6) * (Om * Delc / Omz / 18 / np.pi ** 2) ** (1. / 3) * ((1 + z) / 10)
-    M = 1e8 / param.cosmo.h * (Tvir / conv_fact) ** (3. / 2)
+    M = 1e8 / param.cosmo.h0 * (Tvir / conv_fact) ** (3. / 2)
     return M
 
 
@@ -212,7 +212,7 @@ def M_to_Tvir(M, z, param):
     Delc = 18 * np.pi ** 2 + 82 * d - 39 * d ** 2
     mu = 0.6  # 0.59 for fully ionized primordial gas, 0.61 for a gas with ionized H and singly ionized He, 1.22 for neutral primordial gas.
     conv_fact = 1.98e4 * (mu / 0.6) * (Om * Delc / Omz / 18 / np.pi ** 2) ** (1. / 3) * ((1 + z) / 10)
-    Tvir = conv_fact * (M * param.cosmo.h / 1e8) ** (2. / 3)
+    Tvir = conv_fact * (M * param.cosmo.h0 / 1e8) ** (2. / 3)
     return Tvir
 
 
@@ -241,7 +241,7 @@ def Thomson_optical_depth(zz, xHII, param):
 
     from scipy.integrate import cumtrapz
     Ob = param.cosmo.Ob
-    h0 = param.cosmo.h
+    h0 = param.cosmo.h0
 
     # hydrogen and helium cross sections
     sHII = sigma_T * 1e4 * (h0 / cm_per_Mpc) ** 2  # [Mpc/h]^2

@@ -40,7 +40,7 @@ def Ngdot_ion(parameters: Parameters, zz: np.ndarray, Mh: np.ndarray, dMh_dt: np
         numpy.ndarray: Photon production rate in s^-1 with the same
         broadcastable shape as the inputs.
     """
-    Ob, Om, h0 = parameters.cosmology.Ob, parameters.cosmology.Om, parameters.cosmology.h
+    Ob, Om, h0 = parameters.cosmology.Ob, parameters.cosmology.Om, parameters.cosmology.h0
 
     if parameters.source.source_type == 'SED':
         Ngam_dot_ion = dMh_dt / h0 * f_star_Halo(parameters, Mh) * Ob / Om * f_esc(parameters, Mh) * parameters.source.Nion / sec_per_year / m_H * M_sun
@@ -84,7 +84,7 @@ def mean_gamma_ion_xray(parameters: Parameters, sfrd, zz):
     """
 
     Ob = parameters.cosmology.Ob
-    h0 = parameters.cosmology.h
+    h0 = parameters.cosmology.h0
     zstar = 35
     Emin = parameters.source.energy_cutoff_min_xray
     Emax = parameters.source.energy_cutoff_max_xray
@@ -176,7 +176,7 @@ def solve_xe(parameters: Parameters, mean_G_ion, mean_Gsec_ion, zz: np.ndarray):
     Mean free electron fraction in the neutral medium. We use it to compute the fraction of energy deposited as heat by e- originating from ionisation by xray: fXh = xe**0.225
     """
     logger.info('Computing x_e(z) from the sfrd, including first and secondary ionisations....')
-    h0 = parameters.cosmology.h
+    h0 = parameters.cosmology.h0
     Ob = parameters.cosmology.Ob
     f_He_bynumb = 1 - parameters.solver.HI_frac
 
@@ -232,7 +232,7 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
     """
     # TODO: remove hardcoded values
     z_star = 35
-    h0 = parameters.cosmology.h
+    h0 = parameters.cosmology.h0
     rectrunc = 23
 
     # rec fraction
@@ -313,7 +313,7 @@ def cum_optical_depth(zz, E, parameters: Parameters):
         numpy.ndarray: Optical depth array evaluated along ``zz``.
     """
     Ob = parameters.cosmology.Ob
-    h0 = parameters.cosmology.h
+    h0 = parameters.cosmology.h0
 
     # Energy of a photon observed at (zz[0], E) and emitted at zz
     if isinstance(E, np.ndarray):

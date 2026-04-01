@@ -121,4 +121,4 @@ def eps_xray(nu_, parameters: Parameters):
     norm_xray = (1 - sed_xray) / ((parameters.source.energy_max_sed_xray / h_eV_sec) ** (1 - sed_xray) - (parameters.source.energy_min_sed_xray / h_eV_sec) ** ( 1 - sed_xray)) ## [Hz**al-1]
     # param.source.cX * eV_per_erg * norm_xray * nu_ ** (-sed_xray) * Hz_per_eV   # [eV/eV/s/SFR]
 
-    return parameters.source.xray_normalisation / parameters.cosmology.h * eV_per_erg * norm_xray * nu_ ** (-sed_xray) /(nu_*h_eV_sec)   # [photons/Hz/s/SFR]
+    return parameters.source.xray_normalisation / parameters.cosmology.h0 * eV_per_erg * norm_xray * nu_ ** (-sed_xray) /(nu_*h_eV_sec)   # [photons/Hz/s/SFR]

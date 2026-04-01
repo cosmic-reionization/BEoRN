@@ -77,7 +77,7 @@ def x_coll_coef(z,param):
     """
     Coefficient to turn rho/rho_mean into a baryon density in nbr of H atoms per physical cm**3 [1/pcm**3]
     """
-    _Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h
+    _Om, Ob, h0 = param.cosmo.Om, param.cosmo.Ob, param.cosmo.h0
     coef = rhoc0 * h0 ** 2 * Ob * (1 + z) ** 3 * M_sun / cm_per_Mpc ** 3 / m_H
     return coef
 
@@ -119,7 +119,7 @@ def eps_lyal(nu, parameters: Parameters):
     float. [photons.yr-1.Hz-1.SFR-1], SFR being the Star Formation Rate in Msol/h/yr
     """
 
-    h0    = parameters.cosmology.h
+    h0    = parameters.cosmology.h0
     N_al  = parameters.source.n_lyman_alpha_photons  #9690 number of lya photons per protons (baryons) in stars
     alS = parameters.source.lyman_alpha_power_law
 

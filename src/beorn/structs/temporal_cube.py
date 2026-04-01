@@ -192,8 +192,8 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
                     # py21cmfast internals (seed and high-res factor are in the dir name)
                     "cosmo_sim.py21cmfast_high_res_factor",
                     "cosmo_sim.random_seed",
-                    # Thesan-specific mass-assignment method
-                    "cosmo_sim.halo_catalogs_thesan_mass_assignment",
+                    # Particle mass-assignment scheme (affects density/RSD fields, not the IGM output)
+                    "cosmo_sim.particle_mass_assignment",
                 },
             )
         ret = cls(z_snapshots=None, parameters=parameters, delta_b=None, Grid_Temp=None, Grid_xHII=None, Grid_xal=None)

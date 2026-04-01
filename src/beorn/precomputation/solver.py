@@ -249,7 +249,7 @@ class RadiationProfileSolver:
             self.halo_mass_derivative
         )  # s-1
         assert np.all(np.isfinite(Ngam_dot)), "Ngam_dot contains NaN values. Check the parameters and the mass accretion."
-        Ob, h0 = self.parameters.cosmology.Ob, self.parameters.cosmology.h
+        Ob, h0 = self.parameters.cosmology.Ob, self.parameters.cosmology.h0
 
         # \bar{n}^0_H - mean comoving number density of baryons [Mpc/h]**-3
         baryon_density = (Ob * constants.rhoc0) / (constants.m_p_in_Msun * h0)
@@ -306,7 +306,7 @@ class RadiationProfileSolver:
 
         Om = self.parameters.cosmology.Om
         Ob = self.parameters.cosmology.Ob
-        h0 = self.parameters.cosmology.h
+        h0 = self.parameters.cosmology.h0
         Emin = self.parameters.source.energy_cutoff_min_xray
         Emax = self.parameters.source.energy_cutoff_max_xray
         NE = 50

@@ -22,7 +22,7 @@ import h5py
 import numpy as np
 
 from .merger_tree_base import MergerTreeLoader
-from ..particle_mapping import pylians
+from ..particle_mapping import map_particles_to_mesh
 
 
 class ThesanLoader(MergerTreeLoader):
@@ -196,9 +196,11 @@ class ThesanLoader(MergerTreeLoader):
         particle_positions *= 1e-3 / self.thesan_h  # kpc/h → Mpc/h
         physical_size = particle_positions.max()
 
-        mass_assignment = self.parameters.cosmo_sim.halo_catalogs_thesan_mass_assignment
-        pylians.map_particles_to_mesh(
-            mesh, physical_size, particle_positions, mass_assignment=mass_assignment
+        mass_assignment = self.parameters.cosmo_sim.particle_mass_assignment
+        backend = self.parameters.cosmo_sim.particle_mapping_backend
+        map_particles_to_mesh(
+            mesh, physical_size, particle_positions,
+            mass_assignment=mass_assignment, backend=backend,
         )
         return mesh / np.mean(mesh, dtype=np.float64) - 1
 
@@ -228,17 +230,18 @@ class ThesanLoader(MergerTreeLoader):
         particle_velocities /= np.sqrt(scale_factor)  # peculiar km/s
 
         Lbox = self.parameters.simulation.Lbox
-        mass_assignment = self.parameters.cosmo_sim.halo_catalogs_thesan_mass_assignment
-        pylians.map_particles_to_mesh(
+        mass_assignment = self.parameters.cosmo_sim.particle_mass_assignment
+        backend = self.parameters.cosmo_sim.particle_mapping_backend
+        map_particles_to_mesh(
             mesh_x, Lbox, particle_positions,
-            mass_assignment=mass_assignment, weights=particle_velocities[:, 0],
+            mass_assignment=mass_assignment, backend=backend, weights=particle_velocities[:, 0],
         )
-        pylians.map_particles_to_mesh(
+        map_particles_to_mesh(
             mesh_y, Lbox, particle_positions,
-            mass_assignment=mass_assignment, weights=particle_velocities[:, 1],
+            mass_assignment=mass_assignment, backend=backend, weights=particle_velocities[:, 1],
         )
-        pylians.map_particles_to_mesh(
+        map_particles_to_mesh(
             mesh_z, Lbox, particle_positions,
-            mass_assignment=mass_assignment, weights=particle_velocities[:, 2],
+            mass_assignment=mass_assignment, backend=backend, weights=particle_velocities[:, 2],
         )
         return mesh_x, mesh_y, mesh_z

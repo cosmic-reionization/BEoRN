@@ -254,7 +254,7 @@ class CosmologyParameters:
         Ob: Baryon density parameter.
         Ol: Dark energy density parameter.
         rho_c: Critical density of the universe.
-        h: Dimensionless Hubble parameter.
+        h0: Dimensionless Hubble parameter.
         sigma_8: Amplitude of the matter power spectrum on 8 Mpc/h scales.
         ns: Scalar spectral index.
     """
@@ -264,7 +264,7 @@ class CosmologyParameters:
     Ob: float = 0.045
     Ol: float = 0.68
     rho_c: float = 2.775e11
-    h: float = 0.68
+    h0: float = 0.68
     sigma_8: float = 0.83
     ns: float = 0.96
 
@@ -403,7 +403,7 @@ class Parameters:
             "=" * 60,
             "BEoRN model summary",
             "=" * 60,
-            f"  Cosmology   : Om={cos.Om}, Ob={cos.Ob}, h={cos.h}, sigma_8={cos.sigma_8}",
+            f"  Cosmology   : Om={cos.Om}, Ob={cos.Ob}, h0={cos.h0}, sigma_8={cos.sigma_8}",
             f"  Grid        : Ncell={sim.Ncell}, Lbox={sim.Lbox} Mpc/h",
             f"  Profile z   : z={slv.redshifts[0]:.1f} -> {slv.redshifts[-1]:.1f} ({slv.redshifts.size} steps)",
             *(

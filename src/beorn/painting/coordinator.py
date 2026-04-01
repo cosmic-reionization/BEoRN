@@ -340,7 +340,7 @@ class PaintingCoordinator:
         )
 
         # # TODO - describe the relevance of coef
-        # coef = constants.rhoc0 * self.parameters.cosmology.h ** 2 * self.parameters.cosmology.Ob * (1 + zgrid) ** 3 * constants.M_sun / constants.cm_per_Mpc ** 3 / constants.m_H
+        # coef = constants.rhoc0 * self.parameters.cosmology.h0 ** 2 * self.parameters.cosmology.Ob * (1 + zgrid) ** 3 * constants.M_sun / constants.cm_per_Mpc ** 3 / constants.m_H
 
 
         # since we want to paint the halo profiles in grouped mass bins, we need to know which halos are in which mass bin

@@ -4,7 +4,7 @@ import numpy as np
 import logging
 
 from .parameters import Parameters
-from ..particle_mapping.pylians import map_particles_to_mesh
+from ..particle_mapping import map_particles_to_mesh
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,11 @@ class HaloCatalog:
         physical_size = self.parameters.simulation.Lbox
         grid_size = self.parameters.simulation.Ncell
         mesh = np.zeros((grid_size, grid_size, grid_size), dtype=np.float32)
-        map_particles_to_mesh(mesh, physical_size, self.positions.astype(np.float32), "NGP")
+        backend = self.parameters.cosmo_sim.particle_mapping_backend
+        map_particles_to_mesh(
+            mesh, physical_size, self.positions.astype(np.float32),
+            mass_assignment="NGP", backend=backend,
+        )
         return mesh
 
 
