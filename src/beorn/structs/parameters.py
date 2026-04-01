@@ -318,6 +318,11 @@ class CosmoSimParameters:
 
     file_root: Path = None
 
+    particle_mapping_backend: str = 'numpy'
+    """Backend used by :func:`beorn.particle_mapping.map_particles_to_mesh` when
+    painting particle snapshots onto a grid.  Options: ``'numpy'`` (default,
+    no extra dependencies), ``'numba'``, ``'pylians'``, ``'torch'``, ``'jax'``."""
+
     def __post_init__(self):
         if isinstance(self.snapshot_redshifts, list):
             self.snapshot_redshifts = np.array(self.snapshot_redshifts)

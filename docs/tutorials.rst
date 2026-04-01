@@ -13,6 +13,7 @@ Some notebooks that show common use cases and visual examples:
    examples/21cmfast_halos
    examples/nbody_simulation_halos
    examples/thesan_nbody_data_exploration
+   examples/thesan_merger_tree_postprocessing
 
 A full run from a non-interactive script (command-line usage):
 

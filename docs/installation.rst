@@ -41,3 +41,5 @@ or directly install 21cmFAST using pip::
 
     pip install 21cmfast
 
+Optional extras (``numba``, ``pylians``, ``torch``, ``jax``) enable faster or GPU-accelerated backends for particle-to-mesh mapping but are not required for standard use.
+

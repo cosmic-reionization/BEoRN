@@ -24,6 +24,7 @@ Responsibilities handled here so subclasses do not have to repeat them:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from abc import abstractmethod
 import numpy as np
@@ -40,13 +41,14 @@ class MergerTreeLoader(BaseLoader):
     """Abstract base loader for simulations with merger trees.
 
     Subclass this and implement :meth:`load_tree_cache`,
-    :meth:`get_halo_information_from_catalog`, :meth:`load_density_field`,
-    and :meth:`load_rsd_fields`.  The higher-level
+    :meth:`get_halo_information_from_catalog`, and :meth:`load_density_field`.
+    Optionally override :meth:`load_rsd_fields` if velocity data is available.
+    The higher-level
     :meth:`load_halo_catalog` is implemented here and calls those methods
     automatically.
 
-    The tree cache is a flat HDF5 file containing four parallel arrays that
-    describe every entry across all snapshots:
+    The tree cache is a flat HDF5 file containing four or five parallel arrays
+    that describe every entry across all snapshots:
 
     - ``tree_halo_ids``      — subhalo index within its snapshot
     - ``tree_snap_num``      — snapshot index
@@ -55,6 +57,8 @@ class MergerTreeLoader(BaseLoader):
       :meth:`get_halo_information_from_catalog`)
     - ``tree_main_progenitor`` — index into these arrays pointing to the
       main progenitor entry (one snapshot earlier), or -1 if none
+    - ``tree_is_central``    — (optional) bool flag; True for FoF centrals.
+      When present, satellite halos are excluded from alpha fitting.
 
     This minimal schema is simulation-agnostic.  It can be produced from
     LHaloTree (IllustrisTNG / THESAN), Consistent-Trees, SubFind, or any
@@ -71,17 +75,21 @@ class MergerTreeLoader(BaseLoader):
     # ── Abstract interface ─────────────────────────────────────────────────
 
     @abstractmethod
-    def load_tree_cache(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def load_tree_cache(self):
         """Load the simplified merger tree cache from disk.
 
         Returns:
-            tuple of four 1D arrays, all with the same length:
+            tuple of four or five 1D arrays, all with the same length:
 
             - ``tree_halo_ids``        (int): subhalo index within snapshot
             - ``tree_snap_num``        (int): snapshot index
             - ``tree_mass``            (float): halo mass (raw simulation units)
             - ``tree_main_progenitor`` (int): array index of main progenitor,
               or -1 when there is no progenitor
+            - ``tree_is_central``      (bool, optional): True for FoF central
+              subhalos.  When present, satellite subhalos are excluded from
+              alpha fitting (satellites undergo tidal stripping, producing
+              decreasing mass histories and unreliable alpha fits).
         """
 
     @abstractmethod
@@ -101,6 +109,42 @@ class MergerTreeLoader(BaseLoader):
             - ``subhalo_to_group_map``   (S,)   int   — for each subhalo entry
               in the tree, the group/FoF index it belongs to (length S ≥ N)
         """
+
+    def load_rsd_fields(self, redshift_index: int):
+        """RSD velocity fields — not required for basic post-processing.
+
+        Override in a subclass if particle velocity data is available and
+        you want redshift-space-distortion corrections to the 21cm signal.
+
+        Raises:
+            NotImplementedError: Always, unless overridden.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not provide RSD fields. "
+            "Override load_rsd_fields() in a subclass if velocity data is available."
+        )
+
+    @property
+    def catalogs(self) -> list:
+        """Sentinel list used by PaintingCoordinator to identify halo-bearing snapshots.
+
+        Every snapshot in a merger-tree loader has a halo catalog, so all
+        entries are non-None.  The list length equals ``self.redshifts.size``.
+        """
+        return [True] * self.redshifts.size
+
+    @property
+    def input_tag(self) -> str:
+        """Short identifier for this dataset, used to namespace output files.
+
+        Derived from the simulation code name and the Ncell/Lbox grid settings.
+        Subclasses may override to include a path-based hash if multiple
+        simulations with the same code name are used simultaneously.
+        """
+        sim = self.parameters.simulation
+        code = getattr(self, "simulation_code", "mergertree")
+        h = hashlib.md5(code.encode()).hexdigest()[:8]
+        return f"{code.lower().replace('-', '_')}_N{sim.Ncell}_L{int(sim.Lbox)}_{h}"
 
     # ── Concrete HaloCatalog assembly ─────────────────────────────────────
 
@@ -196,9 +240,16 @@ class MergerTreeLoader(BaseLoader):
             f"({redshift_range.size} snapshots)"
         )
 
-        tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor = self.load_tree_cache()
+        cache = self.load_tree_cache()
+        if len(cache) == 5:
+            tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor, tree_is_central = cache
+        else:
+            tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor = cache
+            tree_is_central = None
 
         current_mask = (tree_snap_num == redshift_index) & (tree_mass > 0)
+        if tree_is_central is not None:
+            current_mask &= tree_is_central
         current_halo_ids = tree_halo_ids[current_mask]
         n_halos = current_mask.sum()
 

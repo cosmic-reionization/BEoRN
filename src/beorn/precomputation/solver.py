@@ -68,38 +68,44 @@ class RadiationProfileSolver:
         self.z_bins = redshifts
 
 
-    def get_or_compute_profiles(self, handler: Handler) -> RadiationProfiles:
+    def get_or_compute_profiles(self, handler: Handler, force_recompute: bool = False) -> RadiationProfiles:
         """Load profiles from cache or compute and save them if unavailable.
 
         Args:
             handler (Handler): IO handler capable of loading/saving
                 :class:`RadiationProfiles` objects.
+            force_recompute (bool): If ``True``, ignore any cached profiles and
+                recompute from scratch.  Useful after changing mass bin range or
+                other profile-affecting parameters.  Default ``False``.
 
         Returns:
             RadiationProfiles: Loaded or freshly computed profiles.
         """
-        try:
-            profiles = handler.load_file(self.parameters, RadiationProfiles, cache_namespace=self.profile_cache_namespace())
-            # Validate that the cached redshift grid matches what is currently requested.
-            # A hash mismatch would already produce FileNotFoundError above, but an
-            # explicit check here gives a clear diagnostic if the cache is somehow stale.
-            if not np.array_equal(profiles.z_history, self.z_bins):
-                raise ValueError(
-                    f"Cached radiation profiles cover "
-                    f"z={profiles.z_history[0]:.2f}→{profiles.z_history[-1]:.2f} "
-                    f"({len(profiles.z_history)} steps) but solver.redshifts requests "
-                    f"z={self.z_bins[0]:.2f}→{self.z_bins[-1]:.2f} "
-                    f"({len(self.z_bins)} steps). "
-                    "Delete the cached file or restore the matching solver.redshifts."
+        if not force_recompute:
+            try:
+                profiles = handler.load_file(self.parameters, RadiationProfiles, cache_namespace=self.profile_cache_namespace())
+                # Validate that the cached redshift grid matches what is currently requested.
+                # A hash mismatch would already produce FileNotFoundError above, but an
+                # explicit check here gives a clear diagnostic if the cache is somehow stale.
+                if not np.array_equal(profiles.z_history, self.z_bins):
+                    raise ValueError(
+                        f"Cached radiation profiles cover "
+                        f"z={profiles.z_history[0]:.2f}→{profiles.z_history[-1]:.2f} "
+                        f"({len(profiles.z_history)} steps) but solver.redshifts requests "
+                        f"z={self.z_bins[0]:.2f}→{self.z_bins[-1]:.2f} "
+                        f"({len(self.z_bins)} steps). "
+                        "Delete the cached file or use force_recompute=True."
+                    )
+                logger.info(
+                    f"Loaded radiation profiles from cache "
+                    f"(z={profiles.z_history[0]:.2f}→{profiles.z_history[-1]:.2f}, "
+                    f"{len(profiles.z_history)} steps)."
                 )
-            logger.info(
-                f"Loaded radiation profiles from cache "
-                f"(z={profiles.z_history[0]:.2f}→{profiles.z_history[-1]:.2f}, "
-                f"{len(profiles.z_history)} steps)."
-            )
-            return profiles
-        except FileNotFoundError:
-            logger.info("Radiation profiles not found in cache. Launching a single computation process.")
+                return profiles
+            except FileNotFoundError:
+                logger.info("Radiation profiles not found in cache. Launching a single computation process.")
+        else:
+            logger.info("force_recompute=True — recomputing radiation profiles.")
             logger.info(self.parameters.summary_str())
 
         # we need to consider that this is likely being run in MPI mode. Only a single rank should perform the computation and save the results, others should wait and then load the results
