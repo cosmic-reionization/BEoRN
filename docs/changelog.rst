@@ -2,6 +2,17 @@
 Changelog
 =========
 
+v2.1.0
+------
+* Per-halo accretion rate α fitting from merger trees (Moll 2025, Master's thesis, ETH Zürich)
+* New ``MergerTreeLoader`` abstract base class for simulations with merger trees
+* THESAN-DARK merger tree tutorial (``thesan_merger_tree_postprocessing`` notebook)
+* THESAN-DARK N-body data exploration tutorial (``thesan_nbody_data_exploration`` notebook)
+* Refactored ``beorn.particle_mapping`` module with unified ``map_particles_to_mesh`` dispatcher; pure-NumPy default backend; optional ``numba``, ``pylians``, ``torch``, ``jax`` backends
+* ``force_recompute`` parameter added to ``RadiationProfileSolver.get_or_compute_profiles``
+* ``CosmologyParameters.h`` renamed to ``h0`` for clarity
+* ``pylians`` is no longer a required dependency; it is an optional extra
+
 v1.2.0
 ------
 * Post-processing of any N-body simulation data
