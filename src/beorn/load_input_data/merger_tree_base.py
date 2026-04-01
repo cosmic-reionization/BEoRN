@@ -40,8 +40,9 @@ class MergerTreeLoader(BaseLoader):
     """Abstract base loader for simulations with merger trees.
 
     Subclass this and implement :meth:`load_tree_cache`,
-    :meth:`get_halo_information_from_catalog`, :meth:`load_density_field`,
-    and :meth:`load_rsd_fields`.  The higher-level
+    :meth:`get_halo_information_from_catalog`, and :meth:`load_density_field`.
+    Optionally override :meth:`load_rsd_fields` if velocity data is available.
+    The higher-level
     :meth:`load_halo_catalog` is implemented here and calls those methods
     automatically.
 
@@ -101,6 +102,20 @@ class MergerTreeLoader(BaseLoader):
             - ``subhalo_to_group_map``   (S,)   int   — for each subhalo entry
               in the tree, the group/FoF index it belongs to (length S ≥ N)
         """
+
+    def load_rsd_fields(self, redshift_index: int):
+        """RSD velocity fields — not required for basic post-processing.
+
+        Override in a subclass if particle velocity data is available and
+        you want redshift-space-distortion corrections to the 21cm signal.
+
+        Raises:
+            NotImplementedError: Always, unless overridden.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not provide RSD fields. "
+            "Override load_rsd_fields() in a subclass if velocity data is available."
+        )
 
     # ── Concrete HaloCatalog assembly ─────────────────────────────────────
 
