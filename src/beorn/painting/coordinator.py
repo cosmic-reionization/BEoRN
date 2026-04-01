@@ -558,7 +558,16 @@ class PaintingCoordinator:
             # wait for all futures to complete
             completed, uncompleted = wait(futures)
             assert len(uncompleted) == 0, "Not all painting subprocesses completed successfully"
-            assert total_halos == halo_catalog.size, f"Number of painted halos ({total_halos}) does not match the halo catalog size ({halo_catalog.size})."
+            assert total_halos == halo_catalog.size, (
+                f"Number of painted halos ({total_halos}) does not match the halo catalog size "
+                f"({halo_catalog.size}). {halo_catalog.size - total_halos} halo(s) fell outside "
+                f"all mass/alpha bins. Catalog mass range: "
+                f"[{halo_catalog.masses.min():.3e}, {halo_catalog.masses.max():.3e}] M☉ — "
+                f"profile bins cover [{self.parameters.solver.halo_mass_bin_min:.3e}, "
+                f"{self.parameters.solver.halo_mass_bin_max:.3e}] M☉. "
+                "Widen halo_mass_bin_min/max in the parameters and recompute profiles "
+                "(force_recompute=True)."
+            )
 
         # clean up the shared memory buffers - but keep the data that was in the buffers
         if buffer_xHII:

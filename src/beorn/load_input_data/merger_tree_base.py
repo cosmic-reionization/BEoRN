@@ -24,6 +24,7 @@ Responsibilities handled here so subclasses do not have to repeat them:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from abc import abstractmethod
 import numpy as np
@@ -122,6 +123,28 @@ class MergerTreeLoader(BaseLoader):
             f"{self.__class__.__name__} does not provide RSD fields. "
             "Override load_rsd_fields() in a subclass if velocity data is available."
         )
+
+    @property
+    def catalogs(self) -> list:
+        """Sentinel list used by PaintingCoordinator to identify halo-bearing snapshots.
+
+        Every snapshot in a merger-tree loader has a halo catalog, so all
+        entries are non-None.  The list length equals ``self.redshifts.size``.
+        """
+        return [True] * self.redshifts.size
+
+    @property
+    def input_tag(self) -> str:
+        """Short identifier for this dataset, used to namespace output files.
+
+        Derived from the simulation code name and the Ncell/Lbox grid settings.
+        Subclasses may override to include a path-based hash if multiple
+        simulations with the same code name are used simultaneously.
+        """
+        sim = self.parameters.simulation
+        code = getattr(self, "simulation_code", "mergertree")
+        h = hashlib.md5(code.encode()).hexdigest()[:8]
+        return f"{code.lower().replace('-', '_')}_N{sim.Ncell}_L{int(sim.Lbox)}_{h}"
 
     # ── Concrete HaloCatalog assembly ─────────────────────────────────────
 
