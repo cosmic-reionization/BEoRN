@@ -1,0 +1,42 @@
+simulation:
+  cores: 4
+  halo_mass_bin_min: 1.0e+7
+  halo_mass_bin_max: 1.0e+15
+  halo_mass_bin_n: 200
+  halo_mass_accretion_alpha: [0.785, 0.795]
+  Lbox: 100
+  Ncell: 128
+
+source:
+  Nion: 15000
+  energy_cutoff_min_xray: 500
+  energy_cutoff_max_xray: 2000
+  energy_min_sed_xray: 500
+  energy_max_sed_xray: 2000
+  alS_xray: 1.5
+  xray_normalisation: 1.02e+41
+  f0_esc: 0.2
+  pl_esc: 0
+  f_st: 1
+  g1: 0
+  g2: 0
+  g3: 4
+  g4: -1
+  Mp: 1.088e+11
+  Mt: 1.0e+7
+  halo_mass_min: 1.0e+5
+
+solver: 
+  fXh: 'constant'
+
+cosmology:
+  Om: 0.31
+  Ob: 0.045
+  Ol: 0.68
+  rho_c: 2.775e+11
+  h: 0.68
+  sigma_8: 0.83
+  ns: 0.96
+  HI_frac: 0.92 # 1 - 0.08
+  clumping: 1
+  z_decoupling: 135

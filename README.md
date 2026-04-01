@@ -65,6 +65,8 @@ The core dependencies include [numpy](https://numpy.org/), [scipy](https://scipy
 - `docs/`: Documentation source.
 - `examples/`: Runnable examples and Jupyter notebooks to get started quickly.
 
+For the stochastic `f_st` workflow, see `examples/full_run_fstar.py` together with the companion documentation file `examples/full_run_fstar_file.rst`.
+
 **Note**: This repository focuses on code and workflows. Heavy simulation outputs (coeval/temporal cubes, large data products) are expected to be stored externally due to size.
 
 ## 📖 Citation

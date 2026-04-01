@@ -52,6 +52,17 @@ class Handler:
         if clear:
             self.clear()
 
+    def _directory_for_namespace(self, cache_namespace: str | None) -> Path:
+        """Return the effective directory for a cache namespace.
+
+        If ``cache_namespace`` is ``None`` the handler root is returned. Otherwise
+        a subdirectory under ``file_root`` is created and returned.
+        """
+        if cache_namespace is None:
+            return self.file_root
+        namespace_dir = self.file_root / str(cache_namespace)
+        namespace_dir.mkdir(exist_ok=True, parents=True)
+        return namespace_dir
 
     def write_file(self, parameters: Parameters, obj: BaseStructDerived, **kwargs) -> None:
         """Write ``obj`` to the handler's persistence directory.
@@ -71,7 +82,9 @@ class Handler:
         Returns:
             None
         """
-        obj.write(directory=self.file_root, parameters=parameters, **kwargs, **self.write_kwargs)
+        cache_namespace = kwargs.get("cache_namespace", None)
+        directory = self._directory_for_namespace(cache_namespace)
+        obj.write(directory=directory, parameters=parameters, **kwargs, **self.write_kwargs)
 
 
     def load_file(self, parameters: Parameters, cls: type[BaseStructDerived], **kwargs) -> BaseStructDerived:
@@ -89,7 +102,9 @@ class Handler:
         Returns:
             BaseStructDerived: Loaded instance of ``cls``.
         """
-        return cls.read(directory=self.file_root, parameters=parameters, **kwargs, **self.write_kwargs)
+        cache_namespace = kwargs.get("cache_namespace", None)
+        directory = self._directory_for_namespace(cache_namespace)
+        return cls.read(directory=directory, parameters=parameters, **kwargs, **self.write_kwargs)
 
 
     def clear(self):

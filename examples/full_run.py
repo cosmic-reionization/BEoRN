@@ -3,23 +3,23 @@ import os
 import logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
+import numpy as np
 import beorn
 
 # change the simulation-related paths here
-SCRATCH_ROOT = Path(os.getenv("SCRATCH"))
-FILE_ROOT = SCRATCH_ROOT / "Thesan"
+SCRATCH_ROOT = Path("/xdisk/timeifler/yhhuang/BEoRN-v2/")
+FILE_ROOT = Path("/xdisk/timeifler/yhhuang/Thesan/")
 
 CACHE_ROOT = SCRATCH_ROOT / "thesan_run" / "cache"
 OUTPUT_ROOT = SCRATCH_ROOT / "thesan_run" / "output"
 
-PARAMETER_FILE = Path(".") / "parameters.yaml"
+PARAMETER_FILE = Path(".") / "parameters_thesan.yaml"
 
 
 ### Parameter setup
 parameters = beorn.structs.Parameters.from_yaml(PARAMETER_FILE)
 parameters.simulation.file_root = FILE_ROOT
-
+parameters.solver.redshifts = np.sort(parameters.solver.redshifts)
 
 ### IO setup
 loader = beorn.load_input_data.ThesanLoader(
