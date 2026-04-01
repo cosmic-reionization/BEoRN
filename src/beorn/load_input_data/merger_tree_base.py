@@ -46,8 +46,8 @@ class MergerTreeLoader(BaseLoader):
     :meth:`load_halo_catalog` is implemented here and calls those methods
     automatically.
 
-    The tree cache is a flat HDF5 file containing four parallel arrays that
-    describe every entry across all snapshots:
+    The tree cache is a flat HDF5 file containing four or five parallel arrays
+    that describe every entry across all snapshots:
 
     - ``tree_halo_ids``      — subhalo index within its snapshot
     - ``tree_snap_num``      — snapshot index
@@ -56,6 +56,8 @@ class MergerTreeLoader(BaseLoader):
       :meth:`get_halo_information_from_catalog`)
     - ``tree_main_progenitor`` — index into these arrays pointing to the
       main progenitor entry (one snapshot earlier), or -1 if none
+    - ``tree_is_central``    — (optional) bool flag; True for FoF centrals.
+      When present, satellite halos are excluded from alpha fitting.
 
     This minimal schema is simulation-agnostic.  It can be produced from
     LHaloTree (IllustrisTNG / THESAN), Consistent-Trees, SubFind, or any
@@ -72,17 +74,21 @@ class MergerTreeLoader(BaseLoader):
     # ── Abstract interface ─────────────────────────────────────────────────
 
     @abstractmethod
-    def load_tree_cache(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def load_tree_cache(self):
         """Load the simplified merger tree cache from disk.
 
         Returns:
-            tuple of four 1D arrays, all with the same length:
+            tuple of four or five 1D arrays, all with the same length:
 
             - ``tree_halo_ids``        (int): subhalo index within snapshot
             - ``tree_snap_num``        (int): snapshot index
             - ``tree_mass``            (float): halo mass (raw simulation units)
             - ``tree_main_progenitor`` (int): array index of main progenitor,
               or -1 when there is no progenitor
+            - ``tree_is_central``      (bool, optional): True for FoF central
+              subhalos.  When present, satellite subhalos are excluded from
+              alpha fitting (satellites undergo tidal stripping, producing
+              decreasing mass histories and unreliable alpha fits).
         """
 
     @abstractmethod
@@ -211,9 +217,16 @@ class MergerTreeLoader(BaseLoader):
             f"({redshift_range.size} snapshots)"
         )
 
-        tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor = self.load_tree_cache()
+        cache = self.load_tree_cache()
+        if len(cache) == 5:
+            tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor, tree_is_central = cache
+        else:
+            tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor = cache
+            tree_is_central = None
 
         current_mask = (tree_snap_num == redshift_index) & (tree_mass > 0)
+        if tree_is_central is not None:
+            current_mask &= tree_is_central
         current_halo_ids = tree_halo_ids[current_mask]
         n_halos = current_mask.sum()
 
