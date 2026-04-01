@@ -28,7 +28,7 @@ v1.1.0
 * 3D signal map painting (xHII, Tk, Lyman-alpha, dTb)
 * Lightcone construction and plotting utilities
 
-v0.1
-----
+v0.1.0
+------
 * Initial form of the package
 * Compatible with python 3 only
