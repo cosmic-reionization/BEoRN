@@ -1,7 +1,7 @@
 [project]
 name = "BEoRN"
 version = "2.1.0"
-description = "Add your description here"
+description = "Fast and flexible semi-numerical simulator for the epoch of reionization and cosmic dawn"
 readme = "README.md"
 requires-python = ">=3.10"
 
