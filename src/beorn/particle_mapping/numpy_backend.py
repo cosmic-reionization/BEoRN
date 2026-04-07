@@ -79,7 +79,7 @@ def map_particles_to_mesh(
     scale  = N / box_size
 
     # Use Numba JIT loops if available, otherwise pure-NumPy batch functions
-    if _numba_loops is not None:
+    if _numba_loops:
         loop      = _numba_loops[scheme]
         batchsize = _BATCH_SIZE
         for start in range(0, n_part, batchsize):
