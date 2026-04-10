@@ -291,7 +291,7 @@ class RadiationProfileSolver:
             y0 = v0.flatten(),
             t_eval = scale_factors
         )
-        bubble_volume = sol.y
+        bubble_volume = np.asarray(sol.y)
         bubble_volume.clip(min = 0, out = bubble_volume)
 
         # since solve_ivp works with 1d arrays we have a flattened version currently, where the last axis is the "time"
@@ -576,15 +576,15 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
         halo_mass_bins, _ = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bins,
-            self.parameters.simulation.halo_mass_accretion_alpha
+            self.parameters.solver.halo_mass_bins,
+            self.parameters.solver.halo_mass_accretion_alpha
         )
 
         halo_mass, halo_mass_derivative = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bin_centers,
-            self.parameters.simulation.halo_mass_accreation_alpha_bin_centers
+            self.parameters.solver.halo_mass_bin_centers,
+            self.parameters.solver.halo_mass_accretion_alpha_bin_centers
         )
 
         self.halo_mass_evolution = halo_mass
@@ -602,13 +602,13 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
 
         logger.info(
             f"Computing profiles for {self.z_bins.size} redshifts, "
-            f"{self.parameters.simulation.halo_mass_bins.size - 1} halo mass bins, "
-            f"{self.parameters.simulation.halo_mass_accretion_alpha.size - 1} alpha bins and "
+            f"{self.parameters.solver.halo_mass_nbin - 1} halo mass bins, "
+            f"{self.parameters.solver.halo_mass_accretion_alpha.size - 1} alpha bins and "
             f"{self.f_st_grid.size} f_st values."
         )
 
-        mass_n = self.parameters.simulation.halo_mass_bin_n - 1
-        alpha_n = len(self.parameters.simulation.halo_mass_accretion_alpha) - 1
+        mass_n = self.parameters.solver.halo_mass_nbin - 1
+        alpha_n = len(self.parameters.solver.halo_mass_accretion_alpha) - 1
         z_n = len(self.z_bins)
         f_n = self.f_st_grid.size
 

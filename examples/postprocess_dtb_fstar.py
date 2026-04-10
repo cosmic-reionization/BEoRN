@@ -12,14 +12,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-SCRATCH_ROOT = Path("/xdisk/timeifler/yhhuang/BEoRN-v2/")
-FILE_ROOT = Path("/xdisk/timeifler/yhhuang/Thesan/")
+DEFAULT_SCRATCH_ROOT = "/xdisk/timeifler/yhhuang/BEoRN-v2/coarse_grid_test_merged/"
+DEFAULT_FILE_ROOT = "/xdisk/timeifler/yhhuang/Thesan/"
+DEFAULT_TREE_CACHE_FILE = "/xdisk/timeifler/yhhuang/Thesan/postprocessing/trees/LHaloTree/tree_cache_v2.hdf5"
 
-CACHE_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "cache"
-DTB_OUTPUT_ROOT = SCRATCH_ROOT / "thesan_run_fstar" / "output_dtb"
+SCRATCH_ROOT = Path(os.environ.get("BEORN_SCRATCH_ROOT", DEFAULT_SCRATCH_ROOT))
+FILE_ROOT = Path(os.environ.get("BEORN_FILE_ROOT", DEFAULT_FILE_ROOT))
+TREE_CACHE_FILE = Path(os.environ.get("BEORN_TREE_CACHE_FILE", DEFAULT_TREE_CACHE_FILE))
 
-DEFAULT_PARAMETER_FILE = "coarse_grid.yaml"
-PARAMETER_FILE = Path(os.environ.get("BEORN_PARAMETER_FILE", DEFAULT_PARAMETER_FILE))
+CACHE_ROOT = SCRATCH_ROOT / "cache"
+OUTPUT_ROOT = SCRATCH_ROOT / "output"
+DTB_OUTPUT_ROOT = SCRATCH_ROOT / "output_dtb"
+
+DEFAULT_PARAMETER_FILE = Path(__file__).with_name("coarse_grid.yaml")
+PARAMETER_FILE = Path(os.environ.get("BEORN_PARAMETER_FILE", str(DEFAULT_PARAMETER_FILE)))
 
 
 def _format_cache_value(value) -> str:
@@ -48,9 +54,23 @@ def expected_snapshot_path(cache_handler, parameters, cache_namespace: str, z_in
     )
 
 
+def active_snapshot_indices(loader, requested_redshifts) -> list[int]:
+    if requested_redshifts is None:
+        return list(range(loader.redshifts.size))
+
+    all_z = loader.redshifts
+    indices = []
+    for z_target in np.asarray(requested_redshifts, dtype=float):
+        nearest = int(np.argmin(np.abs(all_z - z_target)))
+        if nearest not in indices:
+            indices.append(nearest)
+    return sorted(indices)
+
+
 def ensure_all_painted_snapshots_available(loader, cache_handler, parameters, cache_namespace: str) -> None:
     missing = []
-    for z_index, redshift in enumerate(loader.redshifts):
+    for z_index in active_snapshot_indices(loader, parameters.cosmo_sim.snapshot_redshifts):
+        redshift = loader.redshifts[z_index]
         snapshot_path = expected_snapshot_path(cache_handler, parameters, cache_namespace, z_index)
         if not snapshot_path.exists():
             missing.append((z_index, float(redshift), snapshot_path))
@@ -66,30 +86,55 @@ def ensure_all_painted_snapshots_available(loader, cache_handler, parameters, ca
         )
 
 
+def load_temporal_output(output_root: Path, parameters):
+    cube_path = beorn.structs.TemporalCube.get_file_path(output_root, parameters)
+    if not cube_path.exists():
+        return None
+    cube = beorn.structs.TemporalCube.read(file_path=cube_path, parameters=parameters)
+    if cube.z_snapshots is None or len(cube.z_snapshots) == 0:
+        return None
+    return cube
+
+
 def main() -> None:
     parameters = beorn.structs.Parameters.from_yaml(PARAMETER_FILE)
-    parameters.simulation.file_root = FILE_ROOT
-    parameters.solver.redshifts = np.sort(parameters.solver.redshifts)
+    parameters.cosmo_sim.file_root = FILE_ROOT
+    parameters.solver.redshifts = np.sort(parameters.solver.redshifts)[::-1]
+    if parameters.cosmo_sim.snapshot_redshifts is not None:
+        parameters.cosmo_sim.snapshot_redshifts = np.sort(parameters.cosmo_sim.snapshot_redshifts)[::-1]
 
-    loader = beorn.load_input_data.ThesanLoader(parameters, is_high_res=False)
+    loader = beorn.load_input_data.ThesanLoader(
+        parameters,
+        cache_file=TREE_CACHE_FILE,
+        is_high_res=False,
+    )
     cache_handler = beorn.io.Handler(file_root=CACHE_ROOT)
+    temporal_output = load_temporal_output(OUTPUT_ROOT, parameters)
 
     cache_namespace = painted_cache_namespace(parameters)
     logger.info("Using painted snapshot cache namespace %s", cache_namespace)
-    ensure_all_painted_snapshots_available(loader, cache_handler, parameters, cache_namespace)
-    logger.info("All %d painted snapshots are available. Starting Grid_dTb postprocessing.", loader.redshifts.size)
+    snapshot_indices = active_snapshot_indices(loader, parameters.cosmo_sim.snapshot_redshifts)
+    if temporal_output is None:
+        ensure_all_painted_snapshots_available(loader, cache_handler, parameters, cache_namespace)
+        logger.info("Using painted snapshot cache as the Grid_dTb input source.")
+    else:
+        logger.info("Using temporal output snapshots as the Grid_dTb input source.")
+    logger.info("All %d painted snapshots are available. Starting Grid_dTb postprocessing.", len(snapshot_indices))
 
     DTB_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     simulation_name = beorn.structs.TemporalCube.simulation_name(parameters)
     ncell = int(parameters.simulation.Ncell)
 
-    for snapshot_index in range(loader.redshifts.size):
-        grid_snapshot = cache_handler.load_file(
-            parameters,
-            beorn.structs.CoevalCube,
-            z_index=snapshot_index,
-            cache_namespace=cache_namespace,
-        )
+    for snapshot_index in snapshot_indices:
+        if temporal_output is not None:
+            grid_snapshot = temporal_output.snapshot(float(loader.redshifts[snapshot_index]))
+        else:
+            grid_snapshot = cache_handler.load_file(
+                parameters,
+                beorn.structs.CoevalCube,
+                z_index=snapshot_index,
+                cache_namespace=cache_namespace,
+            )
         grid_snapshot.to_arrays()
         redshift = float(grid_snapshot.z)
 

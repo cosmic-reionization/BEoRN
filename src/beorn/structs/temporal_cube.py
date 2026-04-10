@@ -233,6 +233,7 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
                     "cosmo_sim.random_seed",
                     # Particle mass-assignment scheme (affects density/RSD fields, not the IGM output)
                     "cosmo_sim.particle_mass_assignment",
+                    "cosmo_sim.halo_catalogs_thesan_mass_assignment",
                 },
             )
         ret = cls(z_snapshots=None, parameters=parameters, delta_b=None, Grid_Temp=None, Grid_xHII=None, Grid_xal=None)
@@ -256,7 +257,15 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
         if self._file_path is None:
             raise ValueError("Output directory is not set. Call create_empty() first.")
         path = self.snapshot_path(grid_snapshot.z)
-        grid_snapshot.write(file_path=path)
+        original_file_path = grid_snapshot._file_path
+        try:
+            # The same CoevalCube may already have been written to a cache
+            # location. Clear the bound path temporarily so the temporal output
+            # write targets this snapshot file instead of reusing the cache path.
+            grid_snapshot._file_path = None
+            grid_snapshot.write(file_path=path)
+        finally:
+            grid_snapshot._file_path = original_file_path
 
     # ------------------------------------------------------------------ #
     # Loading                                                              #

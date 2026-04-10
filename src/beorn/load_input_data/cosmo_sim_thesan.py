@@ -47,6 +47,12 @@ class ThesanLoader(MergerTreeLoader):
 
     simulation_code = "THESAN"
 
+    @staticmethod
+    def _snapshot_index_from_name(path: Path) -> int:
+        """Extract the integer snapshot index from names like groups_039 or offsets_039.hdf5."""
+        suffix = path.stem if path.is_file() else path.name
+        return int(suffix.split("_")[1])
+
     def __init__(self, parameters, cache_file: Path | str, *, is_high_res: bool = False):
         super().__init__(parameters)
 
@@ -74,22 +80,33 @@ class ThesanLoader(MergerTreeLoader):
         # Index available directories by snapshot number (parsed from the name,
         # e.g. "groups_100" → 100).  Using a dict means only the snapshots you
         # actually downloaded need to be present — a subset is fine.
-        catalogs     = {int(p.name.split("_")[1]): p
+        catalogs     = {self._snapshot_index_from_name(p): p
                         for p in self.snapshot_path_root.glob("groups_*")}
-        density_dirs = {int(p.name.split("_")[1]): p
+        density_dirs = {self._snapshot_index_from_name(p): p
                         for p in self.snapshot_path_root.glob("snapdir_*")}
-        offset_files = {int(p.name.split("_")[1]): p
+        offset_files = {self._snapshot_index_from_name(p): p
                         for p in self.offset_path_root.glob("offsets_*")}
 
         # Restrict to the solver redshift range
         z_min = min(self.parameters.solver.redshifts)
         z_max = max(self.parameters.solver.redshifts)
         indices = np.where((redshifts >= z_min) & (redshifts <= z_max))[0]
+        available_snapshot_indices = sorted(set(catalogs) & set(density_dirs) & set(offset_files))
+        self._snap_indices = np.array(
+            [int(i) for i in indices if int(i) in available_snapshot_indices],
+            dtype=int,
+        )
 
-        self._redshifts          = redshifts[indices]
-        self.catalogs            = [catalogs[i]     for i in indices]
-        self.density_directories = [density_dirs.get(i) for i in indices]
-        self.offset_files        = [offset_files[i] for i in indices]
+        if self._snap_indices.size == 0:
+            raise FileNotFoundError(
+                "No THESAN snapshots within the requested solver.redshifts range have a complete "
+                "set of groups_*, snapdir_*, and offsets_* data."
+            )
+
+        self._redshifts = redshifts[self._snap_indices]
+        self._catalog_directories = [catalogs[i] for i in self._snap_indices]
+        self._density_directories = [density_dirs.get(i) for i in self._snap_indices]
+        self._offset_files = [offset_files[i] for i in self._snap_indices]
 
         self.logger.info(
             f"THESAN snapshots: {self._redshifts.size} "
@@ -97,7 +114,7 @@ class ThesanLoader(MergerTreeLoader):
         )
 
         # Read h from first snapshot header
-        first_snap = next(self.density_directories[0].glob("snap_*.hdf5"))
+        first_snap = next(self._density_directories[0].glob("snap_*.hdf5"))
         with h5py.File(first_snap, "r") as f:
             self.thesan_h = f["Header"].attrs["HubbleParam"]
 
@@ -106,6 +123,23 @@ class ThesanLoader(MergerTreeLoader):
     @property
     def redshifts(self) -> np.ndarray:
         return self._redshifts
+
+    def _particle_mapping_config(self) -> tuple[str, str]:
+        """Return the particle-to-mesh mapping scheme and backend.
+
+        ``main`` stores the THESAN-specific assignment kernel under
+        ``cosmo_sim.halo_catalogs_thesan_mass_assignment``. Older branches used
+        ``cosmo_sim.particle_mass_assignment`` instead, so we keep a fallback
+        here while preferring the current schema.
+        """
+        cosmo_sim = self.parameters.cosmo_sim
+        mass_assignment = getattr(
+            cosmo_sim,
+            "halo_catalogs_thesan_mass_assignment",
+            getattr(cosmo_sim, "particle_mass_assignment", "CIC"),
+        )
+        backend = getattr(cosmo_sim, "particle_mapping_backend", "numpy")
+        return mass_assignment, backend
 
     # ── MergerTreeLoader interface ─────────────────────────────────────────
 
@@ -128,8 +162,8 @@ class ThesanLoader(MergerTreeLoader):
         self, redshift_index: int
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Read group positions, masses, and subhalo→group mapping from THESAN group catalogs."""
-        offset_file = self.offset_files[redshift_index]
-        catalog_dir = self.catalogs[redshift_index]
+        offset_file = self._offset_files[redshift_index]
+        catalog_dir = self._catalog_directories[redshift_index]
 
         snap_files = sorted(
             catalog_dir.rglob("*.hdf5"),
@@ -179,7 +213,7 @@ class ThesanLoader(MergerTreeLoader):
 
     def load_density_field(self, redshift_index: int) -> np.ndarray:
         """Paint DM particles onto a mesh and return the overdensity field δ = ρ/⟨ρ⟩ − 1."""
-        snapshot_path = self.density_directories[redshift_index]
+        snapshot_path = self._density_directories[redshift_index]
         snapshots = list(snapshot_path.glob("snap_*.hdf5"))
 
         particle_positions = np.zeros((self.particle_count, 3), dtype=np.float32)
@@ -196,8 +230,7 @@ class ThesanLoader(MergerTreeLoader):
         particle_positions *= 1e-3 / self.thesan_h  # kpc/h → Mpc/h
         physical_size = particle_positions.max()
 
-        mass_assignment = self.parameters.cosmo_sim.particle_mass_assignment
-        backend = self.parameters.cosmo_sim.particle_mapping_backend
+        mass_assignment, backend = self._particle_mapping_config()
         map_particles_to_mesh(
             mesh, physical_size, particle_positions,
             mass_assignment=mass_assignment, backend=backend,
@@ -206,7 +239,7 @@ class ThesanLoader(MergerTreeLoader):
 
     def load_rsd_fields(self, redshift_index: int):
         """Return per-axis velocity meshes for redshift-space distortions."""
-        snapshot_path = self.density_directories[redshift_index]
+        snapshot_path = self._density_directories[redshift_index]
         snapshots = list(snapshot_path.glob("snap_*.hdf5"))
 
         particle_positions  = np.zeros((self.particle_count, 3), dtype=np.float32)
@@ -230,8 +263,7 @@ class ThesanLoader(MergerTreeLoader):
         particle_velocities /= np.sqrt(scale_factor)  # peculiar km/s
 
         Lbox = self.parameters.simulation.Lbox
-        mass_assignment = self.parameters.cosmo_sim.particle_mass_assignment
-        backend = self.parameters.cosmo_sim.particle_mapping_backend
+        mass_assignment, backend = self._particle_mapping_config()
         map_particles_to_mesh(
             mesh_x, Lbox, particle_positions,
             mass_assignment=mass_assignment, backend=backend, weights=particle_velocities[:, 0],

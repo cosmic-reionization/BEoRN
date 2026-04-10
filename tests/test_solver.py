@@ -20,6 +20,11 @@ def make_parameters():
         ),
         solver=SimpleNamespace(
             fXh="constant",
+            halo_mass_bins=np.array([1e8, 1e9, 1e10]),
+            halo_mass_bin_centers=np.array([3e8, 3e9]),
+            halo_mass_accretion_alpha=np.array([0.5, 1.0]),
+            halo_mass_accretion_alpha_bin_centers=np.array([0.75]),
+            halo_mass_nbin=3,
         ),
         source=SimpleNamespace(
             f_st=0.05,
@@ -41,11 +46,6 @@ def make_parameters():
             xray_normalisation=1e40,
         ),
         simulation=SimpleNamespace(
-            halo_mass_bins=np.array([1e8, 1e9, 1e10]),
-            halo_mass_bin_centers=np.array([3e8, 3e9]),
-            halo_mass_accretion_alpha=np.array([0.5, 1.0]),
-            halo_mass_accreation_alpha_bin_centers=np.array([0.75]),
-            halo_mass_bin_n=3,
         ),
     )
 
@@ -110,8 +110,8 @@ def test_solve_returns_fstar_grid(monkeypatch):
         f = parameters.source.f_st
         z_n = len(self.z_bins)
         r_n = len(self.r_grid)
-        mass_n = self.parameters.simulation.halo_mass_bin_n - 1
-        alpha_n = len(self.parameters.simulation.halo_mass_accretion_alpha) - 1
+        mass_n = self.parameters.solver.halo_mass_nbin - 1
+        alpha_n = len(self.parameters.solver.halo_mass_accretion_alpha) - 1
         rlya_n = 1000
 
         r_bubble = np.full((mass_n, alpha_n, z_n), f)
@@ -256,6 +256,8 @@ def test_mpi_fstar_profile_cache_roundtrip(tmp_path, monkeypatch):
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
+    if comm.Get_size() < 2:
+        pytest.skip("MPI f_st profile cache roundtrip requires at least 2 ranks")
 
     # Under mpirun, each rank runs its own pytest process, so tmp_path may differ
     # between ranks. Build one shared cache directory on rank 0 and broadcast it.

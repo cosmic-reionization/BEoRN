@@ -1,9 +1,5 @@
 simulation:
   cores: 1
-  halo_mass_bin_min: 1.0e+7
-  halo_mass_bin_max: 1.0e+15
-  halo_mass_bin_n: 200
-  halo_mass_accretion_alpha: [0.3, 0.7, 1.1]
   Lbox: 95.5
   Ncell: 8
   store_grids: ['Grid_Temp', 'Grid_xHII', 'Grid_xal']
@@ -11,10 +7,8 @@ simulation:
   spreading_subgrid_approximation: true
   minimum_grid_size_heat: 4
   minimum_grid_size_lyal: 16
-  random_seed: 12345
   compute_s_alpha_fluctuations: true
   compute_x_coll_fluctuations: true
-  halo_catalogs_thesan_mass_assignment: 'CIC'
 
 source:
   source_type: 'SED'
@@ -57,15 +51,24 @@ source:
 
 solver:
   fXh: 'constant'
+  halo_mass_bin_min: 1.0e+7
+  halo_mass_bin_max: 1.0e+15
+  halo_mass_nbin: 200
+  halo_mass_accretion_alpha: [0.3, 0.7, 1.1]
+  HI_frac: 0.92
+  clumping: 1
+  z_decoupling: 135
+
+cosmo_sim:
+  random_seed: 12345
+  halo_catalogs_thesan_mass_assignment: 'CIC'
+  snapshot_redshifts: [19.22, 17.80, 17.17, 16.62, 15.20, 13.95, 13.01, 12.38, 12.13, 11.40, 10.98, 10.40, 10.06, 9.56, 9.13, 8.75, 8.64, 8.27, 8.17, 7.86, 7.79, 7.49, 7.43, 7.18, 7.08, 6.87, 6.66]
 
 cosmology:
   Om: 0.31
   Ob: 0.045
   Ol: 0.68
   rho_c: 2.775e+11
-  h: 0.68
+  h0: 0.68
   sigma_8: 0.83
   ns: 0.96
-  HI_frac: 0.92
-  clumping: 1
-  z_decoupling: 135
