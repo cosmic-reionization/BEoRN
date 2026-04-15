@@ -10,6 +10,7 @@
 #SBATCH --partition=standard
 #SBATCH --account=timeifler
 #SBATCH --mail-type=FAIL
+#SBATCH --mail-user=yhhuang@arizona.edu
 
 # This postprocessing job is intentionally single-node and single-task.
 # It stays well within the UArizona HPC standard Ocelote job limits documented at:
@@ -23,6 +24,8 @@ conda activate v2
 export OMP_NUM_THREADS=1
 export HDF5_USE_FILE_LOCKING=FALSE
 export BEORN_PARAMETER_FILE="${BEORN_PARAMETER_FILE:-coarse_grid.yaml}"
+export BEORN_SCRATCH_ROOT="${BEORN_SCRATCH_ROOT:-/xdisk/timeifler/yhhuang/BEoRN-v2/coarse_grid_test_main/}"
+export BEORN_TREE_CACHE_FILE="${BEORN_TREE_CACHE_FILE:-/xdisk/timeifler/yhhuang/Thesan/postprocessing/trees/LHaloTree/tree_cache_v2.hdf5}"
 
 cd /home/u15/yhhuang/cosmology/BEoRN-v2/examples
 

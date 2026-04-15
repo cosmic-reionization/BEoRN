@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_SCRATCH_ROOT = "/xdisk/timeifler/yhhuang/BEoRN-v2/coarse_grid_test_merged/"
+DEFAULT_SCRATCH_ROOT = "/xdisk/timeifler/yhhuang/BEoRN-v2/coarse_grid_test_main/"
 DEFAULT_FILE_ROOT = "/xdisk/timeifler/yhhuang/Thesan/"
 DEFAULT_TREE_CACHE_FILE = "/xdisk/timeifler/yhhuang/Thesan/postprocessing/trees/LHaloTree/tree_cache_v2.hdf5"
 
