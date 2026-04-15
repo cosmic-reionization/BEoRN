@@ -251,20 +251,20 @@ class RadiationProfileSolver:
             (mass_bins-1, alpha_bins-1, len(z_bins)).
         """
 
-        Ngam_dot = np.asarray(Ngdot_ion(
+        Ngam_dot = Ngdot_ion(
             self.parameters,
             self.z_bins[None, None, :],
             # brought to the same shape as the mass arrays
             self.halo_mass_evolution,
             self.halo_mass_derivative
-        ), dtype=np.float64)  # s-1
+        )  # s-1
         assert np.all(np.isfinite(Ngam_dot)), "Ngam_dot contains NaN values. Check the parameters and the mass accretion."
         Ob, h0 = self.parameters.cosmology.Ob, self.parameters.cosmology.h0
 
         # \bar{n}^0_H - mean comoving number density of baryons [Mpc/h]**-3
         baryon_density = (Ob * constants.rhoc0) / (constants.m_p_in_Msun * h0)
         # scale factors corresponding to the redshifts
-        scale_factors = np.asarray(1 / (self.z_bins + 1), dtype=np.float64)
+        scale_factors = 1 / (self.z_bins + 1)
         # b_0(z) - physical baryon density
         physical_baryon_density = baryon_density / scale_factors** 3
         # clumping factor
@@ -272,34 +272,6 @@ class RadiationProfileSolver:
 
         nb0_interp  = interp1d(scale_factors, physical_baryon_density, fill_value = 'extrapolate')
         Ngam_interp = interp1d(scale_factors, Ngam_dot, axis = -1, fill_value = 'extrapolate')
-
-        logger.info(
-            "R_bubble inputs: z_range=(%.6f, %.6f), a_range=(%.6g, %.6g), "
-            "Ngam_dot[min,max]=(%.6e, %.6e), nb_phys[min,max]=(%.6e, %.6e), "
-            "halo_mass[min,max]=(%.6e, %.6e), dMdt[min,max]=(%.6e, %.6e), "
-            "dtype[z,a,Ngam]=( %s, %s, %s )",
-            float(self.z_bins[0]),
-            float(self.z_bins[-1]),
-            float(scale_factors[0]),
-            float(scale_factors[-1]),
-            float(np.nanmin(Ngam_dot)),
-            float(np.nanmax(Ngam_dot)),
-            float(np.nanmin(physical_baryon_density)),
-            float(np.nanmax(physical_baryon_density)),
-            float(np.nanmin(self.halo_mass_evolution)),
-            float(np.nanmax(self.halo_mass_evolution)),
-            float(np.nanmin(self.halo_mass_derivative)),
-            float(np.nanmax(self.halo_mass_derivative)),
-            getattr(self.z_bins, "dtype", type(self.z_bins).__name__),
-            scale_factors.dtype,
-            Ngam_dot.dtype,
-        )
-        if not np.all(np.isfinite(physical_baryon_density)):
-            raise RuntimeError("physical_baryon_density contains non-finite values before solve_ivp in R_bubble().")
-        if not np.all(np.isfinite(self.halo_mass_evolution)):
-            raise RuntimeError("halo_mass_evolution contains non-finite values before solve_ivp in R_bubble().")
-        if not np.all(np.isfinite(self.halo_mass_derivative)):
-            raise RuntimeError("halo_mass_derivative contains non-finite values before solve_ivp in R_bubble().")
 
         def volume_derivative(a, volume):
             z = 1 / a - 1
@@ -317,20 +289,9 @@ class RadiationProfileSolver:
             volume_derivative,
             t_span = [scale_factors[0], scale_factors[-1]],
             y0 = v0.flatten(),
-            t_eval = scale_factors,
-            method = "BDF",
+            t_eval = scale_factors
         )
-        if not sol.success or sol.y is None or np.asarray(sol.y).size == 0:
-            raise RuntimeError(
-                "solve_ivp failed while computing ionized bubble volumes in "
-                "RadiationProfileSolver.R_bubble(). "
-                f"message={sol.message!r}, status={sol.status}, "
-                f"t_span=({scale_factors[0]:.6g}, {scale_factors[-1]:.6g}), "
-                f"n_eval={scale_factors.size}, y0_size={v0.size}, "
-                f"mass_bins={volume_shape[0]}, alpha_bins={volume_shape[1]}, "
-                f"z_range=({self.z_bins[0]:.6g}, {self.z_bins[-1]:.6g})"
-            )
-        bubble_volume = np.asarray(sol.y)
+        bubble_volume = sol.y
         bubble_volume.clip(min = 0, out = bubble_volume)
 
         # since solve_ivp works with 1d arrays we have a flattened version currently, where the last axis is the "time"
