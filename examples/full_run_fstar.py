@@ -17,7 +17,7 @@ except Exception:
     _comm = None
     _rank = 0
 # change the simulation-related paths here
-DEFAULT_SCRATCH_ROOT = "/xdisk/timeifler/yhhuang/BEoRN-v2/coarse_grid_test_merged/"
+DEFAULT_SCRATCH_ROOT = "/xdisk/timeifler/yhhuang/BEoRN-v2/coarse_grid_test_main/"
 DEFAULT_FILE_ROOT = "/xdisk/timeifler/yhhuang/Thesan/"
 DEFAULT_TREE_CACHE_FILE = "/xdisk/timeifler/yhhuang/Thesan/postprocessing/trees/LHaloTree/tree_cache_v2.hdf5"
 
@@ -78,15 +78,29 @@ else:
 if _comm is not None:
     cache_exists = _comm.bcast(cache_exists, root=0)
 
+profiles_full = None
 if cache_exists:
     profiles_path = str(expected_profiles_path)
     logger.info("Using cached f_st-grid radiation profiles from %s", profiles_path)
-    profiles_full = None
 else:
-    logger.info("Profile cache miss. Entering collective profile generation.")
-    profiles_full = solver.get_or_compute_profiles(cache_handler)
-    profiles_path = str(profiles_full._file_path)
-    logger.info("Profile generation finished. Using %s", profiles_path)
+    mpi_size = _comm.Get_size() if _comm is not None else 1
+    if mpi_size > 1:
+        if _rank == 0:
+            logger.info("Profile cache miss. Rank 0 will generate the f_st-grid profiles.")
+            profiles_full = solver.get_or_compute_profiles(cache_handler)
+            profiles_path = str(profiles_full._file_path)
+            logger.info("Profile generation finished. Using %s", profiles_path)
+        else:
+            logger.info("Profile cache miss. Rank %d is waiting for rank 0 to finish profile generation.", _rank)
+            profiles_path = None
+        _comm.barrier()
+        profiles_path = _comm.bcast(profiles_path, root=0)
+        cache_exists = True
+    else:
+        logger.info("Profile cache miss. Entering profile generation.")
+        profiles_full = solver.get_or_compute_profiles(cache_handler)
+        profiles_path = str(profiles_full._file_path)
+        logger.info("Profile generation finished. Using %s", profiles_path)
 
 mpi_size = _comm.Get_size() if _comm is not None else 1
 if mpi_size > 1:
