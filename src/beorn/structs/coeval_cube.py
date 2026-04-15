@@ -34,7 +34,10 @@ class CoevalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMixin
             except Exception:
                 pass
 
-            setattr(self, field.name, value[:])
+            if value.shape == ():
+                setattr(self, field.name, value[()])
+            else:
+                setattr(self, field.name, value[:])
 
         for file_handle in open_files.values():
             try:
