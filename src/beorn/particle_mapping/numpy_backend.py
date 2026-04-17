@@ -136,7 +136,10 @@ def _cic_batch(mesh, N, pos, w):
 
 
 def _tsc_batch(mesh, N, pos, w):
-    i_cen = np.floor(pos).astype(np.int32)
+    # TSC needs the stencil centred on the *nearest* cell (round), not floor.
+    # With floor the k=2 contribution is silently dropped for frac >= 0.5,
+    # breaking mass conservation by up to ~6%.
+    i_cen = np.round(pos).astype(np.int32)
     wt    = np.ones(len(pos), dtype=np.float32) if w is None else w.astype(np.float32)
     for kx in (-1, 0, 1):
         ix = (i_cen[:, 0] + kx) % N

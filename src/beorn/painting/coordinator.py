@@ -12,8 +12,7 @@ try:
     from mpi4py import MPI
     from mpi4py.futures import MPICommExecutor
     MPI_ENABLED = True
-except RuntimeError:
-    # mpi fails to import because the host system does not have it installed
+except (ImportError, RuntimeError):
     MPI_ENABLED = False
 
 from .helpers import TQDM_KWARGS, precompute_fft

@@ -29,8 +29,7 @@ logger = logging.getLogger(__name__)
 try:
     from mpi4py import MPI
     MPI_ENABLED = True
-except RuntimeError:
-    # mpi fails to import because the host system does not have it installed
+except (ImportError, RuntimeError):
     MPI_ENABLED = False
 
 

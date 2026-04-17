@@ -95,9 +95,9 @@ if _NUMBA_AVAILABLE:
     @njit(cache=True)
     def _tsc_loop(mesh, N, pos, wt):
         for p in range(pos.shape[0]):
-            icx = int(pos[p, 0])
-            icy = int(pos[p, 1])
-            icz = int(pos[p, 2])
+            icx = int(round(pos[p, 0]))
+            icy = int(round(pos[p, 1]))
+            icz = int(round(pos[p, 2]))
             w = wt[p]
             for kx in (-1, 0, 1):
                 ix = (icx + kx) % N

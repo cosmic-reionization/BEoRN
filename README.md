@@ -54,6 +54,13 @@ To also install the optional dependencies:
 pip install -e ".[extra]"
 ```
 
+### Verifying the Installation
+After installing, you can run the unit tests to verify everything works correctly:
+```bash
+pip install ".[dev]"
+python -m pytest tests -v
+```
+
 ## Dependencies
 The core dependencies are listed in `pyproject.toml` and include [numpy](https://numpy.org/), [scipy](https://scipy.org/), [h5py](https://www.h5py.org/), [mpi4py](https://mpi4py.readthedocs.io/en/stable/), [astropy](https://www.astropy.org/), [matplotlib](https://matplotlib.org/), and [tools21cm](https://github.com/sambit-giri/tools21cm).
 

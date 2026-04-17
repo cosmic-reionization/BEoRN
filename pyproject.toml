@@ -20,6 +20,9 @@ dependencies = [
 
 
 [project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
 extra = [
     "21cmfast>=3.4.0,<4",
     "hmf>=3.4",
