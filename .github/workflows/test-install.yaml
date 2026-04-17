@@ -1,4 +1,4 @@
-name: Test Pip Installation
+name: Test Installation
 
 on:
   pull_request:
