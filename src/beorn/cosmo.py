@@ -7,6 +7,11 @@ from pathlib import Path
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
 
+try:
+    from numpy import trapezoid as _trapz
+except ImportError:
+    from numpy import trapz as _trapz
+
 from .constants import sec_per_year, km_per_Mpc, c_km_s, Tcmb0, sigma_T, cm_per_Mpc, rhoc0, m_p_in_Msun
 from .structs import Parameters
 
@@ -92,7 +97,7 @@ def D_non_normalized(a, parameters: Parameters):
         print('Integration pb in Growth Factor.')
         exit()
     integrand = np.linspace(0.001, a, 100)
-    w = np.trapz(1 / (integrand * E(integrand,parameters)) ** 3, integrand, axis=0)
+    w = _trapz(1 / (integrand * E(integrand,parameters)) ** 3, integrand, axis=0)
     return (5 * parameters.cosmology.Om * E(a,parameters) / 2) * w
 
 #define D normalized
@@ -146,7 +151,7 @@ def correlation_fct(param):
         bin_r = np.logspace(np.log(rmin), np.log(rmax), bin_N, base=np.e)
         krange = Power_Spec[:, 0]
         PS_values = Power_Spec[:, 1]
-        bin_corr = np.trapz(krange ** 3 * PS_values * siny_ov_y(krange * bin_r[:, None]) / 2 / np.pi ** 2,np.log(krange))
+        bin_corr = _trapz(krange ** 3 * PS_values * siny_ov_y(krange * bin_r[:, None]) / 2 / np.pi ** 2,np.log(krange))
         try:
             np.savetxt(path_to_corr_file, np.transpose([bin_r, bin_corr]))
             print('Saving the correlation function in ' + path_to_corr_file)
