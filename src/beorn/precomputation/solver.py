@@ -284,12 +284,24 @@ class RadiationProfileSolver:
         volume_shape = (self.parameters.solver.halo_mass_nbin - 1, len(self.parameters.solver.halo_mass_accretion_alpha) - 1)
         v0 = np.zeros(volume_shape)
 
+        rtol   = self.parameters.solver.ode_rtol
+        atol   = self.parameters.solver.ode_atol
+        method = self.parameters.solver.ode_method
         sol = solve_ivp(
             volume_derivative,
             t_span = [scale_factors[0], scale_factors[-1]],
             y0 = v0.flatten(),
-            t_eval = scale_factors
+            t_eval = scale_factors,
+            method = method,
+            rtol = rtol,
+            atol = atol,
         )
+        if not sol.success:
+            logger.warning(
+                "R_bubble ODE did not converge (rtol=%g, atol=%g): %s. "
+                "Results may be inaccurate — tighten ode_rtol/ode_atol or check inputs.",
+                rtol, atol, sol.message,
+            )
         bubble_volume = sol.y
         bubble_volume.clip(min = 0, out = bubble_volume)
 
@@ -444,8 +456,20 @@ class RadiationProfileSolver:
             gamma_heat = 2 * rho_interpolated(a) / (3 * kb_eV_per_K * a * hubble(1 / a - 1, self.parameters)) * km_per_Mpc
             return gamma_heat.flatten() - 2 * y / a
 
+        rtol   = self.parameters.solver.ode_rtol
+        atol   = self.parameters.solver.ode_atol
+        method = self.parameters.solver.ode_method
         y0 = np.zeros(single_rho_xray_shape)
-        result = solve_ivp(right_hand_side, [aa[0], aa[-1]], y0.flatten(), t_eval=aa)#, atol=1e-2, rtol=1e-2)
+        result = solve_ivp(
+            right_hand_side, [aa[0], aa[-1]], y0.flatten(),
+            t_eval=aa, method=method, rtol=rtol, atol=atol,
+        )
+        if not result.success:
+            logger.warning(
+                "rho_heat ODE did not converge (rtol=%g, atol=%g): %s. "
+                "Results may be inaccurate — tighten ode_rtol/ode_atol or check inputs.",
+                rtol, atol, result.message,
+            )
         source_in_time = result.y
         # don't keep the initial condition at the first time step (time is in the last axis)
         # logger.debug(f"{source_in_time.shape=}")

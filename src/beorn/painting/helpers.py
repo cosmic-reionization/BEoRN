@@ -6,8 +6,121 @@ account for profiles extending beyond the simulation box.
 """
 import numpy as np
 from scipy.interpolate import interp1d
+from scipy.fft import rfftn as _rfftn, irfftn as _irfftn
 import logging
 logger = logging.getLogger(__name__)
+
+_GPU_BACKENDS = ('jax', 'torch')
+
+
+def _resolve_fft_backend(backend: str) -> str:
+    """Resolve ``'auto'`` to the fastest FFT backend available on this machine.
+
+    Priority: jax (GPU/TPU) > torch (GPU) > numpy (CPU via scipy/pocketfft).
+    GPU backends are only selected when a non-CPU device is actually present.
+    """
+    if backend != 'auto':
+        return backend
+    try:
+        import jax
+        if any(d.platform != 'cpu' for d in jax.devices()):
+            return 'jax'
+    except (ImportError, Exception):
+        pass
+    try:
+        import torch
+        if torch.cuda.is_available() or (
+            hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
+        ):
+            return 'torch'
+    except ImportError:
+        pass
+    return 'numpy'
+
+
+def make_fourier_accumulator(shape: tuple, backend: str = 'numpy'):
+    """Return a zero-initialised Fourier-space accumulator on the correct device.
+
+    Args:
+        shape (tuple): Shape of the complex accumulator — typically
+            ``(nGrid, nGrid, nGrid // 2 + 1)``.
+        backend (str): One of ``'numpy'``, ``'jax'``, ``'torch'``.
+
+    Returns:
+        Complex array (numpy, JAX, or torch) initialised to zero.
+    """
+    if backend == 'numpy':
+        return np.zeros(shape, dtype=np.complex128)
+    if backend == 'jax':
+        import jax.numpy as jnp
+        return jnp.zeros(shape, dtype=jnp.complex64)
+    if backend == 'torch':
+        import torch
+        if torch.cuda.is_available():
+            device = 'cuda'
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = 'mps'
+        else:
+            device = 'cpu'
+        return torch.zeros(shape, dtype=torch.complex64, device=device)
+    raise ValueError(f"Unknown backend '{backend}'.")
+
+
+def fourier_multiply_kernel(fa, kernel: np.ndarray, backend: str = 'numpy', workers: int = 1):
+    """Compute ``fa * FFT(ifftshift(kernel))`` in Fourier space — **no IFFT**.
+
+    Used to accumulate per-bin contributions without performing an inverse
+    transform for every mass bin.  The caller accumulates the return values
+    across all bins and calls :func:`ifft_field` exactly once at the end.
+
+    Args:
+        fa: Pre-computed forward FFT of the halo grid
+            (numpy ndarray, JAX array, or torch Tensor).
+        kernel (np.ndarray): Centred 3-D convolution kernel (always CPU numpy).
+        backend (str): FFT backend — must match the backend used in
+            :func:`precompute_fft`.
+        workers (int): Thread count (numpy backend only).
+
+    Returns:
+        Complex Fourier-space product, same type and device as ``fa``.
+    """
+    kernel_shifted = np.fft.ifftshift(kernel)
+    if backend == 'numpy':
+        return fa * _rfftn(kernel_shifted, workers=workers)
+    if backend == 'jax':
+        import jax.numpy as jnp
+        return fa * jnp.fft.rfftn(jnp.asarray(kernel_shifted))
+    if backend == 'torch':
+        import torch
+        kt = torch.as_tensor(kernel_shifted.astype(np.float32), device=fa.device)
+        return fa * torch.fft.rfftn(kt)
+    raise ValueError(f"Unknown backend '{backend}'.")
+
+
+def ifft_field(fa_accum, shape: tuple, backend: str = 'numpy', workers: int = 1) -> np.ndarray:
+    """Inverse real FFT — convert an accumulated Fourier array to real space.
+
+    Always returns a CPU numpy array regardless of the input device so that
+    downstream code stays backend-agnostic.
+
+    Args:
+        fa_accum: Accumulated Fourier-space array (numpy, JAX, or torch).
+        shape (tuple): Full real-space shape, e.g. ``(nGrid, nGrid, nGrid)``.
+        backend (str): Backend matching the forward transforms.
+        workers (int): Thread count (numpy backend only).
+
+    Returns:
+        numpy.ndarray: Real-valued 3-D result.
+    """
+    if backend == 'numpy':
+        return _irfftn(fa_accum, s=shape, workers=workers).real
+    if backend == 'jax':
+        import jax.numpy as jnp
+        return np.asarray(jnp.fft.irfftn(fa_accum, s=shape).real)
+    if backend == 'torch':
+        import torch
+        return torch.fft.irfftn(fa_accum, s=shape).real.cpu().numpy()
+    raise ValueError(f"Unknown backend '{backend}'.")
 
 
 TQDM_KWARGS = {
@@ -16,23 +129,38 @@ TQDM_KWARGS = {
 }
 
 
-def precompute_fft(array: np.ndarray, backend: str = 'numpy') -> np.ndarray:
+def precompute_fft(array: np.ndarray, backend: str = 'numpy', workers: int = 1):
     """Compute the forward real FFT of an array for reuse across multiple convolutions.
 
     Separating the forward transform lets callers avoid recomputing it when the
     same array (e.g. a halo grid) is convolved with several different kernels.
 
     Args:
-        array (np.ndarray): Input array (e.g. a 3-D halo count mesh).
-        backend (str): FFT backend. ``'numpy'`` uses :func:`numpy.fft.rfftn`.
-            Pass ``'torch'`` once GPU support is added.
+        array (np.ndarray): Input array (e.g. a 3-D halo count mesh) — always
+            a CPU numpy array; GPU backends upload internally.
+        backend (str): One of ``'numpy'``, ``'jax'``, ``'torch'``.
+            ``'numpy'`` uses :func:`scipy.fft.rfftn` (pocketfft).
+        workers (int): Thread count for the numpy backend. ``-1`` = all CPUs.
+            Ignored for GPU backends (which schedule threads internally).
 
     Returns:
-        np.ndarray: Complex array of shape suitable for :func:`fft_convolve_periodic`.
+        Complex array on the appropriate device (numpy, JAX, or torch Tensor).
     """
     if backend == 'numpy':
-        return np.fft.rfftn(array)
-    raise ValueError(f"Unknown backend '{backend}'. Supported: 'numpy'.")
+        return _rfftn(array, workers=workers)
+    if backend == 'jax':
+        import jax.numpy as jnp
+        return jnp.fft.rfftn(jnp.asarray(array))
+    if backend == 'torch':
+        import torch
+        if torch.cuda.is_available():
+            device = 'cuda'
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = 'mps'
+        else:
+            device = 'cpu'
+        return torch.fft.rfftn(torch.as_tensor(array, device=device, dtype=torch.float32))
+    raise ValueError(f"Unknown backend '{backend}'. Supported: 'numpy', 'jax', 'torch'.")
 
 
 def fft_convolve_periodic(
@@ -40,6 +168,7 @@ def fft_convolve_periodic(
     kernel: np.ndarray,
     shape: tuple,
     backend: str = 'numpy',
+    workers: int = 1,
 ) -> np.ndarray:
     """Convolve a pre-FFT'd signal with a kernel under periodic boundary conditions.
 
@@ -57,17 +186,27 @@ def fft_convolve_periodic(
             returned by :func:`precompute_fft`.
         kernel (np.ndarray): 3-D convolution kernel centered at the midpoint.
         shape (tuple): Shape of the original (un-FFT'd) input array — required
-            by :func:`numpy.fft.irfftn` to reconstruct the real-valued output.
-        backend (str): FFT backend matching the one used in :func:`precompute_fft`.
+            by :func:`scipy.fft.irfftn` to reconstruct the real-valued output.
+        backend (str): FFT backend — ``'numpy'``, ``'jax'``, or ``'torch'``.
+            Must match the backend used in :func:`precompute_fft`.
+        workers (int): Number of threads (numpy only).
 
     Returns:
-        np.ndarray: Real-valued convolution result with the same shape as the
-        original input array.
+        np.ndarray: Real-valued convolution result (always CPU numpy).
     """
     if backend == 'numpy':
-        fk = np.fft.rfftn(np.fft.ifftshift(kernel))
-        return np.fft.irfftn(fa * fk, s=shape).real
-    raise ValueError(f"Unknown backend '{backend}'. Supported: 'numpy'.")
+        fk = _rfftn(np.fft.ifftshift(kernel), workers=workers)
+        return _irfftn(fa * fk, s=shape, workers=workers).real
+    if backend == 'jax':
+        import jax.numpy as jnp
+        fk = jnp.fft.rfftn(jnp.asarray(np.fft.ifftshift(kernel)))
+        return np.asarray(jnp.fft.irfftn(fa * fk, s=shape).real)
+    if backend == 'torch':
+        import torch
+        kt = torch.as_tensor(np.fft.ifftshift(kernel).astype(np.float32), device=fa.device)
+        fk = torch.fft.rfftn(kt)
+        return torch.fft.irfftn(fa * fk, s=shape).real.cpu().numpy()
+    raise ValueError(f"Unknown backend '{backend}'. Supported: 'numpy', 'jax', 'torch'.")
 
 
 def profile_to_3Dkernel(profile: callable, nGrid: int, LB: float) -> np.ndarray:

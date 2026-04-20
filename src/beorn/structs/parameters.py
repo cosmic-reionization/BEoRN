@@ -185,6 +185,20 @@ class SolverParameters:
     back to ``z_source_start``.  When ``source_age`` is set, the window is further
     capped by the finite age — whichever limit is reached first applies."""
 
+    ode_rtol: float = 1e-2
+    """Relative tolerance for ODE integrations (R_bubble, rho_heat).
+    Looser values speed up the solver; tighten if profiles show numerical artefacts."""
+
+    ode_atol: float = 1e-2
+    """Absolute tolerance for ODE integrations (R_bubble, rho_heat)."""
+
+    ode_method: str = 'RK45'
+    """Integration method passed to scipy.integrate.solve_ivp for R_bubble and rho_heat.
+    'RK45' (default) is fine for non-stiff or mildly stiff systems.
+    'LSODA' auto-switches between Adams and BDF and is a good all-round choice.
+    'Radau' or 'BDF' are best when the system is strongly stiff (large recombination
+    rates or very fine redshift grids at high z)."""
+
     # derived properties that are directly related to the parameters
     @property
     def halo_mass_bins(self) -> np.ndarray:
@@ -226,6 +240,14 @@ class SimulationParameters:
 
     cores: int = 1
     """Number of cores used in parallelization. The computation for each redshift can be parallelized with a shared memory approach. This is the number of cores used for this. Keeping the number at 1 disables parallelization."""
+
+    fft_backend: str = 'auto'
+    """FFT backend for 3D convolutions during painting.  ``'auto'`` (default)
+    selects the fastest available backend: jax (GPU/TPU) > torch (GPU) > numpy
+    (CPU via scipy/pocketfft).  Override with ``'numpy'``, ``'jax'``, or
+    ``'torch'``.  GPU backends process mass bins sequentially on the device
+    (the GPU provides internal parallelism); numpy uses :attr:`cores` worker
+    processes."""
 
     spreading_pixel_threshold: int = -1
     """When spreading the excess ionization fraction, treat all the connected regions with less than "thresh_pixel" as a single connected region (to speed up). If set to a negative value, a default nonzero value will be used"""
@@ -318,10 +340,11 @@ class CosmoSimParameters:
 
     file_root: Path = None
 
-    particle_mapping_backend: str = 'numpy'
+    particle_mapping_backend: str = 'auto'
     """Backend used by :func:`beorn.particle_mapping.map_particles_to_mesh` when
-    painting particle snapshots onto a grid.  Options: ``'numpy'`` (default,
-    no extra dependencies), ``'numba'``, ``'pylians'``, ``'torch'``, ``'jax'``."""
+    painting particle snapshots onto a grid.  ``'auto'`` (default) selects the
+    fastest available backend: jax (GPU) > torch (GPU) > numba (CPU JIT) > numpy.
+    Override with ``'numpy'``, ``'numba'``, ``'pylians'``, ``'torch'``, or ``'jax'``."""
 
     def __post_init__(self):
         if isinstance(self.snapshot_redshifts, list):

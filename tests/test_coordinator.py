@@ -79,6 +79,7 @@ def make_parameters(seed=12345):
             Ncell=4,
             Lbox=10.0,
             cores=1,
+            fft_backend='numpy',
             store_grids=["Grid_xHII", "Grid_Temp", "Grid_xal"],
             minimum_grid_size_heat=1,
             minimum_grid_size_lyal=1,
@@ -190,22 +191,13 @@ def test_paint_single_fstar_uses_reproducible_fst_assignment_per_snapshot(monkey
             np.array([tag]),
         )
 
-    def fake_paint_single_mass_bin(
-        self,
-        halo_catalog,
-        z,
-        radial_grid,
-        r_lyal,
-        profiles_of_bin,
-        buffer_lyal=None,
-        buffer_temp=None,
-        buffer_xHII=None,
-    ):
+    def fake_paint_single_mass_bin(self, halo_catalog, z, radial_grid, r_lyal, profiles_of_bin, **kwargs):
         record = (int(np.asarray(profiles_of_bin[0]).item()), tuple(halo_catalog.selected.tolist()))
         if run_state["count"] == 0:
             picked_groups_run1.append(record)
         else:
             picked_groups_run2.append(record)
+        return (None, None, None)
 
     monkeypatch.setattr(RadiationProfilesFStarGrid, "profiles_of_halo_bin", fake_profiles_of_halo_bin)
     monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_paint_single_mass_bin)
@@ -222,18 +214,9 @@ def test_paint_single_fstar_uses_reproducible_fst_assignment_per_snapshot(monkey
 
     picked_groups_run3 = []
 
-    def fake_paint_single_mass_bin_run3(
-        self,
-        halo_catalog,
-        z,
-        radial_grid,
-        r_lyal,
-        profiles_of_bin,
-        buffer_lyal=None,
-        buffer_temp=None,
-        buffer_xHII=None,
-    ):
+    def fake_paint_single_mass_bin_run3(self, halo_catalog, z, radial_grid, r_lyal, profiles_of_bin, **kwargs):
         picked_groups_run3.append((int(np.asarray(profiles_of_bin[0]).item()), tuple(halo_catalog.selected.tolist())))
+        return (None, None, None)
 
     monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_paint_single_mass_bin_run3)
     coordinator.paint_single_fstar(1, profiles)
@@ -383,18 +366,9 @@ def test_paint_single_fstar_mixed_mass_bins_paints_all_halos_once(monkeypatch):
             np.array([tag]),
         )
 
-    def fake_paint_single_mass_bin(
-        self,
-        halo_catalog,
-        z,
-        radial_grid,
-        r_lyal,
-        profiles_of_bin,
-        buffer_lyal=None,
-        buffer_temp=None,
-        buffer_xHII=None,
-    ):
+    def fake_paint_single_mass_bin(self, halo_catalog, z, radial_grid, r_lyal, profiles_of_bin, **kwargs):
         painted_halo_ids.extend(halo_catalog.selected.tolist())
+        return (None, None, None)
 
     monkeypatch.setattr(RadiationProfilesFStarGrid, "profiles_of_halo_bin", fake_profiles_of_halo_bin)
     monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_paint_single_mass_bin)
@@ -440,18 +414,8 @@ def test_paint_single_dispatches_fstar_and_legacy_paths(monkeypatch):
         calls.append(("fstar", z_index, type(profiles).__name__))
         return "fstar-result"
 
-    def fake_legacy_paint_single_mass_bin(
-        self,
-        halo_catalog,
-        z,
-        radial_grid,
-        r_lyal,
-        profiles_of_bin,
-        buffer_lyal=None,
-        buffer_temp=None,
-        buffer_xHII=None,
-    ):
-        return None
+    def fake_legacy_paint_single_mass_bin(self, halo_catalog, z, radial_grid, r_lyal, profiles_of_bin, **kwargs):
+        return (None, None, None)
 
     monkeypatch.setattr(PaintingCoordinator, "paint_single_fstar", fake_paint_single_fstar)
     monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_legacy_paint_single_mass_bin)
@@ -654,29 +618,11 @@ def test_paint_single_fstar_end_to_end_cache_roundtrip(tmp_path, monkeypatch):
 
     paint_calls = {"count": 0}
 
-    def as_array(buffer):
-        if isinstance(buffer, np.ndarray):
-            return buffer
-        return np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer.buf)
-
-    def fake_paint_single_mass_bin(
-        self,
-        halo_catalog,
-        z,
-        radial_grid,
-        r_lyal,
-        profiles_of_bin,
-        buffer_lyal=None,
-        buffer_temp=None,
-        buffer_xHII=None,
-    ):
+    def fake_paint_single_mass_bin(self, halo_catalog, z, radial_grid, r_lyal, profiles_of_bin, **kwargs):
         paint_calls["count"] += 1
-        if buffer_xHII is not None:
-            as_array(buffer_xHII)[:] += 1.0
-        if buffer_temp is not None:
-            as_array(buffer_temp)[:] += 2.0
-        if buffer_lyal is not None:
-            as_array(buffer_lyal)[:] += 3.0
+        shape = (4, 4, 4)
+        fa = np.fft.rfftn(np.ones(shape))
+        return (fa, 3.0 * fa, 2.0 * fa)
 
     monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_paint_single_mass_bin)
     monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_fast", lambda parameters, grid: grid)
@@ -793,29 +739,11 @@ def test_mpi_paint_single_fstar_cache_roundtrip(tmp_path, monkeypatch):
 
     paint_calls = {"count": 0}
 
-    def as_array(buffer):
-        if isinstance(buffer, np.ndarray):
-            return buffer
-        return np.ndarray((4, 4, 4), dtype=np.float64, buffer=buffer.buf)
-
-    def fake_paint_single_mass_bin(
-        self,
-        halo_catalog,
-        z,
-        radial_grid,
-        r_lyal,
-        profiles_of_bin,
-        buffer_lyal=None,
-        buffer_temp=None,
-        buffer_xHII=None,
-    ):
+    def fake_paint_single_mass_bin(self, halo_catalog, z, radial_grid, r_lyal, profiles_of_bin, **kwargs):
         paint_calls["count"] += 1
-        if buffer_xHII is not None:
-            as_array(buffer_xHII)[:] += 1.0
-        if buffer_temp is not None:
-            as_array(buffer_temp)[:] += 2.0
-        if buffer_lyal is not None:
-            as_array(buffer_lyal)[:] += 3.0
+        shape = (4, 4, 4)
+        fa = np.fft.rfftn(np.ones(shape))
+        return (fa, 3.0 * fa, 2.0 * fa)
 
     monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fake_paint_single_mass_bin)
     monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_fast", lambda parameters, grid: grid)

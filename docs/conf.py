@@ -23,6 +23,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.mathjax",
     "myst_nb",
+    "sphinxcontrib.mermaid",
 ]
 
 
@@ -61,6 +62,7 @@ html_static_path = [
 
 suppress_warnings = [
     "toc.not_included",
-    "ref.python", # suppress warnings about references to python objects
+    "ref.python",       # references to python objects
+    "myst.xref_missing",  # relative .ipynb links in symlinked notebooks resolve via the real path, not the docs tree
 ]
 
