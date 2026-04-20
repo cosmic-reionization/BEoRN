@@ -29,8 +29,7 @@ logger = logging.getLogger(__name__)
 try:
     from mpi4py import MPI
     MPI_ENABLED = True
-except RuntimeError:
-    # mpi fails to import because the host system does not have it installed
+except (ImportError, RuntimeError):
     MPI_ENABLED = False
 
 
@@ -483,14 +482,19 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
             comm = MPI.COMM_WORLD
             rank = comm.Get_rank()
             if rank == 0:
-                profiles = self.solve()
-                handler.write_file(
-                    self.parameters,
-                    profiles,
-                    cache_namespace=self.profile_cache_namespace(),
-                )
-                logger.info(f"Rank {rank} computed f_st-grid profiles and saved them to cache.")
-                comm.Barrier()
+                try:
+                    profiles = self.solve()
+                    handler.write_file(
+                        self.parameters,
+                        profiles,
+                        cache_namespace=self.profile_cache_namespace(),
+                    )
+                    logger.info(f"Rank {rank} computed f_st-grid profiles and saved them to cache.")
+                    comm.Barrier()
+                except Exception:
+                    logger.exception("Rank 0 failed while computing f_st-grid radiation profiles.")
+                    comm.Abort(1)
+                    raise
             else:
                 comm.Barrier()
                 profiles = handler.load_file(
@@ -576,15 +580,15 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
         halo_mass_bins, _ = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bins,
-            self.parameters.simulation.halo_mass_accretion_alpha
+            self.parameters.solver.halo_mass_bins,
+            self.parameters.solver.halo_mass_accretion_alpha
         )
 
         halo_mass, halo_mass_derivative = mass_accretion(
             self.parameters,
             self.z_bins,
-            self.parameters.simulation.halo_mass_bin_centers,
-            self.parameters.simulation.halo_mass_accreation_alpha_bin_centers
+            self.parameters.solver.halo_mass_bin_centers,
+            self.parameters.solver.halo_mass_accretion_alpha_bin_centers
         )
 
         self.halo_mass_evolution = halo_mass
@@ -602,13 +606,13 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
 
         logger.info(
             f"Computing profiles for {self.z_bins.size} redshifts, "
-            f"{self.parameters.simulation.halo_mass_bins.size - 1} halo mass bins, "
-            f"{self.parameters.simulation.halo_mass_accretion_alpha.size - 1} alpha bins and "
+            f"{self.parameters.solver.halo_mass_nbin - 1} halo mass bins, "
+            f"{self.parameters.solver.halo_mass_accretion_alpha.size - 1} alpha bins and "
             f"{self.f_st_grid.size} f_st values."
         )
 
-        mass_n = self.parameters.simulation.halo_mass_bin_n - 1
-        alpha_n = len(self.parameters.simulation.halo_mass_accretion_alpha) - 1
+        mass_n = self.parameters.solver.halo_mass_nbin - 1
+        alpha_n = len(self.parameters.solver.halo_mass_accretion_alpha) - 1
         z_n = len(self.z_bins)
         f_n = self.f_st_grid.size
 

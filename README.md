@@ -4,6 +4,7 @@
 [![GitHub Repository](https://img.shields.io/github/repo-size/cosmic-reionization/BEoRN)](https://github.com/cosmic-reionization/BEoRN)
 [![CI status](https://github.com/cosmic-reionization/BEoRN/actions/workflows/test-install.yaml/badge.svg)](https://github.com/cosmic-reionization/BEoRN/actions/workflows/test-install.yaml)
 [![Documentation](https://img.shields.io/badge/Documentation-here-blue)](https://cosmic-reionization.github.io/BEoRN)
+[![PyPI version](https://badge.fury.io/py/beorn.svg)](https://badge.fury.io/py/beorn)
 
 BEoRN is a simulation tool designed to model the state of the intergalactic medium (IGM) during cosmic dawn and reionization ([Schaeffer, Giri & Schneider 2023](https://ui.adsabs.harvard.edu/abs/2023MNRAS.526.2942S/abstract)). It leverages one-dimensional radiative transfer calculations to efficiently model the temperature evolution of intergalactic gas and growth of ionized regions (bubbles) around early galaxies embedded in dark matter halos (e.g., [Schneider, Giri & Mirocha 2021](https://ui.adsabs.harvard.edu/abs/2021PhRvD.103h3025S/abstract); [Schneider, Schaeffer & Giri 2023](https://ui.adsabs.harvard.edu/abs/2023PhRvD.108d3030S/abstract)).
 
@@ -52,6 +53,13 @@ pip install -e .
 To also install the optional dependencies:
 ```bash
 pip install -e ".[extra]"
+```
+
+### Verifying the Installation
+After installing, you can run the unit tests to verify everything works correctly:
+```bash
+pip install ".[dev]"
+python -m pytest tests -v
 ```
 
 ## Dependencies

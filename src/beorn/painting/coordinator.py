@@ -12,8 +12,7 @@ try:
     from mpi4py import MPI
     from mpi4py.futures import MPICommExecutor
     MPI_ENABLED = True
-except RuntimeError:
-    # mpi fails to import because the host system does not have it installed
+except (ImportError, RuntimeError):
     MPI_ENABLED = False
 
 from .helpers import TQDM_KWARGS, precompute_fft
@@ -31,8 +30,82 @@ from ..load_input_data.base import BaseLoader
 
 
 class PaintingCoordinator:
+    @staticmethod
+    def _profile_redshift_array(z_history) -> np.ndarray:
+        """Materialize profile redshifts as a small in-memory array.
 
-    def _load_fstar_profiles_z_slice(self, profiles_path: Path, z_index: int) -> RadiationProfilesFStarGrid:
+        Loaded profile objects may expose ``z_history`` either as a NumPy array
+        or as an h5py Dataset. The coordinator only needs this small 1D vector
+        for nearest-neighbor matching, so materializing it here keeps the rest
+        of the large profile cube lazy.
+        """
+        return np.asarray(z_history[...]) if isinstance(z_history, h5py.Dataset) else np.asarray(z_history)
+
+    @staticmethod
+    def _small_profile_array(values) -> np.ndarray:
+        """Materialize a small 1D HDF5-backed profile array when needed."""
+        return np.asarray(values[...]) if isinstance(values, h5py.Dataset) else np.asarray(values)
+
+    def _solver_grid_config(self):
+        """Return the parameter section holding halo mass / alpha bin definitions."""
+        return getattr(self.parameters, "solver", self.parameters.simulation)
+
+    def _nearest_profile_redshift_index(self, z_history: np.ndarray, z_index: int) -> int:
+        """Return the nearest profile redshift index for a loader snapshot index."""
+        z_history = self._profile_redshift_array(z_history)
+        snap_z = float(self.loader.redshifts[z_index])
+        if z_history.size == 1:
+            return 0
+        return int(np.argmin(np.abs(z_history - snap_z)))
+
+    def _warn_if_profile_redshift_far(self, z_history: np.ndarray, profile_z_index: int, z_index: int) -> None:
+        """Warn when the nearest profile redshift is far from the target snapshot."""
+        z_history = self._profile_redshift_array(z_history)
+        snap_z = float(self.loader.redshifts[z_index])
+        profile_z = float(z_history[profile_z_index])
+        if abs(profile_z - snap_z) > 0.5:
+            self.logger.warning(
+                f"Snapshot z={snap_z:.3f} is more than Δz=0.5 away from the nearest "
+                f"profile redshift z={profile_z:.3f}. "
+                "Consider adding more steps to solver.redshifts."
+            )
+
+    @staticmethod
+    def _grid_from_buffer(buffer, shape: tuple[int, int, int]) -> np.ndarray | None:
+        """Return a writable ndarray view for either shared memory or a local array."""
+        if buffer is None:
+            return None
+        if isinstance(buffer, np.ndarray):
+            return buffer
+        return np.ndarray(shape, dtype=np.float64, buffer=buffer.buf)
+
+    def _allocate_paint_buffers(self, zero_grid: np.ndarray):
+        """Allocate output buffers, using shared memory only when multiprocessing needs it."""
+        size = zero_grid.size * np.dtype(np.float64).itemsize
+        use_shared_memory = self.parameters.simulation.cores > 1
+
+        def _alloc(field_name: str):
+            if field_name not in self.parameters.simulation.store_grids:
+                return None
+            if use_shared_memory:
+                return shared_memory.SharedMemory(create=True, size=size)
+            return zero_grid.copy()
+
+        return _alloc("Grid_xHII"), _alloc("Grid_Temp"), _alloc("Grid_xal")
+
+    def _finalize_paint_buffer(self, buffer, zero_grid: np.ndarray) -> np.ndarray:
+        """Materialize a paint buffer into a plain ndarray and release shared memory if needed."""
+        if buffer is None:
+            return zero_grid
+        if isinstance(buffer, np.ndarray):
+            return buffer
+        array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer.buf)
+        result = array.copy()
+        buffer.close()
+        buffer.unlink()
+        return result
+
+    def _load_fstar_profiles_z_slice(self, profiles_path: Path, profile_z_index: int) -> RadiationProfilesFStarGrid:
         """Load only one redshift slice of f_st-grid profiles from disk.
 
         This avoids loading the full (mass, alpha, f_st, z) profile grid into memory.
@@ -46,14 +119,14 @@ class PaintingCoordinator:
             f_st_grid = h5["f_st_grid"][...]
 
             z_all = h5["z_history"][...]
-            z_val = float(z_all[z_index])
+            z_val = float(z_all[profile_z_index])
             z_history = np.array([z_val], dtype=z_all.dtype)
 
-            halo_mass_bins = h5["halo_mass_bins"][..., z_index][..., None]
-            R_bubble = h5["R_bubble"][..., z_index][..., None]
-            rho_xray = h5["rho_xray"][..., z_index][..., None]
-            rho_heat = h5["rho_heat"][..., z_index][..., None]
-            rho_alpha = h5["rho_alpha"][..., z_index][..., None]
+            halo_mass_bins = h5["halo_mass_bins"][..., profile_z_index][..., None]
+            R_bubble = h5["R_bubble"][..., profile_z_index][..., None]
+            rho_xray = h5["rho_xray"][..., profile_z_index][..., None]
+            rho_heat = h5["rho_heat"][..., profile_z_index][..., None]
+            rho_alpha = h5["rho_alpha"][..., profile_z_index][..., None]
 
         # Use the coordinator parameters (small object) rather than materializing
         # Parameters from the HDF5 file.
@@ -336,11 +409,12 @@ class PaintingCoordinator:
         with tqdm(active_indices, **TQDM_KWARGS) as pbar:
             for loop_index in pbar:
                 z = self.loader.redshifts[loop_index]
+                z_history = self._profile_redshift_array(radiation_profiles.z_history)
                 # Use the profile-matched redshift for the filename check: paint_single
                 # writes CoevalCube with z=zgrid (nearest profile z), so we must look
                 # for that name rather than the raw loader redshift which may differ.
-                profile_z_index = int(np.argmin(np.abs(radiation_profiles.z_history - z)))
-                zgrid = float(radiation_profiles.z_history[profile_z_index])
+                profile_z_index = int(np.argmin(np.abs(z_history - z)))
+                zgrid = float(z_history[profile_z_index])
                 pbar.set_postfix(z=f"{zgrid:.3f}", refresh=False)
                 if cube.snapshot_path(zgrid).exists():
                     if self.force_recompute:
@@ -380,10 +454,12 @@ class PaintingCoordinator:
             try:
                 with h5py.File(profiles_path, "r") as h5:
                     is_fstar = "f_st_grid" in h5
+                    if is_fstar:
+                        profile_z_index = self._nearest_profile_redshift_index(h5["z_history"][...], z_index)
             except Exception:
                 is_fstar = False
             if is_fstar:
-                profiles = self._load_fstar_profiles_z_slice(profiles_path, z_index)
+                profiles = self._load_fstar_profiles_z_slice(profiles_path, profile_z_index)
             else:
                 profiles = RadiationProfiles.read(profiles_path)
 
@@ -415,26 +491,20 @@ class PaintingCoordinator:
 
         if profiles.z_history.size == 1:
             profile_z_index = 0
-            snap_z = self.loader.redshifts[z_index]
         else:
             # Find the profile index whose redshift is nearest to this snapshot's redshift.
             # When solver.redshifts and simulation.snapshot_redshifts are the same grid this is a
             # direct lookup; when snapshot_redshifts is a coarser subset the nearest
             # profile step is used.
-            snap_z = self.loader.redshifts[z_index]
-            profile_z_index = int(np.argmin(np.abs(profiles.z_history - snap_z)))
-        if abs(profiles.z_history[profile_z_index] - snap_z) > 0.5:
-            self.logger.warning(
-                f"Snapshot z={snap_z:.3f} is more than Δz=0.5 away from the nearest "
-                f"profile redshift z={profiles.z_history[profile_z_index]:.3f}. "
-                "Consider adding more steps to solver.redshifts."
-            )
+            profile_z_index = self._nearest_profile_redshift_index(profiles.z_history, z_index)
+        self._warn_if_profile_redshift_far(profiles.z_history, profile_z_index, z_index)
 
         zgrid = profiles.z_history[profile_z_index]
         mass_range = profiles.halo_mass_bins[..., profile_z_index]
+        solver_cfg = self._solver_grid_config()
 
         # log some information about the current "paintable range"
-        alphas = self.parameters.solver.halo_mass_accretion_alpha
+        alphas = solver_cfg.halo_mass_accretion_alpha
         self.logger.debug(
             f"Got {mass_range.shape[0]}x{mass_range.shape[1]} profiles. Range: "
             f"alpha={alphas[0]:.2f} [{mass_range[...,0].min():.2e} - {mass_range[..., 0].max():.2e} Msun] and "
@@ -470,46 +540,35 @@ class PaintingCoordinator:
         # initialise the "main" grids here. Since they will be filled in place by multiple parallel processes, we need to use shared memory
         # get the memory size of the grids
 
-        size = zero_grid.size * np.dtype(np.float64).itemsize
-        if "Grid_xHII" in self.parameters.simulation.store_grids:
-            buffer_xHII = shared_memory.SharedMemory(create=True, size=size)
-        else:
-            buffer_xHII = None
+        buffer_xHII, buffer_Temp, buffer_xal = self._allocate_paint_buffers(zero_grid)
 
-        if "Grid_Temp" in self.parameters.simulation.store_grids:
-            buffer_Temp = shared_memory.SharedMemory(create=True, size=size)
-        else:
-            buffer_Temp = None
+        futures = []
+        total_halos = 0
+        executor = None
 
-        if "Grid_xal" in self.parameters.simulation.store_grids:
-            buffer_xal = shared_memory.SharedMemory(create=True, size=size)
-        else:
-            buffer_xal = None
+        ## iterate over the range of mass and alpha bins that the profiles are available for
+        # the alpha bins are constant so we can use the ones from the parameters
+        # the mass bins are more tricky - they follow the mass accretion history i.e. they shift with each redshift step
+        alpha_indices = range(len(solver_cfg.halo_mass_accretion_alpha) - 1)
+        mass_indices = range(len(solver_cfg.halo_mass_bins) - 1)
 
-        with ProcessPoolExecutor(max_workers=self.parameters.simulation.cores) as executor:
-            # if only one process is used, we won't make use of the executor
-            futures = []
-            total_halos = 0
+        # now each profile was computed for a precise mass/alpha value that we set to be the center points of the bins
+        # => in the actual profile the shape is (l-1)x(m-1)x(n-1) where l,m,n are the number of bins in mass, alpha and redshift
+        # For each profile we have a range of mass and alpha values where we can pick haloes from
+        # We just need to ensure that all haloes are considered in the end (hence the total_halos check)
 
-            ## iterate over the range of mass and alpha bins that the profiles are available for
-            # the alpha bins are constant so we can use the ones from the parameters
-            # the mass bins are more tricky - they follow the mass accretion history i.e. they shift with each redshift step
-            alpha_indices = range(len(self.parameters.solver.halo_mass_accretion_alpha) - 1)
-            mass_indices = range(len(self.parameters.solver.halo_mass_bins) - 1)
+        self.logger.debug(f"Using {self.parameters.simulation.cores} processes for painting.")
+        start_time = time.time()
 
-            # now each profile was computed for a precise mass/alpha value that we set to be the center points of the bins
-            # => in the actual profile the shape is (l-1)x(m-1)x(n-1) where l,m,n are the number of bins in mass, alpha and redshift
-            # For each profile we have a range of mass and alpha values where we can pick haloes from
-            # We just need to ensure that all haloes are considered in the end (hence the total_halos check)
+        if self.parameters.simulation.cores > 1:
+            executor = ProcessPoolExecutor(max_workers=self.parameters.simulation.cores)
 
-            self.logger.debug(f"Using {self.parameters.simulation.cores} processes for painting.")
-            start_time = time.time()
-
+        try:
             for alpha_index in alpha_indices:
                 # the alpha range is simply defined by the parameters
                 loop_alpha_range = [
-                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index],
-                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index + 1]
+                    solver_cfg.halo_mass_accretion_alpha[alpha_index],
+                    solver_cfg.halo_mass_accretion_alpha[alpha_index + 1]
                 ]
                 for mass_index in mass_indices:
 
@@ -544,7 +603,7 @@ class PaintingCoordinator:
                         "buffer_xHII": buffer_xHII
                     }
 
-                    if self.parameters.simulation.cores > 1:
+                    if executor is not None:
                         # use the multiprocessing approach and submit the task to the executor
                         f = executor.submit(
                             self.paint_single_mass_bin,
@@ -554,43 +613,31 @@ class PaintingCoordinator:
                     else:
                         # use the single process approach and call the function directly
                         self.paint_single_mass_bin(**kwargs)
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=True)
 
-            # wait for all futures to complete
+        # wait for all futures to complete
+        if futures:
             completed, uncompleted = wait(futures)
             assert len(uncompleted) == 0, "Not all painting subprocesses completed successfully"
-            assert total_halos == halo_catalog.size, (
-                f"Number of painted halos ({total_halos}) does not match the halo catalog size "
-                f"({halo_catalog.size}). {halo_catalog.size - total_halos} halo(s) fell outside "
-                f"all mass/alpha bins. Catalog mass range: "
-                f"[{halo_catalog.masses.min():.3e}, {halo_catalog.masses.max():.3e}] M☉ — "
-                f"profile bins cover [{self.parameters.solver.halo_mass_bin_min:.3e}, "
-                f"{self.parameters.solver.halo_mass_bin_max:.3e}] M☉. "
-                "Widen halo_mass_bin_min/max in the parameters and recompute profiles "
-                "(force_recompute=True)."
-            )
+            for future in completed:
+                future.result()
+        assert total_halos == halo_catalog.size, (
+            f"Number of painted halos ({total_halos}) does not match the halo catalog size "
+            f"({halo_catalog.size}). {halo_catalog.size - total_halos} halo(s) fell outside "
+            f"all mass/alpha bins. Catalog mass range: "
+            f"[{halo_catalog.masses.min():.3e}, {halo_catalog.masses.max():.3e}] M☉ — "
+            f"profile bins cover [{self.parameters.solver.halo_mass_bin_min:.3e}, "
+            f"{self.parameters.solver.halo_mass_bin_max:.3e}] M☉. "
+            "Widen halo_mass_bin_min/max in the parameters and recompute profiles "
+            "(force_recompute=True)."
+        )
 
         # clean up the shared memory buffers - but keep the data that was in the buffers
-        if buffer_xHII:
-            array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer_xHII.buf)
-            Grid_xHII = array.copy()
-            buffer_xHII.close()
-            buffer_xHII.unlink()
-        else:
-            Grid_xHII = zero_grid
-        if buffer_Temp:
-            array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer_Temp.buf)
-            Grid_Temp = array.copy()
-            buffer_Temp.close()
-            buffer_Temp.unlink()
-        else:
-            Grid_Temp = zero_grid
-        if buffer_xal:
-            array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer_xal.buf)
-            Grid_xal = array.copy()
-            buffer_xal.close()
-            buffer_xal.unlink()
-        else:
-            Grid_xal = zero_grid
+        Grid_xHII = self._finalize_paint_buffer(buffer_xHII, zero_grid)
+        Grid_Temp = self._finalize_paint_buffer(buffer_Temp, zero_grid)
+        Grid_xal = self._finalize_paint_buffer(buffer_xal, zero_grid)
 
         self.logger.info(f'Profile painting took {timedelta(seconds=time.time() - start_time)}.')
 
@@ -687,27 +734,32 @@ class PaintingCoordinator:
 
         if profiles.z_history.size == 1:
             profile_z_index = 0
-            snap_z = self.loader.redshifts[z_index]
         else:
-            snap_z = self.loader.redshifts[z_index]
-            profile_z_index = int(np.argmin(np.abs(profiles.z_history - snap_z)))
-        if abs(profiles.z_history[profile_z_index] - snap_z) > 0.5:
-            self.logger.warning(
-                f"Snapshot z={snap_z:.3f} is more than Δz=0.5 away from the nearest "
-                f"profile redshift z={profiles.z_history[profile_z_index]:.3f}. "
-                "Consider adding more steps to solver.redshifts."
-            )
+            profile_z_index = self._nearest_profile_redshift_index(profiles.z_history, z_index)
+        self._warn_if_profile_redshift_far(profiles.z_history, profile_z_index, z_index)
         zgrid = profiles.z_history[profile_z_index]
         mass_range = profiles.halo_mass_bins[..., profile_z_index]
+        solver_cfg = self._solver_grid_config()
 
         rng = self._make_f_st_rng(z_index)  # create a random number generator for sampling f_st values, seeded by the redshift index to ensure reproducibility
 
-        alphas = self.parameters.solver.halo_mass_accretion_alpha
+        alphas = solver_cfg.halo_mass_accretion_alpha
         self.logger.debug(
             f"Got {mass_range.shape[0]}x{mass_range.shape[1]} profile-bin edges. Range: "
             f"alpha={alphas[0]:.2f} [{mass_range[...,0].min():.2e} - {mass_range[..., 0].max():.2e} Msun] and "
             f"alpha={alphas[-1]:.2f} [{mass_range[...,-1].min():.2e} - {mass_range[..., -1].max():.2e} Msun]."
         )
+
+        if halo_catalog.masses.size == 0:
+            self.logger.info(f'No halos at z={float(zgrid):.2f}. Returning empty grids.')
+            return CoevalCube(
+                parameters=self.parameters,
+                z=zgrid,
+                delta_b=delta_b,
+                Grid_Temp=T_adiab_fluctu(zgrid, self.parameters, delta_b),
+                Grid_xHII=zero_grid.copy(),
+                Grid_xal=zero_grid.copy(),
+            )
 
         if halo_catalog.masses.max() > mass_range.max() or halo_catalog.masses.min() < mass_range.min():
             raise RuntimeError(
@@ -720,36 +772,26 @@ class PaintingCoordinator:
 
         self.logger.info(f'Painting {halo_catalog.size} halos at {zgrid=:.2f} ({z_index=:.0f}) using stochastic f_st sampling.')
 
-        size = zero_grid.size * np.dtype(np.float64).itemsize
-        if "Grid_xHII" in self.parameters.simulation.store_grids:
-            buffer_xHII = shared_memory.SharedMemory(create=True, size=size)
-        else:
-            buffer_xHII = None
+        buffer_xHII, buffer_Temp, buffer_xal = self._allocate_paint_buffers(zero_grid)
 
-        if "Grid_Temp" in self.parameters.simulation.store_grids:
-            buffer_Temp = shared_memory.SharedMemory(create=True, size=size)
-        else:
-            buffer_Temp = None
+        futures = []
+        total_halos = 0
+        executor = None
 
-        if "Grid_xal" in self.parameters.simulation.store_grids:
-            buffer_xal = shared_memory.SharedMemory(create=True, size=size)
-        else:
-            buffer_xal = None
+        alpha_indices = range(len(solver_cfg.halo_mass_accretion_alpha) - 1)
+        mass_indices = range(len(solver_cfg.halo_mass_bins) - 1)
 
-        with ProcessPoolExecutor(max_workers=self.parameters.simulation.cores) as executor:
-            futures = []
-            total_halos = 0
+        self.logger.debug(f"Using {self.parameters.simulation.cores} processes for painting.")
+        start_time = time.time()
 
-            alpha_indices = range(len(self.parameters.solver.halo_mass_accretion_alpha) - 1)
-            mass_indices = range(len(self.parameters.solver.halo_mass_bins) - 1)
+        if self.parameters.simulation.cores > 1:
+            executor = ProcessPoolExecutor(max_workers=self.parameters.simulation.cores)
 
-            self.logger.debug(f"Using {self.parameters.simulation.cores} processes for painting.")
-            start_time = time.time()
-
+        try:
             for alpha_index in alpha_indices:
                 loop_alpha_range = [
-                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index],
-                    self.parameters.solver.halo_mass_accretion_alpha[alpha_index + 1]
+                    solver_cfg.halo_mass_accretion_alpha[alpha_index],
+                    solver_cfg.halo_mass_accretion_alpha[alpha_index + 1]
                 ]
 
                 for mass_index in mass_indices:
@@ -806,41 +848,27 @@ class PaintingCoordinator:
                             "buffer_xHII": buffer_xHII,
                         }
 
-                        if self.parameters.simulation.cores > 1:
+                        if executor is not None:
                             f = executor.submit(self.paint_single_mass_bin, **kwargs)
                             futures.append(f)
                         else:
                             self.paint_single_mass_bin(**kwargs)
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=True)
 
+        if futures:
             completed, uncompleted = wait(futures)
             assert len(uncompleted) == 0, "Not all painting subprocesses completed successfully"
-            assert total_halos == halo_catalog.size, (
-                f"Number of painted halos ({total_halos}) does not match the halo catalog size ({halo_catalog.size})."
-            )
+            for future in completed:
+                future.result()
+        assert total_halos == halo_catalog.size, (
+            f"Number of painted halos ({total_halos}) does not match the halo catalog size ({halo_catalog.size})."
+        )
 
-        if buffer_xHII:
-            array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer_xHII.buf)
-            Grid_xHII = array.copy()
-            buffer_xHII.close()
-            buffer_xHII.unlink()
-        else:
-            Grid_xHII = zero_grid
-
-        if buffer_Temp:
-            array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer_Temp.buf)
-            Grid_Temp = array.copy()
-            buffer_Temp.close()
-            buffer_Temp.unlink()
-        else:
-            Grid_Temp = zero_grid
-
-        if buffer_xal:
-            array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer_xal.buf)
-            Grid_xal = array.copy()
-            buffer_xal.close()
-            buffer_xal.unlink()
-        else:
-            Grid_xal = zero_grid
+        Grid_xHII = self._finalize_paint_buffer(buffer_xHII, zero_grid)
+        Grid_Temp = self._finalize_paint_buffer(buffer_Temp, zero_grid)
+        Grid_xal = self._finalize_paint_buffer(buffer_xal, zero_grid)
 
         self.logger.info(f'Profile painting took {timedelta(seconds=time.time() - start_time)}.')
 
@@ -937,6 +965,7 @@ class PaintingCoordinator:
     
     def _nearest_f_st_indices(self, sampled_f_st: np.ndarray, f_st_grid: np.ndarray) -> np.ndarray:
         """Map sampled f_st values to the nearest precomputed f_st-grid index."""
+        f_st_grid = self._small_profile_array(f_st_grid)
         return np.abs(sampled_f_st[:, None] - f_st_grid[None, :]).argmin(axis=1)
 
     def _make_f_st_rng(self, z_index: int):
@@ -1010,9 +1039,9 @@ class PaintingCoordinator:
         fft_halo_grid = precompute_fft(halo_grid)
 
         # Every halo in the mass bin i is assumed to have the mass M_bin[i].
-        if buffer_xHII:
+        output_grid_xHII = self._grid_from_buffer(buffer_xHII, output_shape)
+        if output_grid_xHII is not None:
             # initialize the output grid over the shared memory buffer
-            output_grid_xHII = np.ndarray(output_shape, dtype=np.float64, buffer=buffer_xHII.buf)
             x_HII_profile = np.zeros((len(radial_grid)))
             x_HII_profile[np.where(radial_grid < R_bubble / (1 + z))] = 1
 
@@ -1022,9 +1051,9 @@ class PaintingCoordinator:
                 fft_halo_grid=fft_halo_grid,
             )
 
-        if buffer_lyal:
+        output_grid_lyal = self._grid_from_buffer(buffer_lyal, output_shape)
+        if output_grid_lyal is not None:
             # initialize the output grid over the shared memory buffer
-            output_grid_lyal = np.ndarray(output_shape, dtype=np.float64, buffer=buffer_lyal.buf)
             x_alpha_prof = 1.81e11 * (rho_alpha_) / (1 + z)
             # We add up S_alpha(z, T_extrap, 1 - xHII_extrap) later, a the map level.
 
@@ -1035,9 +1064,9 @@ class PaintingCoordinator:
                 fft_halo_grid=fft_halo_grid,
             )
 
-        if buffer_temp:
+        output_grid_temp = self._grid_from_buffer(buffer_temp, output_shape)
+        if output_grid_temp is not None:
             # initialize the output grid over the shared memory buffer
-            output_grid_temp = np.ndarray(output_shape, dtype=np.float64, buffer=buffer_temp.buf)
             # modify Grid_Temp in place
             paint_temperature_profile(
                 output_grid_temp, radial_grid, Temp_profile, nGrid, LBox, self.parameters.simulation.minimum_grid_size_heat, z, truncate, halo_grid,

@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
 from ..structs import RadiationProfiles, Parameters
+from ..structs.radiation_profiles import RadiationProfilesFStarGrid
 from ..cosmo import T_adiab
 
 
@@ -21,7 +22,16 @@ Mh_z_3 = np.array([172274291.4769941, 218063348.75063255, 368917395.4438236, 775
 
 
 
-def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_index: int, redshifts: list, alphas: list, label: str = None, figsize: tuple = (14, 9), fontsize: int = None, labelsize: int = None, cmap: str = 'plasma', **gridspec_kw) -> None:
+def _select_fstar_index(profiles: RadiationProfiles | RadiationProfilesFStarGrid, f_st: float | None) -> int | None:
+    """Return the nearest f_st grid index when plotting stochastic profiles."""
+    if not isinstance(profiles, RadiationProfilesFStarGrid):
+        return None
+    if f_st is None:
+        raise ValueError("f_st must be provided when plotting RadiationProfilesFStarGrid data.")
+    return int(np.argmin(np.abs(profiles.f_st_grid[:] - f_st)))
+
+
+def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles | RadiationProfilesFStarGrid, mass_index: int, redshifts: list, alphas: list, label: str = None, figsize: tuple = (14, 9), fontsize: int = None, labelsize: int = None, cmap: str = 'plasma', f_st: float | None = None, **gridspec_kw) -> None:
     """Plot 1D radiation profiles for selected masses, redshifts and alphas.
 
     The figure has two rows:
@@ -69,8 +79,9 @@ def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_i
     ax_xhii   = fig.add_subplot(gs[1, 2])
 
     co_radial_grid = profiles.r_grid_cell[:]
-    r_lyal_phys    = profiles.r_lyal[:]
-    zz             = profiles.z_history[:]
+    r_lyal_phys = profiles.r_lyal[:]
+    zz = profiles.z_history[:]
+    f_st_index = _select_fstar_index(profiles, f_st)
 
     n_z = len(redshifts)
     n_a = len(alphas)
@@ -98,13 +109,18 @@ def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_i
                 actual_alpha_vals.append(alpha_val)
 
             Mh_i = profiles.halo_mass_bins[mass_index, ind_alpha, ind_z]
-            T_adiab_z    = T_adiab(z_val, parameters)
-            Temp_profile = profiles.rho_heat[:, mass_index, ind_alpha, ind_z] + T_adiab_z
+            T_adiab_z = T_adiab(z_val, parameters)
+            if isinstance(profiles, RadiationProfilesFStarGrid):
+                Temp_profile = profiles.rho_heat[:, mass_index, ind_alpha, f_st_index, ind_z] + T_adiab_z
+                x_HII_radius = profiles.R_bubble[mass_index, ind_alpha, f_st_index, ind_z]
+                lyal_profile = profiles.rho_alpha[:, mass_index, ind_alpha, f_st_index, ind_z]
+            else:
+                Temp_profile = profiles.rho_heat[:, mass_index, ind_alpha, ind_z] + T_adiab_z
+                x_HII_radius = profiles.R_bubble[mass_index, ind_alpha, ind_z]
+                lyal_profile = profiles.rho_alpha[:, mass_index, ind_alpha, ind_z]
 
             x_HII_profile = np.zeros(len(co_radial_grid))
-            x_HII_profile[co_radial_grid < profiles.R_bubble[mass_index, ind_alpha, ind_z]] = 1
-
-            lyal_profile = profiles.rho_alpha[:, mass_index, ind_alpha, ind_z]
+            x_HII_profile[co_radial_grid < x_HII_radius] = 1
 
             color = colors_z[i]
             ls    = ls_cycle[j % len(ls_cycle)]
@@ -193,12 +209,13 @@ def plot_1D_profiles(parameters: Parameters, profiles: RadiationProfiles, mass_i
     fig.show()
 
 
-def plot_profile_alpha_dependence(ax: plt.axes, profiles: RadiationProfiles, quantity: str, mass_index: int, redshift_index: int, alphas: list, colors: list) -> None:
+def plot_profile_alpha_dependence(ax: plt.axes, profiles: RadiationProfiles | RadiationProfilesFStarGrid, quantity: str, mass_index: int, redshift_index: int, alphas: list, colors: list, f_st: float | None = None) -> None:
 
     # since these are hdf5 datasets, we need to copy it to a numpy array first
     co_radial_grid = profiles.r_grid_cell[:]
     r_lyal_phys = profiles.r_lyal[:]
     zz = profiles.z_history[:]
+    f_st_index = _select_fstar_index(profiles, f_st)
 
     z_val = zz[redshift_index]
     actual_alpha_list = []
@@ -215,12 +232,17 @@ def plot_profile_alpha_dependence(ax: plt.axes, profiles: RadiationProfiles, qua
 
         # some quantities are required to plot sensible profiles
         T_adiab_z = T_adiab(z_val, profiles.parameters)
-        Temp_profile = profiles.rho_heat[:, mass_index, ind_alpha, redshift_index] + T_adiab_z
+        if isinstance(profiles, RadiationProfilesFStarGrid):
+            Temp_profile = profiles.rho_heat[:, mass_index, ind_alpha, f_st_index, redshift_index] + T_adiab_z
+            x_HII_radius = profiles.R_bubble[mass_index, ind_alpha, f_st_index, redshift_index]
+            lyal_profile = profiles.rho_alpha[:, mass_index, ind_alpha, f_st_index, redshift_index]
+        else:
+            Temp_profile = profiles.rho_heat[:, mass_index, ind_alpha, redshift_index] + T_adiab_z
+            x_HII_radius = profiles.R_bubble[mass_index, ind_alpha, redshift_index]
+            lyal_profile = profiles.rho_alpha[:, mass_index, ind_alpha, redshift_index]  # *1.81e11/(1+zzi)
 
         x_HII_profile = np.zeros((len(co_radial_grid)))
-        x_HII_profile[np.where(co_radial_grid < profiles.R_bubble[mass_index, ind_alpha, redshift_index])] = 1
-
-        lyal_profile = profiles.rho_alpha[:, mass_index, ind_alpha, redshift_index]  # *1.81e11/(1+zzi)
+        x_HII_profile[np.where(co_radial_grid < x_HII_radius)] = 1
 
         color = colors[j]
 

@@ -43,3 +43,12 @@ or directly install 21cmFAST using pip::
 
 Optional extras (``numba``, ``pylians``, ``torch``, ``jax``) enable faster or GPU-accelerated backends for particle-to-mesh mapping but are not required for standard use.
 
+
+Verifying the Installation
+==========================
+
+After installing, you can run the unit tests to verify that the installation is working correctly::
+
+    pip install ".[dev]"
+    python -m pytest tests -v
+
