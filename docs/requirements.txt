@@ -10,3 +10,6 @@ jupyter-cache
 
 # Optional but recommended
 nbsphinx
+
+# Diagrams
+sphinxcontrib-mermaid

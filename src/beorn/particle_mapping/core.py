@@ -37,7 +37,38 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-_VALID_BACKENDS = ('numpy', 'numba', 'pylians', 'torch', 'jax')
+_VALID_BACKENDS = ('numpy', 'numba', 'pylians', 'torch', 'jax', 'auto')
+
+
+def _resolve_backend() -> str:
+    """Return the fastest backend available on this machine.
+
+    Priority: jax (GPU/TPU) > torch (GPU) > numba (CPU JIT) > numpy (fallback).
+    GPU backends are preferred when a device is actually available.
+    """
+    try:
+        import jax
+        import jax.numpy  # noqa: F401
+        devices = jax.devices()
+        if any(d.platform != 'cpu' for d in devices):
+            return 'jax'
+    except (ImportError, Exception):
+        pass
+
+    try:
+        import torch
+        if torch.cuda.is_available() or (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
+            return 'torch'
+    except ImportError:
+        pass
+
+    try:
+        import numba  # noqa: F401
+        return 'numba'
+    except ImportError:
+        pass
+
+    return 'numpy'
 
 
 def map_particles_to_mesh(
@@ -45,7 +76,7 @@ def map_particles_to_mesh(
     box_size: float,
     particle_positions: np.ndarray,
     mass_assignment: str = 'CIC',
-    backend: str = 'numpy',
+    backend: str = 'auto',
     weights: np.ndarray = None,
 ) -> None:
     """Map particle positions onto a 3-D mesh using the requested backend.
@@ -81,6 +112,10 @@ def map_particles_to_mesh(
         raise ValueError(
             f"Unknown backend {backend!r}. Choose from {_VALID_BACKENDS}."
         )
+
+    if backend == 'auto':
+        backend = _resolve_backend()
+        logger.debug("particle_mapping: auto-selected backend=%r", backend)
 
     if backend == 'numba':
         from .numba_backend import map_particles_to_mesh as _fn

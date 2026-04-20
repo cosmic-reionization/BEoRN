@@ -22,6 +22,7 @@ def paint_ionization_profile(
     halo_grid: np.ndarray,
     fft_halo_grid: np.ndarray = None,
     backend: str = 'numpy',
+    fft_workers: int = 1,
 ) -> None:
     """Paint an ionization fraction profile onto a 3D grid.
 
@@ -58,9 +59,9 @@ def paint_ionization_profile(
     else:
         renorm = trapezoid(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (LBox / (1 + z)) ** 3 / np.mean(kernel_xHII)
         if fft_halo_grid is None:
-            fft_halo_grid = precompute_fft(halo_grid, backend=backend)
+            fft_halo_grid = precompute_fft(halo_grid, backend=backend, workers=fft_workers)
         output_grid += fft_convolve_periodic(
-            fft_halo_grid, kernel_xHII * 1e-7 / np.sum(kernel_xHII), halo_grid.shape, backend=backend,
+            fft_halo_grid, kernel_xHII * 1e-7 / np.sum(kernel_xHII), halo_grid.shape, backend=backend, workers=fft_workers,
         ) * np.sum(kernel_xHII) / 1e-7 * renorm
         # bubble_volume = trapezoid(4 * np.pi * radial_grid ** 2 * x_HII_profile, radial_grid)
         # print('bubble volume is ', len(indices) * bubble_volume,'pMpc, grid volume is', np.sum(extra_ion)* (LBox /nGrid/ (1 + z)) ** 3 )
@@ -79,6 +80,7 @@ def paint_alpha_profile(
     halo_grid: np.ndarray,
     fft_halo_grid: np.ndarray = None,
     backend: str = 'numpy',
+    fft_workers: int = 1,
 ) -> None:
     """Paint a Lyman-alpha coupling profile onto a 3D grid.
 
@@ -119,9 +121,9 @@ def paint_alpha_profile(
     if np.any(kernel_xal > 0):
         renorm = trapezoid(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal) / (LBox / (1 + z)) ** 3 / np.mean(kernel_xal)
         if fft_halo_grid is None:
-            fft_halo_grid = precompute_fft(halo_grid, backend=backend)
+            fft_halo_grid = precompute_fft(halo_grid, backend=backend, workers=fft_workers)
         output_grid += fft_convolve_periodic(
-            fft_halo_grid, kernel_xal * 1e-7 / np.sum(kernel_xal), halo_grid.shape, backend=backend,
+            fft_halo_grid, kernel_xal * 1e-7 / np.sum(kernel_xal), halo_grid.shape, backend=backend, workers=fft_workers,
         ) * renorm * np.sum(kernel_xal) / 1e-7
         # Avoid numerical issues when np.sum(kernel) ~ 0
 
@@ -138,6 +140,7 @@ def paint_temperature_profile(
     halo_grid: np.ndarray,
     fft_halo_grid: np.ndarray = None,
     backend: str = 'numpy',
+    fft_workers: int = 1,
 ) -> None:
     """Paint a temperature profile onto a 3D grid.
 
@@ -177,7 +180,7 @@ def paint_temperature_profile(
     if np.any(kernel_T > 0):
         renorm = trapezoid(Temp_profile * 4 * np.pi * radial_grid ** 2, radial_grid) / (LBox / (1 + z)) ** 3 / np.mean(kernel_T)
         if fft_halo_grid is None:
-            fft_halo_grid = precompute_fft(halo_grid, backend=backend)
+            fft_halo_grid = precompute_fft(halo_grid, backend=backend, workers=fft_workers)
         output_grid += fft_convolve_periodic(
-            fft_halo_grid, kernel_T * 1e-7 / np.sum(kernel_T), halo_grid.shape, backend=backend,
+            fft_halo_grid, kernel_T * 1e-7 / np.sum(kernel_T), halo_grid.shape, backend=backend, workers=fft_workers,
         ) * np.sum(kernel_T) / 1e-7 * renorm

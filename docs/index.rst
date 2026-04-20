@@ -8,6 +8,7 @@ BEoRN
    :caption: Contents:
 
    installation
+   algorithm
    tutorials
    reference/index
    citing

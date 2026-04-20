@@ -1,10 +1,12 @@
 """Painting coordinator: orchestrate conversion of 1D profiles into 3D maps."""
+import os
 import time
 from datetime import timedelta
 import logging
-from multiprocessing import shared_memory
-from concurrent.futures import ProcessPoolExecutor, wait, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
+from scipy.integrate import trapezoid as _trapz
+from scipy.interpolate import interp1d
 import h5py
 from pathlib import Path
 from tqdm.auto import tqdm
@@ -15,7 +17,18 @@ try:
 except (ImportError, RuntimeError):
     MPI_ENABLED = False
 
-from .helpers import TQDM_KWARGS, precompute_fft
+from .helpers import (
+    TQDM_KWARGS,
+    _GPU_BACKENDS,
+    _resolve_fft_backend,
+    precompute_fft,
+    fourier_multiply_kernel,
+    ifft_field,
+    make_fourier_accumulator,
+    profile_to_3Dkernel,
+    stacked_lyal_kernel,
+    stacked_T_kernel,
+)
 from .painters import paint_alpha_profile, paint_ionization_profile, paint_temperature_profile
 from .spread  import spreading_excess_fast
 from ..cosmo import T_adiab_fluctu
@@ -71,39 +84,15 @@ class PaintingCoordinator:
             )
 
     @staticmethod
-    def _grid_from_buffer(buffer, shape: tuple[int, int, int]) -> np.ndarray | None:
-        """Return a writable ndarray view for either shared memory or a local array."""
-        if buffer is None:
-            return None
-        if isinstance(buffer, np.ndarray):
-            return buffer
-        return np.ndarray(shape, dtype=np.float64, buffer=buffer.buf)
-
-    def _allocate_paint_buffers(self, zero_grid: np.ndarray):
-        """Allocate output buffers, using shared memory only when multiprocessing needs it."""
-        size = zero_grid.size * np.dtype(np.float64).itemsize
-        use_shared_memory = self.parameters.simulation.cores > 1
-
-        def _alloc(field_name: str):
-            if field_name not in self.parameters.simulation.store_grids:
-                return None
-            if use_shared_memory:
-                return shared_memory.SharedMemory(create=True, size=size)
-            return zero_grid.copy()
-
-        return _alloc("Grid_xHII"), _alloc("Grid_Temp"), _alloc("Grid_xal")
-
-    def _finalize_paint_buffer(self, buffer, zero_grid: np.ndarray) -> np.ndarray:
-        """Materialize a paint buffer into a plain ndarray and release shared memory if needed."""
-        if buffer is None:
-            return zero_grid
-        if isinstance(buffer, np.ndarray):
-            return buffer
-        array = np.ndarray(zero_grid.shape, dtype=np.float64, buffer=buffer.buf)
-        result = array.copy()
-        buffer.close()
-        buffer.unlink()
-        return result
+    def _accumulate_bin_result(result, Grid_xHII, Grid_Temp, Grid_xal):
+        """Add per-bin contribution arrays returned by paint_single_mass_bin into the running totals."""
+        xHII_c, lyal_c, temp_c = result
+        if xHII_c is not None:
+            Grid_xHII += xHII_c
+        if lyal_c is not None:
+            Grid_xal += lyal_c
+        if temp_c is not None:
+            Grid_Temp += temp_c
 
     def _load_fstar_profiles_z_slice(self, profiles_path: Path, profile_z_index: int) -> RadiationProfilesFStarGrid:
         """Load only one redshift slice of f_st-grid profiles from disk.
@@ -537,53 +526,62 @@ class PaintingCoordinator:
 
         self.logger.info(f'Painting {halo_catalog.size} halos at {zgrid=:.2f} ({z_index=:.0f}).')
 
-        # initialise the "main" grids here. Since they will be filled in place by multiple parallel processes, we need to use shared memory
-        # get the memory size of the grids
+        nGrid = self.parameters.simulation.Ncell
+        store_grids = self.parameters.simulation.store_grids
+        cores = self.parameters.simulation.cores
+        fft_backend = _resolve_fft_backend(self.parameters.simulation.fft_backend)
+        # GPU backends (jax/torch) run bins serially in the main process; the GPU
+        # provides internal parallelism for each FFT.  CPU numpy uses ProcessPoolExecutor.
+        use_gpu = fft_backend in _GPU_BACKENDS
+        use_multiprocess = cores > 1 and not use_gpu
+        fft_workers = 1 if use_gpu else (-1 if cores <= 1 else max(1, (os.cpu_count() or 1) // cores))
 
-        buffer_xHII, buffer_Temp, buffer_xal = self._allocate_paint_buffers(zero_grid)
+        # Fourier-space accumulators: contributions from all bins are summed here,
+        # and exactly 3 inverse FFTs are performed at the end (regardless of N_bins).
+        fourier_shape = (nGrid, nGrid, nGrid // 2 + 1)
+        accum_xHII = make_fourier_accumulator(fourier_shape, fft_backend) if "Grid_xHII" in store_grids else None
+        accum_lyal  = make_fourier_accumulator(fourier_shape, fft_backend) if "Grid_xal"  in store_grids else None
+        accum_temp  = make_fourier_accumulator(fourier_shape, fft_backend) if "Grid_Temp" in store_grids else None
+
+        def _add_fourier(result):
+            nonlocal accum_xHII, accum_lyal, accum_temp
+            fa_x, fa_l, fa_t = result
+            if fa_x is not None and accum_xHII is not None:
+                accum_xHII = accum_xHII + fa_x
+            if fa_l is not None and accum_lyal is not None:
+                accum_lyal = accum_lyal + fa_l
+            if fa_t is not None and accum_temp is not None:
+                accum_temp = accum_temp + fa_t
 
         futures = []
         total_halos = 0
-        executor = None
+        executor = ProcessPoolExecutor(max_workers=cores) if use_multiprocess else None
 
-        ## iterate over the range of mass and alpha bins that the profiles are available for
-        # the alpha bins are constant so we can use the ones from the parameters
-        # the mass bins are more tricky - they follow the mass accretion history i.e. they shift with each redshift step
         alpha_indices = range(len(solver_cfg.halo_mass_accretion_alpha) - 1)
         mass_indices = range(len(solver_cfg.halo_mass_bins) - 1)
 
-        # now each profile was computed for a precise mass/alpha value that we set to be the center points of the bins
-        # => in the actual profile the shape is (l-1)x(m-1)x(n-1) where l,m,n are the number of bins in mass, alpha and redshift
-        # For each profile we have a range of mass and alpha values where we can pick haloes from
-        # We just need to ensure that all haloes are considered in the end (hence the total_halos check)
-
-        self.logger.debug(f"Using {self.parameters.simulation.cores} processes for painting.")
+        self.logger.debug(
+            f"Fourier-accumulation painting: backend={fft_backend!r}, "
+            f"{'GPU serial' if use_gpu else f'{cores} workers' if use_multiprocess else 'serial CPU'}."
+        )
         start_time = time.time()
-
-        if self.parameters.simulation.cores > 1:
-            executor = ProcessPoolExecutor(max_workers=self.parameters.simulation.cores)
 
         try:
             for alpha_index in alpha_indices:
-                # the alpha range is simply defined by the parameters
                 loop_alpha_range = [
                     solver_cfg.halo_mass_accretion_alpha[alpha_index],
                     solver_cfg.halo_mass_accretion_alpha[alpha_index + 1]
                 ]
                 for mass_index in mass_indices:
-
-                    # the mass range shifts with the redshift so we need to take the mass range for the current redshift and take the bins from there
                     loop_mass_range = [
                         mass_range[mass_index, alpha_index],
                         mass_range[mass_index + 1, alpha_index]
                     ]
                     halo_indices = halo_catalog.get_halo_indices(loop_alpha_range, loop_mass_range)
-                    # shortcut: don't copy any memory if there are no halos to begin with
                     if halo_indices.size == 0:
                         continue
                     total_halos += halo_indices.size
 
-                    # since the profiles are large and copied in the multiprocessing approach, we only pass the relevant slice
                     profiles_of_bin = profiles.profiles_of_halo_bin(profile_z_index, alpha_index, mass_index)
                     assert not np.any(np.isnan(profiles_of_bin[0])), "R_bubble at the current range seem to be malformed (got nan values)"
                     assert not np.any(np.isnan(profiles_of_bin[1])), "rho_alpha at the current range seem to be malformed (got nan values)"
@@ -593,36 +591,25 @@ class PaintingCoordinator:
                     kwargs = {
                         "halo_catalog": halo_catalog.at_indices(halo_indices),
                         "z": zgrid,
-                        # profiles related quantities
                         "radial_grid": radial_grid,
                         "r_lyal": profiles.r_lyal[:],
                         "profiles_of_bin": profiles_of_bin,
-                        # shared memory buffers
-                        "buffer_lyal": buffer_xal,
-                        "buffer_temp": buffer_Temp,
-                        "buffer_xHII": buffer_xHII
+                        "store_grids": store_grids,
                     }
 
                     if executor is not None:
-                        # use the multiprocessing approach and submit the task to the executor
-                        f = executor.submit(
-                            self.paint_single_mass_bin,
-                            **kwargs
-                        )
+                        f = executor.submit(self.paint_single_mass_bin, **kwargs)
                         futures.append(f)
                     else:
-                        # use the single process approach and call the function directly
-                        self.paint_single_mass_bin(**kwargs)
+                        _add_fourier(self.paint_single_mass_bin(**kwargs))
+
+            if futures:
+                for future in as_completed(futures):
+                    _add_fourier(future.result())
         finally:
             if executor is not None:
                 executor.shutdown(wait=True)
 
-        # wait for all futures to complete
-        if futures:
-            completed, uncompleted = wait(futures)
-            assert len(uncompleted) == 0, "Not all painting subprocesses completed successfully"
-            for future in completed:
-                future.result()
         assert total_halos == halo_catalog.size, (
             f"Number of painted halos ({total_halos}) does not match the halo catalog size "
             f"({halo_catalog.size}). {halo_catalog.size - total_halos} halo(s) fell outside "
@@ -634,10 +621,10 @@ class PaintingCoordinator:
             "(force_recompute=True)."
         )
 
-        # clean up the shared memory buffers - but keep the data that was in the buffers
-        Grid_xHII = self._finalize_paint_buffer(buffer_xHII, zero_grid)
-        Grid_Temp = self._finalize_paint_buffer(buffer_Temp, zero_grid)
-        Grid_xal = self._finalize_paint_buffer(buffer_xal, zero_grid)
+        # 3 inverse FFTs total — regardless of how many mass bins were processed.
+        Grid_xHII = ifft_field(accum_xHII, (nGrid, nGrid, nGrid), backend=fft_backend, workers=fft_workers) if accum_xHII is not None else zero_grid.copy()
+        Grid_xal  = ifft_field(accum_lyal,  (nGrid, nGrid, nGrid), backend=fft_backend, workers=fft_workers) if accum_lyal  is not None else zero_grid.copy()
+        Grid_Temp = ifft_field(accum_temp,  (nGrid, nGrid, nGrid), backend=fft_backend, workers=fft_workers) if accum_temp  is not None else zero_grid.copy()
 
         self.logger.info(f'Profile painting took {timedelta(seconds=time.time() - start_time)}.')
 
@@ -772,20 +759,41 @@ class PaintingCoordinator:
 
         self.logger.info(f'Painting {halo_catalog.size} halos at {zgrid=:.2f} ({z_index=:.0f}) using stochastic f_st sampling.')
 
-        buffer_xHII, buffer_Temp, buffer_xal = self._allocate_paint_buffers(zero_grid)
+        nGrid = self.parameters.simulation.Ncell
+        store_grids = self.parameters.simulation.store_grids
+        cores = self.parameters.simulation.cores
+        fft_backend = _resolve_fft_backend(self.parameters.simulation.fft_backend)
+        use_gpu = fft_backend in _GPU_BACKENDS
+        use_multiprocess = cores > 1 and not use_gpu
+        fft_workers = 1 if use_gpu else (-1 if cores <= 1 else max(1, (os.cpu_count() or 1) // cores))
+
+        fourier_shape = (nGrid, nGrid, nGrid // 2 + 1)
+        accum_xHII = make_fourier_accumulator(fourier_shape, fft_backend) if "Grid_xHII" in store_grids else None
+        accum_lyal  = make_fourier_accumulator(fourier_shape, fft_backend) if "Grid_xal"  in store_grids else None
+        accum_temp  = make_fourier_accumulator(fourier_shape, fft_backend) if "Grid_Temp" in store_grids else None
+
+        def _add_fourier(result):
+            nonlocal accum_xHII, accum_lyal, accum_temp
+            fa_x, fa_l, fa_t = result
+            if fa_x is not None and accum_xHII is not None:
+                accum_xHII = accum_xHII + fa_x
+            if fa_l is not None and accum_lyal is not None:
+                accum_lyal = accum_lyal + fa_l
+            if fa_t is not None and accum_temp is not None:
+                accum_temp = accum_temp + fa_t
 
         futures = []
         total_halos = 0
-        executor = None
+        executor = ProcessPoolExecutor(max_workers=cores) if use_multiprocess else None
 
         alpha_indices = range(len(solver_cfg.halo_mass_accretion_alpha) - 1)
         mass_indices = range(len(solver_cfg.halo_mass_bins) - 1)
 
-        self.logger.debug(f"Using {self.parameters.simulation.cores} processes for painting.")
+        self.logger.debug(
+            f"Fourier-accumulation painting (fstar): backend={fft_backend!r}, "
+            f"{'GPU serial' if use_gpu else f'{cores} workers' if use_multiprocess else 'serial CPU'}."
+        )
         start_time = time.time()
-
-        if self.parameters.simulation.cores > 1:
-            executor = ProcessPoolExecutor(max_workers=self.parameters.simulation.cores)
 
         try:
             for alpha_index in alpha_indices:
@@ -843,34 +851,31 @@ class PaintingCoordinator:
                             "radial_grid": radial_grid,
                             "r_lyal": profiles.r_lyal[:],
                             "profiles_of_bin": profiles_of_bin,
-                            "buffer_lyal": buffer_xal,
-                            "buffer_temp": buffer_Temp,
-                            "buffer_xHII": buffer_xHII,
+                            "store_grids": store_grids,
                         }
 
                         if executor is not None:
                             f = executor.submit(self.paint_single_mass_bin, **kwargs)
                             futures.append(f)
                         else:
-                            self.paint_single_mass_bin(**kwargs)
+                            _add_fourier(self.paint_single_mass_bin(**kwargs))
+
+            if futures:
+                for future in as_completed(futures):
+                    _add_fourier(future.result())
         finally:
             if executor is not None:
                 executor.shutdown(wait=True)
 
-        if futures:
-            completed, uncompleted = wait(futures)
-            assert len(uncompleted) == 0, "Not all painting subprocesses completed successfully"
-            for future in completed:
-                future.result()
         assert total_halos == halo_catalog.size, (
             f"Number of painted halos ({total_halos}) does not match the halo catalog size ({halo_catalog.size})."
         )
 
-        Grid_xHII = self._finalize_paint_buffer(buffer_xHII, zero_grid)
-        Grid_Temp = self._finalize_paint_buffer(buffer_Temp, zero_grid)
-        Grid_xal = self._finalize_paint_buffer(buffer_xal, zero_grid)
-
         self.logger.info(f'Profile painting took {timedelta(seconds=time.time() - start_time)}.')
+
+        Grid_xHII = ifft_field(accum_xHII, (nGrid, nGrid, nGrid), backend=fft_backend, workers=fft_workers) if accum_xHII is not None else zero_grid.copy()
+        Grid_xal  = ifft_field(accum_lyal,  (nGrid, nGrid, nGrid), backend=fft_backend, workers=fft_workers) if accum_lyal  is not None else zero_grid.copy()
+        Grid_Temp = ifft_field(accum_temp,  (nGrid, nGrid, nGrid), backend=fft_backend, workers=fft_workers) if accum_temp  is not None else zero_grid.copy()
 
         start_time = time.time()
         Grid_xHII = spreading_excess_fast(self.parameters, Grid_xHII)
@@ -997,78 +1002,102 @@ class PaintingCoordinator:
     def paint_single_mass_bin(
         self,
         halo_catalog: HaloCatalog,
-        # profile related quantities - we don't want to pass the whole radiation_profiles object
         z: float,
         radial_grid: np.ndarray,
         r_lyal: np.ndarray,
         profiles_of_bin: tuple[np.ndarray, np.ndarray, np.ndarray],
-        buffer_lyal: np.ndarray = None,
-        buffer_temp: np.ndarray = None,
-        buffer_xHII: np.ndarray = None,
+        store_grids: list | tuple = ('delta_b', 'Grid_Temp', 'Grid_xHII', 'Grid_xal'),
     ):
-        """Paint all halos in a single mass/alpha bin into shared buffers.
+        """Paint one mass/alpha bin and return **Fourier-space** contributions.
 
-        This lower-level method is invoked either directly (single-core)
-        or in worker processes. It computes per-halo contributions for
-        ionization, Lyman-alpha and temperature and writes them into the
-        provided shared-memory buffers.
+        By returning Fourier-space arrays instead of real-space grids, the
+        coordinator can accumulate contributions from all bins in Fourier space
+        and perform exactly **3 inverse FFTs** per snapshot — regardless of how
+        many mass bins there are.  For 200 bins this reduces 600 inverse FFTs to
+        3, an O(N_bins) algorithmic saving.
+
+        GPU backends (jax, torch) keep all data on-device throughout; the
+        coordinator does a single device→CPU transfer at the final IFFT step.
 
         Args:
-            halo_catalog (HaloCatalog): Subset of halos to paint.
+            halo_catalog (HaloCatalog): Subset of halos for this bin.
             z (float): Snapshot redshift.
             radial_grid (np.ndarray): Radial coordinate grid for profiles.
             r_lyal (np.ndarray): Radial grid for Lyman-alpha profiles.
-            profiles_of_bin (tuple): Tuple ``(R_bubble, rho_alpha, Temp_profile)``.
-            buffer_lyal, buffer_temp, buffer_xHII: Optional shared-memory buffers.
+            profiles_of_bin (tuple): ``(R_bubble, rho_alpha, Temp_profile)``.
+            store_grids (sequence): Field names to compute (others yield None).
 
         Returns:
-            None: Shared buffers are modified in-place.
+            tuple: ``(fa_xHII, fa_lyal, fa_temp)`` — Fourier-space contributions
+            on the appropriate device, or None for skipped fields.
         """
-        nGrid = self.parameters.simulation.Ncell
-        output_shape = (nGrid, nGrid, nGrid)
-        LBox = self.parameters.simulation.Lbox
-        # TODO
-        # truncate = self.parameters.simulation.truncate_radius
-        truncate = False
+        cores = self.parameters.simulation.cores
+        fft_backend = _resolve_fft_backend(self.parameters.simulation.fft_backend)
+        # GPU handles internal parallelism; don't over-subscribe CPU threads in workers.
+        if fft_backend in _GPU_BACKENDS:
+            fft_workers = 1
+        elif cores <= 1:
+            fft_workers = -1
+        else:
+            fft_workers = max(1, (os.cpu_count() or 1) // cores)
 
+        nGrid = self.parameters.simulation.Ncell
+        LBox = self.parameters.simulation.Lbox
+        truncate = False
         R_bubble, rho_alpha_, Temp_profile = profiles_of_bin
 
-        # place the halos on the grid so that they can be used in a convolution
         halo_grid = halo_catalog.to_mesh()
-        # precompute the FFT of the halo grid once; all three paint functions reuse it
-        fft_halo_grid = precompute_fft(halo_grid)
+        fa_halo = precompute_fft(halo_grid, backend=fft_backend, workers=fft_workers)
 
-        # Every halo in the mass bin i is assumed to have the mass M_bin[i].
-        output_grid_xHII = self._grid_from_buffer(buffer_xHII, output_shape)
-        if output_grid_xHII is not None:
-            # initialize the output grid over the shared memory buffer
-            x_HII_profile = np.zeros((len(radial_grid)))
-            x_HII_profile[np.where(radial_grid < R_bubble / (1 + z))] = 1
+        fa_xHII = None
+        if "Grid_xHII" in store_grids:
+            x_HII_profile = np.zeros(len(radial_grid))
+            x_HII_profile[radial_grid < R_bubble / (1 + z)] = 1
+            profile_fn = interp1d(radial_grid * (1 + z), x_HII_profile, bounds_error=False, fill_value=(1, 0))
+            kernel = profile_to_3Dkernel(profile_fn, nGrid, LBox)
+            if np.any(kernel > 0):
+                renorm = (
+                    _trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
+                    / (LBox / (1 + z)) ** 3 / np.mean(kernel)
+                )
+                fa_xHII = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
+            else:
+                # Bubble smaller than a cell — represent direct halo weighting in Fourier space.
+                scale = (
+                    _trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
+                    / (LBox / nGrid / (1 + z)) ** 3
+                )
+                fa_xHII = fa_halo * scale
 
-            # modify Grid_xHII in place
-            paint_ionization_profile(
-                output_grid_xHII, radial_grid, x_HII_profile, nGrid, LBox, z, halo_grid,
-                fft_halo_grid=fft_halo_grid,
+        fa_lyal = None
+        if "Grid_xal" in store_grids:
+            x_alpha_prof = 1.81e11 * rho_alpha_ / (1 + z)
+            if isinstance(truncate, float):
+                x_alpha_prof[r_lyal * (1 + z) < truncate] = x_alpha_prof[r_lyal * (1 + z) < truncate][-1]
+            kernel = stacked_lyal_kernel(
+                r_lyal * (1 + z), x_alpha_prof, LBox, nGrid,
+                nGrid_min=self.parameters.simulation.minimum_grid_size_lyal,
             )
+            if np.any(kernel > 0):
+                renorm = (
+                    _trapz(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal)
+                    / (LBox / (1 + z)) ** 3 / np.mean(kernel)
+                )
+                fa_lyal = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
 
-        output_grid_lyal = self._grid_from_buffer(buffer_lyal, output_shape)
-        if output_grid_lyal is not None:
-            # initialize the output grid over the shared memory buffer
-            x_alpha_prof = 1.81e11 * (rho_alpha_) / (1 + z)
-            # We add up S_alpha(z, T_extrap, 1 - xHII_extrap) later, a the map level.
-
-            # TODO - document how r_lyal is the physical distance for lyal profile. Never goes further away than 100 pMpc/h (checked)
-            # modify Grid_xal in place
-            paint_alpha_profile(
-                output_grid_lyal, r_lyal, x_alpha_prof, nGrid, LBox, self.parameters.simulation.minimum_grid_size_lyal, z, truncate, halo_grid,
-                fft_halo_grid=fft_halo_grid,
+        fa_temp = None
+        if "Grid_Temp" in store_grids:
+            if isinstance(truncate, float):
+                Temp_profile[radial_grid * (1 + z) < truncate] = Temp_profile[radial_grid * (1 + z) < truncate][-1]
+            kernel = stacked_T_kernel(
+                radial_grid * (1 + z), Temp_profile, LBox, nGrid,
+                nGrid_min=self.parameters.simulation.minimum_grid_size_heat,
             )
+            if np.any(kernel > 0):
+                renorm = (
+                    _trapz(Temp_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
+                    / (LBox / (1 + z)) ** 3 / np.mean(kernel)
+                )
+                fa_temp = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
 
-        output_grid_temp = self._grid_from_buffer(buffer_temp, output_shape)
-        if output_grid_temp is not None:
-            # initialize the output grid over the shared memory buffer
-            # modify Grid_Temp in place
-            paint_temperature_profile(
-                output_grid_temp, radial_grid, Temp_profile, nGrid, LBox, self.parameters.simulation.minimum_grid_size_heat, z, truncate, halo_grid,
-                fft_halo_grid=fft_halo_grid,
-            )
+        return fa_xHII, fa_lyal, fa_temp
