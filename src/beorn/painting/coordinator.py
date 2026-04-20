@@ -29,7 +29,6 @@ from .helpers import (
     stacked_lyal_kernel,
     stacked_T_kernel,
 )
-from .painters import paint_alpha_profile, paint_ionization_profile, paint_temperature_profile
 from .spread  import spreading_excess_fast
 from ..cosmo import T_adiab_fluctu
 from ..couplings import S_alpha
