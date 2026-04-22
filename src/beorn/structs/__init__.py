@@ -4,3 +4,4 @@ from .coeval_cube import CoevalCube as CoevalCube
 from .temporal_cube import TemporalCube as TemporalCube
 from .halo_catalog import HaloCatalog as HaloCatalog
 from .lightcone import Lightcone as Lightcone
+from .statistics import StatisticsEstimator as StatisticsEstimator
