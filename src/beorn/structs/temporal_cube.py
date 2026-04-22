@@ -1,5 +1,6 @@
 """Global description of the 3d data computed over multiple redshifts."""
 from dataclasses import dataclass
+from typing import ClassVar
 from pathlib import Path
 import h5py
 import numpy as np
@@ -367,18 +368,29 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
         logger.info("All grid fields materialised into numpy arrays.")
         return self
 
+    _FIELD_ALIASES: ClassVar[dict] = {
+        'dTb':  'Grid_dTb',
+        'Temp': 'Grid_Temp',
+        'xHII': 'Grid_xHII',
+        'xal':  'Grid_xal',
+        'delta_b': 'delta_b',
+    }
+
     def global_mean(self, field: str) -> np.ndarray:
         """Compute the spatial mean of *field* at each redshift without loading all z into RAM.
 
         Iterates over snapshots one at a time, so peak memory usage is one
         ``(Ncell, Ncell, Ncell)`` array regardless of how many redshifts exist.
 
+        Short aliases are accepted: ``'dTb'``, ``'Temp'``, ``'xHII'``, ``'xal'``.
+
         Args:
-            field (str): Name of the field to average, e.g. ``'Grid_xHII'``.
+            field (str): Attribute name or short alias, e.g. ``'xHII'`` or ``'Grid_xHII'``.
 
         Returns:
             np.ndarray: 1D array of shape ``(n_z,)`` with the spatial mean per redshift.
         """
+        field = self._FIELD_ALIASES.get(field, field)
         arr = getattr(self, field, None)
         if arr is None:
             raise ValueError(f"Field '{field}' is not available on this TemporalCube.")
