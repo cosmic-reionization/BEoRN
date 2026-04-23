@@ -22,6 +22,7 @@ class DummyHaloCatalog:
     def __init__(self, masses, alpha_vals, selected=None):
         self.masses = np.asarray(masses)
         self.alpha_vals = np.asarray(alpha_vals)
+        self.alphas = self.alpha_vals
         if selected is None:
             self.selected = np.arange(self.masses.size)
         else:
@@ -379,6 +380,49 @@ def test_paint_single_fstar_mixed_mass_bins_paints_all_halos_once(monkeypatch):
     coordinator.paint_single_fstar(0, profiles)
 
     np.testing.assert_array_equal(np.sort(np.asarray(painted_halo_ids)), np.arange(halo_catalog.size))
+
+
+def test_paint_single_fstar_fails_early_for_alpha_specific_mass_gap(monkeypatch):
+    halo_catalog = DummyHaloCatalog(
+        masses=np.array([2.0e8, 2.0e9]),
+        alpha_vals=np.array([0.7, 1.2]),
+    )
+    coordinator = make_coordinator(seed=24680, halo_catalog=halo_catalog)
+    coordinator.parameters.simulation.halo_mass_accretion_alpha = np.array([0.5, 1.0, 1.5])
+    coordinator.parameters.simulation.halo_mass_bin_min = 1.0e8
+    coordinator.parameters.simulation.halo_mass_bin_max = 1.0e10
+
+    profiles = RadiationProfilesFStarGrid(
+        parameters=SimpleNamespace(),
+        z_history=np.array([12.0, 10.0]),
+        halo_mass_bins=np.array(
+            [
+                [[1.0e8, 1.0e8], [1.0e8, 1.0e8]],
+                [[1.0e9, 1.0e9], [5.0e8, 5.0e8]],
+                [[1.0e10, 1.0e10], [1.0e9, 1.0e9]],
+            ]
+        ),
+        f_st_grid=np.array([0.01, 0.05, 0.1, 0.2]),
+        rho_xray=np.ones((3, 2, 2, 4, 2)),
+        rho_heat=np.ones((3, 2, 2, 4, 2)),
+        rho_alpha=np.ones((5, 2, 2, 4, 2)),
+        R_bubble=np.ones((2, 2, 4, 2)),
+        r_lyal=np.logspace(-5, 2, 5),
+        r_grid_cell=np.logspace(-2, 1, 3),
+    )
+
+    paint_calls = {"count": 0}
+
+    def fail_if_called(*args, **kwargs):
+        paint_calls["count"] += 1
+        raise AssertionError("paint_single_mass_bin should not be reached when coverage preflight fails")
+
+    monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fail_if_called)
+
+    with pytest.raises(RuntimeError, match="outside the precomputed mass/alpha coverage"):
+        coordinator.paint_single_fstar(0, profiles)
+
+    assert paint_calls["count"] == 0
 
 
 class DummyLegacyProfiles:

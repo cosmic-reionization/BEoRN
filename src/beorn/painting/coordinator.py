@@ -62,6 +62,88 @@ class PaintingCoordinator:
         """Return the parameter section holding halo mass / alpha bin definitions."""
         return getattr(self.parameters, "solver", self.parameters.simulation)
 
+    def _raise_if_halos_outside_profile_coverage(
+        self,
+        halo_catalog: HaloCatalog,
+        mass_range: np.ndarray,
+        zgrid: float,
+    ) -> None:
+        """Fail early when halos cannot be assigned to any precomputed mass/alpha bin."""
+        if halo_catalog.size == 0:
+            return
+
+        solver_cfg = self._solver_grid_config()
+        alpha_edges = self._small_profile_array(solver_cfg.halo_mass_accretion_alpha)
+        alpha_indices = np.searchsorted(alpha_edges, halo_catalog.alphas, side="right") - 1
+        alpha_ok = (alpha_indices >= 0) & (alpha_indices < alpha_edges.size - 1)
+        alpha_indices_clipped = np.clip(alpha_indices, 0, alpha_edges.size - 2)
+
+        supported_mass_min = np.full(halo_catalog.size, np.nan, dtype=float)
+        supported_mass_max = np.full(halo_catalog.size, np.nan, dtype=float)
+        supported_mass_min[alpha_ok] = mass_range[0, alpha_indices_clipped[alpha_ok]]
+        supported_mass_max[alpha_ok] = mass_range[-1, alpha_indices_clipped[alpha_ok]]
+
+        covered = alpha_ok & (halo_catalog.masses >= supported_mass_min) & (halo_catalog.masses < supported_mass_max)
+        unsupported = np.where(~covered)[0]
+        if unsupported.size == 0:
+            return
+
+        sample_details = []
+        for halo_index in unsupported[:5]:
+            mass = float(halo_catalog.masses[halo_index])
+            alpha = float(halo_catalog.alphas[halo_index])
+            if alpha_ok[halo_index]:
+                alpha_bin = int(alpha_indices_clipped[halo_index])
+                sample_details.append(
+                    "halo[{idx}] mass={mass:.3e} Msol alpha={alpha:.3f} is outside the "
+                    "supported mass range [{mass_min:.3e}, {mass_max:.3e}) Msol for "
+                    "alpha bin [{alpha_min:.3f}, {alpha_max:.3f})".format(
+                        idx=int(halo_index),
+                        mass=mass,
+                        alpha=alpha,
+                        mass_min=float(supported_mass_min[halo_index]),
+                        mass_max=float(supported_mass_max[halo_index]),
+                        alpha_min=float(alpha_edges[alpha_bin]),
+                        alpha_max=float(alpha_edges[alpha_bin + 1]),
+                    )
+                )
+            else:
+                sample_details.append(
+                    "halo[{idx}] mass={mass:.3e} Msol alpha={alpha:.3f} is outside the "
+                    "supported alpha range [{alpha_min:.3f}, {alpha_max:.3f})".format(
+                        idx=int(halo_index),
+                        mass=mass,
+                        alpha=alpha,
+                        alpha_min=float(alpha_edges[0]),
+                        alpha_max=float(alpha_edges[-1]),
+                    )
+                )
+
+        suggestion = (
+            "Increase solver.halo_mass_bin_max and recompute the profiles, "
+            "or narrow the halo_mass_accretion_alpha grid."
+        )
+        current_mass_bin_max = getattr(solver_cfg, "halo_mass_bin_max", None)
+        unsupported_with_valid_alpha = unsupported[alpha_ok[unsupported]]
+        if current_mass_bin_max is not None and unsupported_with_valid_alpha.size > 0:
+            required_ratio = np.max(
+                halo_catalog.masses[unsupported_with_valid_alpha]
+                / supported_mass_max[unsupported_with_valid_alpha]
+            )
+            suggested_mass_bin_max = float(current_mass_bin_max) * float(required_ratio) * 1.1
+            suggestion = (
+                f"Increase solver.halo_mass_bin_max to at least {suggested_mass_bin_max:.3e} "
+                "Msol and recompute the profiles, or narrow the halo_mass_accretion_alpha grid."
+            )
+
+        raise RuntimeError(
+            f"Halo catalog at z={float(zgrid):.3f} contains {unsupported.size} halo(s) outside "
+            "the precomputed mass/alpha coverage. Painting would later drop those halos and "
+            "fail the halo-count invariant. Coverage is alpha-dependent even when the global "
+            f"profile mass range [{float(np.min(mass_range)):.3e}, {float(np.max(mass_range)):.3e}] "
+            f"Msol looks wide enough. Examples: {'; '.join(sample_details)}. {suggestion}"
+        )
+
     def _nearest_profile_redshift_index(self, z_history: np.ndarray, z_index: int) -> int:
         """Return the nearest profile redshift index for a loader snapshot index."""
         z_history = self._profile_redshift_array(z_history)
@@ -520,8 +602,7 @@ class PaintingCoordinator:
             )
             return grid_data
 
-        if halo_catalog.masses.max() > mass_range.max() or halo_catalog.masses.min() < mass_range.min():
-            raise RuntimeError(f"The current halo catalog at z={zgrid} has a higher masse range ({halo_catalog.masses.max():.2e} - {halo_catalog.masses.min():.2e}) than the mass range of the precomputed profiles ({mass_range.max():.2e} - {mass_range.min():.2e}). You need to adjust your parameters: either increase the mass range of the profile simulation (parameters.simulation) or decrease the mass range of star forming halos (parameters.source).")
+        self._raise_if_halos_outside_profile_coverage(halo_catalog, mass_range, zgrid)
 
         self.logger.info(f'Painting {halo_catalog.size} halos at {zgrid=:.2f} ({z_index=:.0f}).')
 
@@ -747,14 +828,7 @@ class PaintingCoordinator:
                 Grid_xal=zero_grid.copy(),
             )
 
-        if halo_catalog.masses.max() > mass_range.max() or halo_catalog.masses.min() < mass_range.min():
-            raise RuntimeError(
-                f"The current halo catalog at z={zgrid} has a higher masse range "
-                f"({halo_catalog.masses.max():.2e} - {halo_catalog.masses.min():.2e}) than the mass range "
-                f"of the precomputed profiles ({mass_range.max():.2e} - {mass_range.min():.2e}). "
-                "You need to adjust your parameters: either increase the mass range of the profile simulation "
-                "(parameters.simulation) or decrease the mass range of star forming halos (parameters.source)."
-            )
+        self._raise_if_halos_outside_profile_coverage(halo_catalog, mass_range, zgrid)
 
         self.logger.info(f'Painting {halo_catalog.size} halos at {zgrid=:.2f} ({z_index=:.0f}) using stochastic f_st sampling.')
 
