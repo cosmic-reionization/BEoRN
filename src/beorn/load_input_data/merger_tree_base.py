@@ -185,6 +185,7 @@ class MergerTreeLoader(BaseLoader):
 
         # 5. Clamp to the paintable alpha range
         alpha_range = self.parameters.solver.halo_mass_accretion_alpha
+        alpha_upper_bound = np.nextafter(alpha_range[-2], -np.inf)  # avoid halos go outside of the last half-open alpha bin
         below = full_alphas < alpha_range[0]
         above = full_alphas > alpha_range[-2]
         full_alphas[below] = alpha_range[0]
