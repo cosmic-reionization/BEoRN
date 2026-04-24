@@ -201,7 +201,6 @@ class Py21cmFastLoader(BaseLoader):
             N_THREADS=sim.cores,
         )
 
-
         cosmo_params = p21c.CosmoParams(
             SIGMA_8=cosmo.sigma_8,
             hlittle=cosmo.h0,
@@ -213,7 +212,24 @@ class Py21cmFastLoader(BaseLoader):
         global_params = {
             "INITIAL_REDSHIFT": 300,
             "CLUMPING_FACTOR": 2.0,
+            # "SAMPLER_MIN_MASS": 1e7,
         }
+
+        # Lowering the temperature limit to 5,000K 
+        # and the turnover mass to 10^7
+        astro_params = p21c.AstroParams({
+            "ION_Tvir_MIN": 3.5, 
+            "M_TURN": 7.0,
+            "R_BUBBLE_MAX": 1.0,
+        })
+
+        flag_options = p21c.FlagOptions({
+            # "USE_MINI_HALOS": True,
+            # "USE_MASS_DEPENDENT_ZETA": True,  # Required for Mini-halos
+            # "USE_TS_FLUCT": True,             # Required for Mini-halos
+            # "USE_RELATIVE_VELOCITIES": True,  # Recommended for accurate Mini-halo evolution
+            # "INHOMO_RECO": False              # Or set R_BUBBLE_MAX to 50 to stop the specific bubble warning
+        })
 
         logger.info('Computing initial conditions...')
         ic_start = time.process_time()
@@ -234,10 +250,20 @@ class Py21cmFastLoader(BaseLoader):
 
                     z_start = time.process_time()
                     perturbed_field = p21c.perturb_field(
-                        redshift=redshift, init_boxes=IC, direc=str(file_root), write=False
+                        redshift=redshift, init_boxes=IC, direc=str(file_root), write=False,
+                    )
+                    # Call determine_halo_list explicitly so astro_params/flag_options
+                    # reach ComputeHaloField in C. If left to perturb_halo_list to call
+                    # internally, it drops these params and uses defaults (ION_Tvir_MIN
+                    # = 50000 K floors the catalog at ~5e8 Msun regardless of M_TURN).
+                    halo_field = p21c.determine_halo_list(
+                        redshift=redshift, init_boxes=IC, direc=str(file_root), write=False,
+                        astro_params=astro_params, flag_options=flag_options,
                     )
                     halo_list = p21c.perturb_halo_list(
-                        redshift=redshift, init_boxes=IC, direc=str(file_root), write=False
+                        redshift=redshift, init_boxes=IC, halo_field=halo_field,
+                        direc=str(file_root), write=False,
+                        astro_params=astro_params, flag_options=flag_options,
                     )
 
                     halo_list.write(direc=file_root, fname=halo_fname)
