@@ -499,13 +499,14 @@ class TestPhysicsProfileConsistency:
         """profiles_of_halo_bin() must return independent copies so that
         downstream painting cannot corrupt the precomputed arrays."""
         single, grid = profiles
-        rb_s, ra_s, rh_s = single.profiles_of_halo_bin(0, 0, 0)
-        rb_g, ra_g, rh_g = grid.profiles_of_halo_bin(0, 0, 0, _FST_IDX)
+        _, ra_s, _ = single.profiles_of_halo_bin(0, 0, 0)
+        _, ra_g, _ = grid.profiles_of_halo_bin(0, 0, 0, _FST_IDX)
 
-        rb_s[:] = 0.0
-        rb_g[:] = 0.0
+        # rho_alpha always has the radial dimension so it is always an array.
+        ra_s[:] = 0.0
+        ra_g[:] = 0.0
 
-        rb_s2, _, _ = single.profiles_of_halo_bin(0, 0, 0)
-        rb_g2, _, _ = grid.profiles_of_halo_bin(0, 0, 0, _FST_IDX)
-        assert not np.all(rb_s2 == 0.0), "RadiationProfiles.R_bubble was mutated — not a copy"
-        assert not np.all(rb_g2 == 0.0), "RadiationProfilesFStarGrid.R_bubble was mutated — not a copy"
+        _, ra_s2, _ = single.profiles_of_halo_bin(0, 0, 0)
+        _, ra_g2, _ = grid.profiles_of_halo_bin(0, 0, 0, _FST_IDX)
+        assert not np.all(ra_s2 == 0.0), "RadiationProfiles.rho_alpha was mutated — not a copy"
+        assert not np.all(ra_g2 == 0.0), "RadiationProfilesFStarGrid.rho_alpha was mutated — not a copy"
