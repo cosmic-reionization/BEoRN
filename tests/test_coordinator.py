@@ -827,34 +827,54 @@ def test_mpi_paint_single_fstar_cache_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(CoevalCube, "write", _test_cube_write, raising=True)
     monkeypatch.setattr(CoevalCube, "read", _test_cube_read, raising=True)
 
-    if rank == 0:
-        cube = coordinator.paint_single_fstar(0, profiles)
-        assert paint_calls["count"] > 0
-        n_paint_groups = paint_calls["count"]
-        np.testing.assert_allclose(cube.Grid_xHII, float(n_paint_groups) * np.ones((4, 4, 4)))
-        np.testing.assert_allclose(cube.Grid_Temp, 2.0 * float(n_paint_groups) * np.ones((4, 4, 4)))
-        np.testing.assert_allclose(cube.Grid_xal, 3.0 * float(n_paint_groups) / (4 * np.pi) * np.ones((4, 4, 4)))
+    # Each rank-conditional block is wrapped in try/except so that if a rank
+    # fails before a collective operation, comm.Abort() terminates all ranks
+    # immediately instead of leaving the other rank hanging forever.
+    try:
+        if rank == 0:
+            cube = coordinator.paint_single_fstar(0, profiles)
+            assert paint_calls["count"] > 0
+            n_paint_groups = paint_calls["count"]
+            np.testing.assert_allclose(cube.Grid_xHII, float(n_paint_groups) * np.ones((4, 4, 4)))
+            np.testing.assert_allclose(cube.Grid_Temp, 2.0 * float(n_paint_groups) * np.ones((4, 4, 4)))
+            np.testing.assert_allclose(cube.Grid_xal, 3.0 * float(n_paint_groups) / (4 * np.pi) * np.ones((4, 4, 4)))
+    except Exception as exc:
+        print(f"[rank {rank}] Phase-1 assertion failed: {exc}", flush=True)
+        comm.Abort(1)
 
     # Ensure rank 0 finished writing before rank 1 tries to load.
     comm.Barrier()
 
-    if rank == 1:
-        def fail_if_called(*args, **kwargs):
-            raise AssertionError("rank 1 should load painted output from cache without repainting")
+    try:
+        if rank == 1:
+            namespace = coordinator._paint_cache_namespace(profiles)
+            expected_path = (
+                Path(shared_root_str) / namespace
+                / f"CoevalCube_{coordinator.parameters.unique_hash()}_z0.npz"
+            )
+            print(f"[rank {rank}] Looking for cache file: {expected_path}", flush=True)
+            print(f"[rank {rank}] File exists: {expected_path.exists()}", flush=True)
 
-        monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fail_if_called)
-        cube = coordinator.paint_single_fstar(0, profiles)
-        assert paint_calls["count"] == 0
+            def fail_if_called(*args, **kwargs):
+                raise AssertionError("rank 1 should load painted output from cache without repainting")
 
-    namespace_dir = Path(shared_root_str) / coordinator._paint_cache_namespace(profiles)
-    assert namespace_dir.exists()
+            monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fail_if_called)
+            cube = coordinator.paint_single_fstar(0, profiles)
+            assert paint_calls["count"] == 0
 
-    payload = (
-        float(np.sum(cube.Grid_xHII)),
-        float(np.sum(cube.Grid_Temp)),
-        float(np.sum(cube.Grid_xal)),
-        float(cube.z),
-    )
+        namespace_dir = Path(shared_root_str) / coordinator._paint_cache_namespace(profiles)
+        assert namespace_dir.exists(), f"[rank {rank}] namespace_dir missing: {namespace_dir}"
+
+        payload = (
+            float(np.sum(cube.Grid_xHII)),
+            float(np.sum(cube.Grid_Temp)),
+            float(np.sum(cube.Grid_xal)),
+            float(cube.z),
+        )
+    except Exception as exc:
+        print(f"[rank {rank}] Phase-2 assertion failed: {exc}", flush=True)
+        comm.Abort(1)
+
     gathered = comm.gather(payload, root=0)
     if rank == 0:
         assert len(gathered) == 2
