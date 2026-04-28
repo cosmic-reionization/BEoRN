@@ -172,11 +172,14 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
     @classmethod
     def simulation_name(cls, parameters: Parameters) -> str:
         """Infer a stable simulation name for snapshot file names."""
-        file_root = getattr(parameters.simulation, "file_root", None)
-        if isinstance(file_root, Path):
-            candidate = file_root.name or file_root.stem
-            if candidate:
-                return cls._sanitize_component(candidate)
+        # cosmo_sim.file_root is the canonical location; simulation.file_root is
+        # a legacy fallback used by some run scripts that set it dynamically.
+        for section in ("cosmo_sim", "simulation"):
+            file_root = getattr(getattr(parameters, section, None), "file_root", None)
+            if isinstance(file_root, Path):
+                candidate = file_root.name or file_root.stem
+                if candidate:
+                    return cls._sanitize_component(candidate)
         return "simulation"
 
     @classmethod
