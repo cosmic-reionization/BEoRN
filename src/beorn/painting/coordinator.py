@@ -1028,7 +1028,7 @@ class PaintingCoordinator:
             raise ValueError("f_st_paint_min must be smaller than f_st_paint_max")
 
         if distribution == "lognormal":
-            sampled = rng.lognormal(mean=np.log(f_st_center), sigma=sigma, size=halo_count)
+            sampled = rng.lognormal(mean=np.log(f_st_center) - sigma**2/2, sigma=sigma, size=halo_count)
         elif distribution == "normal":
             sampled = rng.normal(loc=f_st_center, scale=sigma, size=halo_count)
         elif distribution == "uniform":
