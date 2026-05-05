@@ -1024,6 +1024,8 @@ class PaintingCoordinator:
             raise ValueError("parameters.source.f_st must be > 0 for stochastic f_st painting")
         if f_st_min <= 0 or f_st_max <= 0:
             raise ValueError("f_st painting bounds must be > 0")
+        if f_st_max > 1.0:
+            raise ValueError(f"f_st_paint_max={f_st_max} exceeds 1.0, which is unphysical for a stellar fraction")
         if f_st_min >= f_st_max:
             raise ValueError("f_st_paint_min must be smaller than f_st_paint_max")
 

@@ -628,6 +628,8 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
             raise ValueError("f_st_grid_n must be at least 2")
         if f_st_min <= 0 or f_st_max <= 0:
             raise ValueError("f_st grid values must be strictly positive")
+        if f_st_max > 1.0:
+            raise ValueError(f"f_st_grid_max={f_st_max} exceeds 1.0, which is unphysical for a stellar fraction")
         if f_st_min >= f_st_max:
             raise ValueError("f_st_grid_min must be smaller than f_st_grid_max")
         return np.linspace(f_st_min, f_st_max, f_st_n)
