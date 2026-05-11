@@ -12,3 +12,4 @@ from . import io as io
 from . import painting as painting
 from . import plotting as plotting
 from . import lpt as lpt
+from . import mass_function as mass_function

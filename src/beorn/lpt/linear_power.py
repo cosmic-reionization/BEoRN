@@ -153,7 +153,7 @@ class EisensteinHu(PowerSpectrum):
         Omh2, Obh2, Theta = self._Omh2, self._Obh2, self._Theta
         # Equality and drag epoch (Eqs. 2, 4)
         z_eq = 2.50e4 * Omh2 * Theta ** -4
-        k_eq = 7.46e-2 * Omh2 * Theta ** -2  # h/Mpc
+        k_eq = 7.46e-2 * Omh2 * Theta ** -2  # Mpc^{-1} (physical comoving, not h/Mpc)
         b1 = 0.313 * Omh2 ** -0.419 * (1.0 + 0.607 * Omh2 ** 0.674)
         b2 = 0.238 * Omh2 ** 0.223
         z_d = (
@@ -161,9 +161,9 @@ class EisensteinHu(PowerSpectrum):
             * (1.0 + b1 * Obh2 ** b2)
         )
         # Photon-baryon ratio at z_eq and z_d (Eq. 6)
-        R_eq = 31.5e-3 * Obh2 * Theta ** -4 * (1e3 / z_eq)
-        R_d  = 31.5e-3 * Obh2 * Theta ** -4 * (1e3 / z_d)
-        # Sound horizon at drag epoch (Mpc/h, Eq. 6)
+        R_eq = 31.5 * Obh2 * Theta ** -4 * (1e3 / z_eq)
+        R_d  = 31.5 * Obh2 * Theta ** -4 * (1e3 / z_d)
+        # Sound horizon at drag epoch (Mpc, Eq. 6 — E&H formula yields physical Mpc)
         self._s_w = (
             2.0 / (3.0 * k_eq) * np.sqrt(6.0 / R_eq)
             * np.log(
@@ -171,10 +171,10 @@ class EisensteinHu(PowerSpectrum):
                 / (1.0 + np.sqrt(R_eq))
             )
         )
-        # Silk damping scale (h/Mpc, Eq. 7)
+        # Silk damping scale (Mpc^{-1}, E&H Eq. 7 fit)
         self._k_silk = (
-            1.6 * Obh2 ** 0.52 * Omh2 ** 0.38
-            * (1.0 + (0.43 * z_d * Obh2 ** 0.13 / 1.6) ** 0.84) ** -1
+            1.6 * Obh2 ** 0.52 * Omh2 ** 0.73
+            * (1.0 + (10.4 * Omh2) ** (-0.95))
         )
         fb = Obh2 / Omh2
         # CDM growth suppression (Eqs. 15-16)
@@ -205,21 +205,29 @@ class EisensteinHu(PowerSpectrum):
         """E&H 1998 Eqs. 29-31 (smooth, no BAO wiggles)."""
         Omh2, Theta = self._Omh2, self._Theta
         s, alpha_G = self._s_nw, self._alpha_Gamma
-        Gamma_eff = Omh2 * (alpha_G + (1.0 - alpha_G) / (1.0 + (0.43 * k * s) ** 4))
+        # E&H Eq. 30: Γ_eff = Ωm h × {…}, not Ωm h²
+        Gamma_eff = (Omh2 / self._h) * (alpha_G + (1.0 - alpha_G) / (1.0 + (0.43 * k * s) ** 4))
         q = k * Theta ** 2 / Gamma_eff
         L0 = np.log(2.0 * np.e + 1.8 * q)
         C0 = 14.2 + 731.0 / (1.0 + 62.5 * q)
         return L0 / (L0 + C0 * q ** 2)
 
-    def _T0(self, k: np.ndarray, alpha_c: float, beta_c: float) -> np.ndarray:
-        """E&H Eq. 17: master CDM piece."""
-        q = k / (13.41 * self._k_eq)
+    def _T0(self, k_mpc: np.ndarray, alpha_c: float, beta_c: float) -> np.ndarray:
+        """E&H Eq. 17: master CDM piece. k_mpc must be in Mpc^{-1}."""
+        q = k_mpc / (13.41 * self._k_eq)
         C = 14.2 / alpha_c + 386.0 / (1.0 + 69.9 * q ** 1.08)
         L = np.log(np.e + 1.8 * beta_c * q)
         return L / (L + C * q ** 2)
 
     def _transfer_wiggle(self, k: np.ndarray) -> np.ndarray:
-        """E&H 1998 Eqs. 17-21 (full fit with BAO wiggles)."""
+        """E&H 1998 Eqs. 17-21 (full fit with BAO wiggles).
+
+        The E&H wiggle formula quantities (k_eq, s, k_silk) are derived from
+        physical Boltzmann-code integrals and have units of Mpc^{-1} / Mpc.
+        Input k is in h/Mpc, so we convert to Mpc^{-1} here.
+        """
+        # k_eq [Mpc^{-1}], s_w [Mpc], k_silk [Mpc^{-1}] — convert input to match
+        k = k * self._h  # h/Mpc → Mpc^{-1}
         s, k_silk = self._s_w, self._k_silk
         fb, fc = self._fb, self._fc
         # CDM
@@ -240,6 +248,177 @@ class EisensteinHu(PowerSpectrum):
         if self.wiggle:
             return self._transfer_wiggle(k)
         return self._transfer_nowiggle(k)
+
+
+# ======================================================================
+# DISCO-EB: differentiable JAX Boltzmann solver
+# ======================================================================
+
+class DiscoEB(PowerSpectrum):
+    """Linear power spectrum via the DISCO-EB JAX Boltzmann solver.
+
+    DISCO-EB (https://github.com/ohahn/DISCO-EB) solves the full
+    linearised Boltzmann hierarchy in JAX, making P(k) differentiable
+    w.r.t. all cosmological parameters.
+
+    Install::
+
+        pip install git+https://github.com/ohahn/DISCO-EB.git
+
+    The background + perturbation ODE is solved once at ``__init__``
+    time (z = 0).  JIT compilation on the first call takes ~1 min;
+    subsequent calls take ~3 s on GPU or ~30 s on CPU.  Redshift
+    scaling uses BEoRN's analytic growth factor D(z).
+
+    Units: k in h/Mpc, P(k) in (Mpc/h)^3 — consistent with all other
+    BEoRN power spectrum classes.
+
+    Args:
+        parameters: BEoRN Parameters object.
+        num_k:      Number of k-modes passed to ``evolve_perturbations``
+                    (default 512).
+        kmax_hmpc:  Maximum wavenumber in h/Mpc (default 1.0).  DISCO-EB
+                    solves the full Boltzmann hierarchy without the
+                    tight-coupling approximation used by CLASS/CAMB, so
+                    the photon-baryon ODE at k ≳ 1 Mpc⁻¹ requires
+                    O(k × 2800) adaptive steps to resolve pre-recombination
+                    oscillations.  1 h/Mpc (≈ 0.67 Mpc⁻¹) needs ~1900 steps
+                    and is safe with the default ``max_steps=8192``.  To
+                    reach 10 h/Mpc you would need ``max_steps ≥ 20 000``.
+        thermo_module: Thermodynamics module — ``'RECFAST'`` (default)
+                    or ``'MB95'``.
+        rtol, atol: ODE solver tolerances (default 1e-3 each).
+        max_steps:  Maximum ODE steps per k-mode (default 8192).  Rule of
+                    thumb: max_steps ≳ 2800 × kmax_hmpc × h.
+    """
+
+    def __init__(
+        self,
+        parameters,
+        num_k: int = 512,
+        kmax_hmpc: float = 1.0,
+        thermo_module: str = 'RECFAST',
+        rtol: float = 1e-3,
+        atol: float = 1e-3,
+        max_steps: int = 8192,
+        backend: str = 'numpy',
+    ):
+        super().__init__(parameters, method='disco_eb', backend=backend)
+        self._num_k = num_k
+        self._kmax_hmpc = kmax_hmpc
+        self._thermo_module = thermo_module
+        self._rtol = rtol
+        self._atol = atol
+        self._max_steps = max_steps
+        self._Pk_interp_log = None
+        self._precompute_discoeb()
+
+    # ------------------------------------------------------------------
+
+    def _build_param_dict(self) -> dict:
+        cosmo = self.parameters.cosmology
+        from ..constants import Tcmb0
+        return {
+            'Omegam'  : float(cosmo.Om),
+            'Omegab'  : float(cosmo.Ob),
+            'w_DE_0'  : -1.0,
+            'w_DE_a'  : 0.0,
+            'cs2_DE'  : 1.0,
+            'Omegak'  : 0.0,
+            'A_s'     : 2.1e-9,        # preliminary; rescaled below
+            'n_s'     : float(cosmo.ns),
+            'H0'      : float(cosmo.h0) * 100.0,   # km/s/Mpc
+            'Tcmb'    : float(getattr(cosmo, 'T_cmb', Tcmb0)),
+            'YHe'     : 0.248,
+            'Neff'    : 2.046,
+            'Nmnu'    : 0,
+            'mnu'     : 0.0,
+            'k_p'     : 0.05,          # pivot scale in 1/Mpc
+        }
+
+    def _precompute_discoeb(self):
+        try:
+            from discoeb.background import evolve_background
+            from discoeb.perturbations import evolve_perturbations, get_power
+        except ImportError as exc:
+            raise ImportError(
+                "disco-eb is required for DiscoEB.\n"
+                "Install with: pip install git+https://github.com/ohahn/DISCO-EB.git"
+            ) from exc
+
+        import jax.numpy as jnp
+
+        cosmo = self.parameters.cosmology
+        h = float(cosmo.h0)
+
+        param = self._build_param_dict()
+        param = evolve_background(param=param, thermo_module=self._thermo_module)
+
+        # k range in 1/Mpc (DISCO-EB convention); BEoRN uses h/Mpc
+        # kmax is kept modest (~10 h/Mpc → ~6.7 Mpc⁻¹) to avoid
+        # oscillatory high-k ODE modes that exhaust max_steps.
+        aexp_out = jnp.array([1.0])   # z = 0
+        y, kmodes, param = evolve_perturbations(
+            param=param,
+            kmin=1e-4 * h,
+            kmax=self._kmax_hmpc * h,
+            num_k=self._num_k,
+            aexp_out=aexp_out,
+            rtol=self._rtol,
+            atol=self._atol,
+            max_steps=self._max_steps,
+        )
+
+        # idx=4 → total matter power spectrum (CDM + baryons)
+        Pk_1mpc = np.asarray(get_power(k=kmodes, y=y[:, 0, :], idx=4, param=param))
+        k_1mpc  = np.asarray(kmodes)
+
+        # Convert units: k [1/Mpc] → [h/Mpc],  P [Mpc³] → [(Mpc/h)³]
+        k_hmpc  = k_1mpc / h
+        Pk_hmpc = Pk_1mpc * h ** 3
+
+        # Rescale A_s to match sigma_8 (P ∝ A_s, so P ∝ sigma_8²)
+        sigma8_raw = self._compute_sigma8_from_Pk(k_hmpc, Pk_hmpc)
+        Pk_hmpc *= (cosmo.sigma_8 / sigma8_raw) ** 2
+
+        self._k_grid  = k_hmpc
+        self._Pk_grid = Pk_hmpc
+        self._Pk_interp_log = interp1d(
+            np.log(k_hmpc), np.log(Pk_hmpc),
+            kind='cubic', bounds_error=False, fill_value='extrapolate',
+        )
+
+    @staticmethod
+    def _compute_sigma8_from_Pk(k_hmpc: np.ndarray, Pk_hmpc: np.ndarray) -> float:
+        from scipy.integrate import quad as _quad
+        log_Pk = interp1d(np.log(k_hmpc), np.log(Pk_hmpc),
+                          kind='cubic', bounds_error=False, fill_value=-np.inf)
+
+        def integrand(lnk: float) -> float:
+            k = np.exp(lnk)
+            x = k * 8.0
+            W = 3.0 * (np.sin(x) - x * np.cos(x)) / x ** 3
+            return k ** 3 * np.exp(log_Pk(lnk)) * W ** 2 / (2.0 * np.pi ** 2)
+
+        result, _ = _quad(integrand, np.log(1e-4), np.log(1e2), limit=300)
+        return float(np.sqrt(result))
+
+    # ------------------------------------------------------------------
+
+    def transfer(self, k: np.ndarray) -> np.ndarray:
+        # Full transfer function not independently available from DISCO-EB output;
+        # derive from P(k, z=0) = A_s k^n_s T²(k) D²(0) = A_s k^n_s T²(k)
+        k = np.asarray(k, dtype=float)
+        Pk0 = np.exp(self._Pk_interp_log(np.log(k)))
+        ns  = self.parameters.cosmology.ns
+        T2  = Pk0 / (self.A_s * k ** ns)
+        return np.sqrt(np.maximum(T2, 0.0))
+
+    def P(self, k: np.ndarray, z: float = 0.0) -> np.ndarray:
+        k   = np.asarray(k, dtype=float)
+        Pk0 = np.exp(self._Pk_interp_log(np.log(k)))
+        Dz  = self._growth_ratio(z)
+        return Pk0 * Dz ** 2
 
 
 # ======================================================================
@@ -303,6 +482,77 @@ class BoltzmannSolver(PowerSpectrum):
 
 
 # ======================================================================
+# Tabulated power spectrum
+# ======================================================================
+
+class TabulatedPowerSpectrum(PowerSpectrum):
+    """Linear power spectrum interpolated from a user-supplied (k, P(k)) table.
+
+    Typical usage: pass a P(k, z=0) array from colossus, CAMB, or any
+    external code and use it directly inside BEoRN's HMF machinery.
+
+    Args:
+        parameters:  BEoRN Parameters object.
+        k:           Wavenumbers in h/Mpc, 1-D, sorted ascending.
+        Pk:          P(k) in (Mpc/h)^3 at redshift ``z_ref``.
+        z_ref:       Redshift of the input table (default 0).  If non-zero
+                     the table is divided by D²(z_ref)/D²(0) to give P(k,z=0).
+        renormalize: If True (default) rescale the amplitude so that σ₈
+                     computed from the interpolated table matches
+                     ``parameters.cosmology.sigma_8``.  Set to False to
+                     use the input normalization verbatim.
+    """
+
+    def __init__(
+        self,
+        parameters,
+        k: np.ndarray,
+        Pk: np.ndarray,
+        z_ref: float = 0.0,
+        renormalize: bool = True,
+    ):
+        super().__init__(parameters, method='tabulated')
+        k  = np.asarray(k,  dtype=float)
+        Pk = np.asarray(Pk, dtype=float)
+
+        if z_ref != 0.0:
+            Pk = Pk / self._growth_ratio(z_ref) ** 2
+
+        if renormalize:
+            Pk = Pk * self._sigma8_rescale(k, Pk)
+
+        self._Pk0_interp = interp1d(
+            np.log(k), np.log(Pk),
+            kind='linear', bounds_error=False,
+            fill_value='extrapolate',
+        )
+
+    def _sigma8_rescale(self, k: np.ndarray, Pk: np.ndarray) -> float:
+        """Amplitude multiplier so that σ₈(k, Pk) matches the target."""
+        target = self.parameters.cosmology.sigma_8
+        x = k * 8.0
+        W = 3.0 * (np.sin(x) - x * np.cos(x)) / x ** 3
+        integrand = k ** 3 * Pk * W ** 2 / (2.0 * np.pi ** 2)
+        try:
+            sigma2 = np.trapezoid(integrand, np.log(k))
+        except AttributeError:
+            sigma2 = np.trapz(integrand, np.log(k))
+        return target ** 2 / sigma2
+
+    def transfer(self, k: np.ndarray) -> np.ndarray:
+        raise NotImplementedError(
+            "TabulatedPowerSpectrum does not expose a transfer function. "
+            "Use .P(k, z) directly."
+        )
+
+    def P(self, k: np.ndarray, z: float = 0.0) -> np.ndarray:
+        """Interpolated P(k, z) in (Mpc/h)^3."""
+        k = np.asarray(k, dtype=float)
+        Pk0 = np.exp(self._Pk0_interp(np.log(k)))
+        return Pk0 * self._growth_ratio(z) ** 2
+
+
+# ======================================================================
 # Factory
 # ======================================================================
 
@@ -310,7 +560,8 @@ def get_power_spectrum(method: str, parameters, **kwargs) -> PowerSpectrum:
     """Return a PowerSpectrum instance for the given method.
 
     Args:
-        method:     One of 'eisenstein_hu', 'eisenstein_hu_wiggle', 'boltzmann'.
+        method:     One of 'eisenstein_hu', 'eisenstein_hu_wiggle',
+                    'boltzmann', 'disco_eb', 'tabulated'.
         parameters: BEoRN Parameters object.
         **kwargs:   Passed to the subclass constructor.
 
@@ -323,7 +574,12 @@ def get_power_spectrum(method: str, parameters, **kwargs) -> PowerSpectrum:
         return EisensteinHu(parameters, wiggle=True, **kwargs)
     if method == 'boltzmann':
         return BoltzmannSolver(parameters, **kwargs)
+    if method == 'disco_eb':
+        return DiscoEB(parameters, **kwargs)
+    if method == 'tabulated':
+        return TabulatedPowerSpectrum(parameters, **kwargs)
     raise ValueError(
         f"Unknown power spectrum method {method!r}. "
-        "Choose from 'eisenstein_hu', 'eisenstein_hu_wiggle', 'boltzmann'."
+        "Choose from 'eisenstein_hu', 'eisenstein_hu_wiggle', 'boltzmann', "
+        "'disco_eb', 'tabulated'."
     )

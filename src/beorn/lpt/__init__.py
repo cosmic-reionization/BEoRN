@@ -13,13 +13,15 @@ Quick start::
     solver = lpt.SecondOrderLPT(param, seed=42)
     delta = solver.get_density(z=10.0)
 
-Power spectrum methods: 'eisenstein_hu' (default), 'eisenstein_hu_wiggle', 'boltzmann'.
+Power spectrum methods: 'eisenstein_hu' (default), 'eisenstein_hu_wiggle', 'boltzmann', 'tabulated'.
 Backends: 'numpy' (default), 'torch', 'jax'.
 """
 from .linear_power import (
     PowerSpectrum,
     EisensteinHu,
     BoltzmannSolver,
+    TabulatedPowerSpectrum,
+    DiscoEB,
     get_power_spectrum,
 )
 from .lpt import (
@@ -36,6 +38,8 @@ __all__ = [
     'PowerSpectrum',
     'EisensteinHu',
     'BoltzmannSolver',
+    'TabulatedPowerSpectrum',
+    'DiscoEB',
     'get_power_spectrum',
     # LPT solvers
     'LPTBase',
