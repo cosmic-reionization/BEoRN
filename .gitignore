@@ -182,3 +182,6 @@ dist
 
 # Stochastic f_st workflow — tracked in its own separate git repo
 fst_stochastic/
+
+# HPC SLURM scripts contain site-specific paths and personal info; use the .template instead
+tests/run_output_consistency_hpc.slurm
