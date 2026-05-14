@@ -1017,8 +1017,9 @@ class PaintingCoordinator:
         distribution = getattr(source, "f_st_paint_distribution", "lognormal").lower()
         sigma = float(getattr(source, "f_st_paint_sigma", 0.5))
         f_st_center = float(source.f_st)
+        f_st_n = int(getattr(source, "f_st_grid_n", 31))
         f_st_min = float(getattr(source, "f_st_paint_min", getattr(source, "f_st_grid_min", 0.01)))
-        f_st_max = float(getattr(source, "f_st_paint_max", getattr(source, "f_st_grid_max", 0.2)))
+        f_st_max = float(getattr(source, "f_st_paint_max", getattr(source, "f_st_grid_max", 1.0)))
 
         if f_st_center <= 0:
             raise ValueError("parameters.source.f_st must be > 0 for stochastic f_st painting")
@@ -1030,6 +1031,12 @@ class PaintingCoordinator:
             raise ValueError("f_st_paint_min must be smaller than f_st_paint_max")
 
         if distribution == "lognormal":
+            k_star = (f_st_n - 1) // 2
+            dlog = (np.log10(f_st_max) - np.log10(f_st_center)) / (f_st_n - 1 - k_star)
+            log_min = np.log10(f_st_center) - k_star * dlog
+            f_st_min = 10**log_min
+            self.logger.info(f"Redefine f_st_min to {f_st_min:.4f}")
+            self.logger.info("Return f_st_grid in log space")
             sampled = rng.lognormal(mean=np.log(f_st_center) - sigma**2/2, sigma=sigma, size=halo_count)
         elif distribution == "normal":
             sampled = rng.normal(loc=f_st_center, scale=sigma, size=halo_count)

@@ -621,9 +621,11 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
 
     def _build_f_st_grid(self) -> np.ndarray:
         source = self.parameters.source
-        f_st_min = getattr(source, 'f_st_grid_min', 0.01)
-        f_st_max = getattr(source, 'f_st_grid_max', 0.2)
-        f_st_n = getattr(source, 'f_st_grid_n', 30)
+        distribution = getattr(source, "f_st_paint_distribution", "lognormal").lower()
+        f_st_center = float(source.f_st)
+        f_st_min = float(getattr(source, 'f_st_grid_min', 0.01))
+        f_st_max = float(getattr(source, 'f_st_grid_max', 1.0))
+        f_st_n = int(getattr(source, 'f_st_grid_n', 31))
         if f_st_n < 2:
             raise ValueError("f_st_grid_n must be at least 2")
         if f_st_min <= 0 or f_st_max <= 0:
@@ -632,6 +634,14 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
             raise ValueError(f"f_st_grid_max={f_st_max} exceeds 1.0, which is unphysical for a stellar fraction")
         if f_st_min >= f_st_max:
             raise ValueError("f_st_grid_min must be smaller than f_st_grid_max")
+        if distribution == "lognormal":
+            k_star = (f_st_n - 1) // 2
+            dlog = (np.log10(f_st_max) - np.log10(f_st_center)) / (f_st_n - 1 - k_star)
+            log_min = np.log10(f_st_center) - k_star * dlog
+            f_st_min = 10**log_min
+            logger.info(f"Redefine f_st_min to {f_st_min:.4f}")
+            logger.info("Return f_st_grid in log space")
+            return np.logspace(np.log10(f_st_min), np.log10(f_st_max), f_st_n, base=10)
         return np.linspace(f_st_min, f_st_max, f_st_n)
 
     def _parameters_with_f_st(self, f_st: float) -> Parameters:
