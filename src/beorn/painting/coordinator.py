@@ -1031,13 +1031,14 @@ class PaintingCoordinator:
             raise ValueError("f_st_paint_min must be smaller than f_st_paint_max")
 
         if distribution == "lognormal":
-            k_star = (f_st_n - 1) // 2
-            dlog = (np.log10(f_st_max) - np.log10(f_st_center)) / (f_st_n - 1 - k_star)
-            log_min = np.log10(f_st_center) - k_star * dlog
-            f_st_min = 10**log_min
-            self.logger.info(f"Redefine f_st_min to {f_st_min:.4f}")
-            self.logger.info("Return f_st_grid in log space")
-            sampled = rng.lognormal(mean=np.log(f_st_center) - sigma**2/2, sigma=sigma, size=halo_count)
+            # k_star = (f_st_n - 1) // 2
+            # dlog = (np.log10(f_st_max) - np.log10(f_st_center)) / (f_st_n - 1 - k_star)
+            # log_min = np.log10(f_st_center) - k_star * dlog
+            # f_st_min = 10**log_min
+            # self.logger.info(f"Redefine f_st_min to {f_st_min:.4f}")
+            # self.logger.info("Return f_st_grid in log space")
+            # sampled = rng.lognormal(mean=np.log(f_st_center) - sigma**2/2, sigma=sigma, size=halo_count)
+            sampled = rng.lognormal(mean=np.log(f_st_center), sigma=sigma, size=halo_count)
         elif distribution == "normal":
             sampled = rng.normal(loc=f_st_center, scale=sigma, size=halo_count)
         elif distribution == "uniform":

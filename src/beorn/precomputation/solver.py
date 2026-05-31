@@ -635,12 +635,12 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
         if f_st_min >= f_st_max:
             raise ValueError("f_st_grid_min must be smaller than f_st_grid_max")
         if distribution == "lognormal":
-            k_star = (f_st_n - 1) // 2
-            dlog = (np.log10(f_st_max) - np.log10(f_st_center)) / (f_st_n - 1 - k_star)
-            log_min = np.log10(f_st_center) - k_star * dlog
-            f_st_min = 10**log_min
-            logger.info(f"Redefine f_st_min to {f_st_min:.4f}")
-            logger.info("Return f_st_grid in log space")
+            # k_star = (f_st_n - 1) // 2
+            # dlog = (np.log10(f_st_max) - np.log10(f_st_center)) / (f_st_n - 1 - k_star)
+            # log_min = np.log10(f_st_center) - k_star * dlog
+            # f_st_min = 10**log_min
+            # logger.info(f"Redefine f_st_min to {f_st_min:.4f}")
+            # logger.info("Return f_st_grid in log space")
             return np.logspace(np.log10(f_st_min), np.log10(f_st_max), f_st_n, base=10)
         return np.linspace(f_st_min, f_st_max, f_st_n)
 
