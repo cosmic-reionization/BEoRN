@@ -273,8 +273,12 @@ class TestLogFileConsistency:
         import ast, pathlib
 
         scripts_dir = pathlib.Path(__file__).parent.parent / "fst_stochastic"
-        full_run = (scripts_dir / "full_run_fstar.py").read_text()
-        postprocess = (scripts_dir / "postprocess_dtb_fstar.py").read_text()
+        full_run_path = scripts_dir / "full_run_fstar.py"
+        postprocess_path = scripts_dir / "postprocess_dtb_fstar.py"
+        if not full_run_path.exists() or not postprocess_path.exists():
+            pytest.skip("fst_stochastic scripts not present (local HPC scripts)")
+        full_run = full_run_path.read_text()
+        postprocess = postprocess_path.read_text()
 
         def _extract_default_scratch_root(source: str) -> str:
             tree = ast.parse(source)
@@ -304,11 +308,14 @@ class TestLogFileConsistency:
         its log output is captured to a file (same as full_run.py / full_run_fstar.py)."""
         import pathlib
 
-        script = (
+        script_path = (
             pathlib.Path(__file__).parent.parent
             / "fst_stochastic"
             / "postprocess_dtb_fstar.py"
-        ).read_text()
+        )
+        if not script_path.exists():
+            pytest.skip("fst_stochastic scripts not present (local HPC scripts)")
+        script = script_path.read_text()
 
         assert "save_logs" in script, (
             "postprocess_dtb_fstar.py must call output_handler.save_logs(parameters) "
