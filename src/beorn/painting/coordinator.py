@@ -231,7 +231,8 @@ class PaintingCoordinator:
             distribution = self._format_cache_value(getattr(source, "f_st_paint_distribution", "lognormal"))
             sigma = self._format_cache_value(getattr(source, "f_st_paint_sigma", 0.5))
             seed = self._format_cache_value(getattr(source, "f_st_paint_seed", None))
-            return f"painted_output_fstar_dist_{distribution}_sigma_{sigma}_seed_{seed}"
+            beorn_hash = self.parameters.beorn_hash()
+            return f"painted_output_fstar_dist_{distribution}_sigma_{sigma}_seed_{seed}_{beorn_hash}"
         return "painted_output_legacy"
     
     """Orchestrate painting of 1D radiation profiles to 3D grids.
@@ -1054,7 +1055,7 @@ class PaintingCoordinator:
     def _nearest_f_st_indices(self, sampled_f_st: np.ndarray, f_st_grid: np.ndarray) -> np.ndarray:
         """Map sampled f_st values to the nearest precomputed f_st-grid index."""
         f_st_grid = self._small_profile_array(f_st_grid)
-        return np.abs(sampled_f_st[:, None] - f_st_grid[None, :]).argmin(axis=1)
+        return np.abs(np.log(sampled_f_st[:, None]) - np.log(f_st_grid[None, :])).argmin(axis=1)
 
     def _make_f_st_rng(self, z_index: int):
         seed = getattr(self.parameters.source, "f_st_paint_seed", None)
