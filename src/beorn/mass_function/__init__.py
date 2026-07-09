@@ -51,6 +51,7 @@ from .models import (
     PressSchechter as PressSchechter,
     ShethTormen as ShethTormen,
 )
+from .differentiable import sigma2_M, dndlnm as dndlnm_diff
 from .window import (
     TopHatWindow as TopHatWindow,
     SharpKWindow as SharpKWindow,
@@ -59,6 +60,8 @@ from .window import (
 )
 
 __all__ = [
+    'sigma2_M',
+    'dndlnm_diff',
     'MassFunction',
     'HaloMassFunction',
     'ParametricHMF',

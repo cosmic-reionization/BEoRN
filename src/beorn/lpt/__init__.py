@@ -23,6 +23,9 @@ from .linear_power import (
     TabulatedPowerSpectrum,
     DiscoEB,
     get_power_spectrum,
+    transfer_eh_nowiggle,
+    sigma8_normalisation,
+    pk_eh_nowiggle,
 )
 from .lpt import (
     LPTBase,
@@ -41,6 +44,10 @@ __all__ = [
     'TabulatedPowerSpectrum',
     'DiscoEB',
     'get_power_spectrum',
+    # differentiable pure functions (numpy/jax/torch)
+    'transfer_eh_nowiggle',
+    'sigma8_normalisation',
+    'pk_eh_nowiggle',
     # LPT solvers
     'LPTBase',
     'ZeldovichApproximation',

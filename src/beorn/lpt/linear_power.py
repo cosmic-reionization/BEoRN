@@ -14,11 +14,105 @@ Units: k in h/Mpc, P(k) in (Mpc/h)^3.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import math
 import numpy as np
 from scipy.integrate import quad
 from scipy.interpolate import interp1d
 
 from ..cosmo import D
+from ..cosmo.differentiable import (
+    get_backend, device_of, as_const, as_array, trapz_static, growth_factor,
+)
+from ..constants import Tcmb0
+
+
+# ======================================================================
+# Differentiable, backend-generic E&H no-wiggle P(k)  (numpy/jax/torch)
+#
+# Pure-function counterparts of the EisensteinHu class below — same
+# formulas, but every operation runs in the chosen backend, so the result
+# is differentiable w.r.t. ALL cosmological parameters (Om, Ob, h0, ns,
+# sigma_8, z) and device-resident (GPU-capable). The numpy class path is
+# unchanged; these are the opt-in gpu/diff route (issue #42, Phase 1: G1).
+# ======================================================================
+
+def transfer_eh_nowiggle(k, Om, Ob, h0, backend='numpy', Theta=Tcmb0 / 2.7):
+    """E&H 1998 no-wiggle transfer function T(k; Om, Ob, h0).
+
+    Same formulas as ``EisensteinHu._transfer_nowiggle`` (Eqs. 26, 28-31).
+    k in h/Mpc. Pass jax tracers / torch tensors for gradients; tensors on
+    GPU stay on GPU.
+    """
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, k, Om, Ob, h0)
+    k = as_array(k, name, xp, device)
+    Om = as_array(Om, name, xp, device)
+    Ob = as_array(Ob, name, xp, device)
+    h0 = as_array(h0, name, xp, device)
+
+    Omh2 = Om * h0 ** 2
+    Obh2 = Ob * h0 ** 2
+    fb = Obh2 / Omh2
+    s = 44.5 * xp.log(9.83 / Omh2) / xp.sqrt(1.0 + 10.0 * Obh2 ** 0.75)
+    alpha_G = (1.0
+               - 0.328 * xp.log(431.0 * Omh2) * fb
+               + 0.38 * xp.log(22.3 * Omh2) * fb ** 2)
+    Gamma_eff = (Omh2 / h0) * (alpha_G + (1.0 - alpha_G)
+                               / (1.0 + (0.43 * k * s) ** 4))
+    q = k * Theta ** 2 / Gamma_eff
+    L0 = xp.log(2.0 * math.e + 1.8 * q)
+    C0 = 14.2 + 731.0 / (1.0 + 62.5 * q)
+    return L0 / (L0 + C0 * q ** 2)
+
+
+def sigma8_normalisation(Om, Ob, h0, ns, sigma_8, backend='numpy',
+                         n_k=1024, Theta=Tcmb0 / 2.7):
+    """A_s such that sigma(R=8 Mpc/h, z=0) = sigma_8 (E&H no-wiggle).
+
+    Fixed-node log-k trapezoid over k in [1e-4, 1e3] h/Mpc — replaces
+    scipy.quad so gradients flow through every parameter. Agrees with
+    ``PowerSpectrum._compute_A_s`` to ~1e-6 relative at n_k=1024.
+    """
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, Om, Ob, h0, ns, sigma_8)
+    lnk_np = np.linspace(np.log(1e-4), np.log(1e3), n_k)
+    k = as_const(np.exp(lnk_np), name, xp, device)
+    ns = as_array(ns, name, xp, device)
+    sigma_8 = as_array(sigma_8, name, xp, device)
+    x = k * 8.0
+    W = 3.0 * (xp.sin(x) - x * xp.cos(x)) / x ** 3
+    T = transfer_eh_nowiggle(k, Om, Ob, h0, backend=backend, Theta=Theta)
+    integrand = k ** (ns + 3.0) * T ** 2 * W ** 2 / (2.0 * math.pi ** 2)
+    integral = trapz_static(integrand, lnk_np, name, xp)
+    return sigma_8 ** 2 / integral
+
+
+def pk_eh_nowiggle(k, z, Om, Ob, h0, ns, sigma_8, backend='numpy',
+                   n_k=1024, n_nodes=512, Theta=Tcmb0 / 2.7):
+    """Linear P(k, z) [(Mpc/h)^3], E&H no-wiggle, sigma_8-normalised.
+
+    Pure and differentiable w.r.t. every cosmological argument
+    (Om, Ob, h0, ns, sigma_8) and z, in numpy / jax / torch; GPU-capable
+    (computation happens on the device of the input tensors).
+
+    Example (jax)::
+
+        import jax
+        dP_dOm = jax.jacobian(
+            lambda Om: pk_eh_nowiggle(k, 7.0, Om, 0.049, 0.673, 0.963, 0.811,
+                                      backend='jax')
+        )(0.315)
+    """
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, k, Om, Ob, h0, ns, sigma_8)
+    k = as_array(k, name, xp, device)
+    ns = as_array(ns, name, xp, device)
+    A_s = sigma8_normalisation(Om, Ob, h0, ns, sigma_8, backend=backend,
+                               n_k=n_k, Theta=Theta)
+    T = transfer_eh_nowiggle(k, Om, Ob, h0, backend=backend, Theta=Theta)
+    a = 1.0 / (1.0 + z)
+    Dz = growth_factor(a, Om, backend=backend, n_nodes=n_nodes)
+    return A_s * k ** ns * T ** 2 * Dz ** 2
 
 
 class PowerSpectrum(ABC):
@@ -89,9 +183,16 @@ class PowerSpectrum(ABC):
         Returns:
             P(k, z) in (Mpc/h)^3.
         """
-        k = np.asarray(k, dtype=float)
         ns = self.parameters.cosmology.ns
         Dz = self._growth_ratio(z)
+        if self.backend not in (None, 'numpy'):
+            # backend path: keep k as a jax/torch array (device-resident);
+            # A_s and Dz are float constants — see pk_eh_nowiggle for the
+            # fully differentiable pure-function API.
+            name, xp = get_backend(self.backend)
+            k = as_array(k, name, xp)
+            return self.A_s * k ** ns * self.transfer(k) ** 2 * Dz ** 2
+        k = np.asarray(k, dtype=float)
         return self.A_s * k ** ns * self.transfer(k) ** 2 * Dz ** 2
 
 
@@ -114,6 +215,16 @@ class EisensteinHu(PowerSpectrum):
         super().__init__(parameters, method='eisenstein_hu', backend=backend)
         self.wiggle = wiggle
         self._precompute()
+
+    def _compute_A_s(self) -> float:
+        if self.backend not in (None, 'numpy') and not self.wiggle:
+            # fixed-node quadrature on the backend (same result as scipy.quad
+            # to ~1e-6 relative); avoids per-point dispatch through quad
+            c = self.parameters.cosmology
+            return float(sigma8_normalisation(
+                c.Om, c.Ob, c.h0, c.ns, c.sigma_8,
+                backend=self.backend, Theta=self._Theta))
+        return super()._compute_A_s()
 
     # ------------------------------------------------------------------
     # Pre-computation
@@ -244,6 +355,15 @@ class EisensteinHu(PowerSpectrum):
         return fb * T_b + fc * T_c
 
     def transfer(self, k: np.ndarray) -> np.ndarray:
+        if self.backend not in (None, 'numpy'):
+            if self.wiggle:
+                raise NotImplementedError(
+                    "wiggle=True is numpy-only for now; use wiggle=False with "
+                    f"backend='{self.backend}' (differentiable no-wiggle path)."
+                )
+            c = self.parameters.cosmology
+            return transfer_eh_nowiggle(k, c.Om, c.Ob, c.h0,
+                                        backend=self.backend, Theta=self._Theta)
         k = np.asarray(k, dtype=float)
         if self.wiggle:
             return self._transfer_wiggle(k)
