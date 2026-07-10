@@ -146,7 +146,10 @@ def growth_rate(a, Om, backend='numpy', n_nodes=512, eps=1e-4):
     name, xp = get_backend(backend)
     if name == 'jax':
         import jax
-        lnD = lambda lna: xp.log(growth_factor(xp.exp(lna), Om, backend, n_nodes))
+
+        def lnD(lna):
+            return xp.log(growth_factor(xp.exp(lna), Om, backend, n_nodes))
+
         return jax.grad(lnD)(xp.log(xp.asarray(float(a))))
     if name == 'torch':
         a_t = xp.as_tensor(float(a), dtype=xp.float64).requires_grad_(True)
