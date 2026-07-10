@@ -21,11 +21,14 @@ JaxBackend
     accelerator (GPU/TPU).  All intermediate arrays live on-device; only
     ``to_numpy`` moves data back to the host.
 
-Auto-detection priority (``backend='auto'``)
+Auto-detection priority (``backend='auto'``, opt-in — the solver default is
+``'numpy'`` so GPU/float32 execution is never selected silently)
 --------------------------------------------
 1. ``JaxBackend()``            — if JAX is importable and has a GPU device
 2. ``TorchBackend('cuda')``    — if PyTorch is importable and CUDA is present
-3. ``NumpyBackend()``          — multi-core CPU fallback
+3. ``TorchBackend('mps')``     — if PyTorch is importable and Apple MPS is
+                                 present (float32)
+4. ``NumpyBackend()``          — multi-core CPU fallback
 
 Explicit instantiation
 ----------------------
@@ -278,7 +281,8 @@ def get_backend(name: str | LPTBackend = 'numpy',
     Auto-detection priority (``'auto'``):
         1. ``JaxBackend()``         — JAX importable + GPU device present
         2. ``TorchBackend('cuda')`` — PyTorch importable + CUDA present
-        3. ``NumpyBackend()``       — multi-core CPU fallback
+        3. ``TorchBackend('mps')``  — PyTorch importable + Apple MPS (float32)
+        4. ``NumpyBackend()``       — multi-core CPU fallback
     """
     if isinstance(name, LPTBackend):
         if verbose:

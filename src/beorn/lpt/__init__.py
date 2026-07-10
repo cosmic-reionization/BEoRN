@@ -34,7 +34,7 @@ from .lpt import (
     ThirdOrderLPT,
 )
 from .backends import LPTBackend, NumpyBackend, TorchBackend, JaxBackend, get_backend
-from .chmf import CHMF, CHMFSampler
+from .chmf import CHMF, CHMFSampler, conditional_dndlnm_diff
 
 __all__ = [
     # power spectrum
@@ -62,4 +62,5 @@ __all__ = [
     # CHMF halo sampling
     'CHMF',
     'CHMFSampler',
+    'conditional_dndlnm_diff',
 ]

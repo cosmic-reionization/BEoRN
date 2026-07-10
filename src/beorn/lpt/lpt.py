@@ -41,10 +41,12 @@ Parallelism
 -----------
 All FFTs are routed through the active backend, so:
 
-* ``backend='numpy'``  — multi-core CPU via ``scipy.fft`` (``workers=-1``)
+* ``backend='numpy'``  — multi-core CPU via ``scipy.fft`` (``workers=-1``); default
 * ``backend='torch'``  — GPU via PyTorch CUDA (auto-detected)
 * ``backend='jax'``    — GPU/TPU via JAX (auto-detected)
-* ``backend='auto'``   — picks best available: JAX GPU > Torch CUDA > NumPy
+* ``backend='auto'``   — opt-in: picks best available, JAX GPU > Torch CUDA/MPS > NumPy
+  (note MPS runs in float32 — results differ from the numpy default at the
+  1e-6 level, so GPU execution is never selected silently)
 
 Intermediate arrays stay on the backend device throughout
 :meth:`get_displacement`; only the final Ψ components are transferred back
@@ -58,7 +60,7 @@ Units
 """
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import ABC
 import numpy as np
 
 from ..cosmo import D, hubble
@@ -110,31 +112,50 @@ class LPTBase(ABC):
                      the phases are randomised.  Reduces cosmic variance.
         verbose:     If ``True`` (default), print the chosen backend and its
                      parallelism info on construction.
+        f1_method:   How to compute the growth rate f₁ = dlnD₁/dlna:
+                     ``'fd'`` (default) — central finite difference through
+                     ``beorn.cosmo.D`` (legacy behaviour); ``'autodiff'`` —
+                     exact autodiff through the fixed-node growth integral
+                     (``beorn.cosmo.growth_rate``, jax or torch required).
         **ps_kwargs: Extra keyword arguments forwarded to the power spectrum
                      constructor (e.g. ``wiggle=True`` for the E&H with-wiggle
                      fit, or ``ps_file='Pk_camb.dat'`` for the Boltzmann
                      solver).
+
+    Performance note
+    ----------------
+    The z-independent k-space source terms (δ(k) and the 2LPT/3LPT source
+    fields) are computed once per IC realisation and cached on the backend
+    device, together with the k-vector grids.  After the first call, every
+    :meth:`get_displacement` / :meth:`get_velocity` at any redshift costs
+    exactly **3 inverse FFTs** — the growth factors enter as scalar
+    coefficients of the cached sources.
     """
 
     def __init__(
         self,
         parameters,
         ps_method: str = 'eisenstein_hu',
-        backend: str | LPTBackend = 'auto',
+        backend: str | LPTBackend = 'numpy',
         seed: int = 42,
         fixed: bool = True,
         verbose: bool = True,
+        f1_method: str = 'fd',
         **ps_kwargs,
     ):
         self.parameters = parameters
         self.seed = seed
         self.fixed = fixed
         self.verbose = verbose
+        self.f1_method = f1_method
         self._backend: LPTBackend = get_backend(backend, verbose=verbose)
         self.power_spectrum: PowerSpectrum = get_power_spectrum(
             ps_method, parameters, **ps_kwargs
         )
         self._delta_k: np.ndarray | None = None  # cached IC realisation
+        self._k_cache = None            # backend k-vectors, built once
+        self._dk_dev = None             # δ(k) on the backend device
+        self._sources_k_cache = None    # z-independent k-space source terms
 
     # ------------------------------------------------------------------
     # Grid geometry
@@ -181,6 +202,10 @@ class LPTBase(ABC):
         """
         N, L = self.N, self.L
         V = L ** 3
+
+        # New realisation → drop device caches derived from the old δ(k)
+        self._dk_dev = None
+        self._sources_k_cache = None
 
         # Amplitude grid (always built in numpy — cheap scalar ops)
         kx, ky, kz, k2 = _kvectors(N, L)
@@ -250,8 +275,25 @@ class LPTBase(ABC):
         return -3.0 / 7.0 * self._D1(z) ** 2
 
     def _f1(self, z: float) -> float:
-        """Linear growth rate f₁ = d ln D₁ / d ln a (numerical finite difference)."""
+        """Linear growth rate f₁ = d ln D₁ / d ln a.
+
+        ``f1_method='fd'`` (default): central finite difference through
+        ``beorn.cosmo.D`` — legacy behaviour, ~1e-3–1e-4 accuracy floor.
+        ``f1_method='autodiff'``: exact autodiff of the fixed-node growth
+        integral via :func:`beorn.cosmo.growth_rate` (jax preferred, torch
+        fallback).
+        """
         a = 1.0 / (1.0 + z)
+        if self.f1_method == 'autodiff':
+            from ..cosmo.differentiable import growth_rate
+            Om = self.parameters.cosmology.Om
+            for be in ('jax', 'torch'):
+                try:
+                    return float(growth_rate(a, Om, backend=be))
+                except ImportError:
+                    continue
+            raise ImportError(
+                "f1_method='autodiff' requires jax or torch; neither is installed.")
         da = a * 1e-4
         D0 = D(1.0, self.parameters)
         dD_da = (D(a + da, self.parameters) - D(a - da, self.parameters)) / (2.0 * da * D0)
@@ -265,20 +307,34 @@ class LPTBase(ABC):
         """Compute k-vectors + inv_k2 as numpy arrays.
 
         Returns:
-            kx, ky, kz — shape (N, N, N//2+1), units h/Mpc.
-            inv_k2     — 1/k² with the k=0 mode set to 0 (avoids divergence
-                         *and* automatically zeros the DC displacement).
+            kx, ky, kz — broadcastable shapes (N,1,1), (1,N,1), (1,1,N//2+1)
+                         in units h/Mpc (saves 3 full grids of memory).
+            inv_k2     — full (N, N, N//2+1): 1/k² with the k=0 mode set to 0
+                         (avoids divergence *and* zeros the DC displacement).
         """
-        kx, ky, kz, k2 = _kvectors(self.N, self.L)
+        N, L = self.N, self.L
+        dk = 2.0 * np.pi / L
+        kx = (np.fft.fftfreq(N, d=1.0 / N) * dk)[:, None, None]
+        ky = (np.fft.fftfreq(N, d=1.0 / N) * dk)[None, :, None]
+        kz = (np.fft.rfftfreq(N, d=1.0 / N) * dk)[None, None, :]
+        k2 = kx ** 2 + ky ** 2 + kz ** 2
         inv_k2 = np.where(k2 == 0, 0.0, 1.0 / k2)
         return kx, ky, kz, inv_k2
 
     def _setup_k_backend(self):
-        """Return k-vectors and inv_k2 as backend arrays on the active device."""
-        b = self._backend
-        kx, ky, kz, inv_k2 = self._setup_k()
-        return (b.as_array(kx), b.as_array(ky), b.as_array(kz),
-                b.as_array(inv_k2))
+        """k-vectors and inv_k2 as backend arrays, built once and cached."""
+        if self._k_cache is None:
+            b = self._backend
+            kx, ky, kz, inv_k2 = self._setup_k()
+            self._k_cache = (b.as_array(kx), b.as_array(ky), b.as_array(kz),
+                             b.as_array(inv_k2))
+        return self._k_cache
+
+    def _dk_backend(self):
+        """δ(k) on the backend device, uploaded once per realisation."""
+        if self._dk_dev is None:
+            self._dk_dev = self._backend.as_array(self.delta_k)
+        return self._dk_dev
 
     def _phi1_derivs_b(self, dk, kx, ky, kz, ik2):
         """Second derivatives of φ₁ as backend arrays (real-valued).
@@ -306,17 +362,81 @@ class LPTBase(ABC):
         }
 
     # ------------------------------------------------------------------
-    # Subclass interface
+    # Cached z-independent sources + growth-coefficient combination
     # ------------------------------------------------------------------
 
-    @abstractmethod
+    def _sources_k(self) -> list:
+        """z-independent k-space source terms, computed once and cached.
+
+        Order n term is defined so that the order-n displacement is
+        Ψ⁽ⁿ⁾ᵢ(z) = Dₙ(z) · ℱ⁻¹[ i kᵢ/k² · sourceₙ(k) ].
+        """
+        if self._sources_k_cache is None:
+            self._sources_k_cache = self._compute_sources_k()
+        return self._sources_k_cache
+
+    def _compute_sources_k(self) -> list:
+        """1LPT default: the single source is δ(k) itself."""
+        return [self._dk_backend()]
+
+    def _growth_coeffs(self, z: float) -> list[float]:
+        """Displacement growth factors, one per source term."""
+        return [self._D1(z)]
+
+    def _velocity_orders(self) -> list[float]:
+        """Effective LPT order n per source term (EdS: fₙ ≈ n·f₁)."""
+        return [1.0]
+
+    def _velocity_coeffs(self, z: float) -> list[float]:
+        """Velocity coefficients a·H/h·fₙ·Dₙ, one per source term (km/s)."""
+        a = 1.0 / (1.0 + z)
+        Hz = hubble(z, self.parameters) / self.parameters.cosmology.h0
+        f1 = self._f1(z)
+        return [a * Hz * n * f1 * Dn
+                for n, Dn in zip(self._velocity_orders(), self._growth_coeffs(z))]
+
+    def _combine(self, coeffs: list[float]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Σₙ cₙ · ℱ⁻¹[i kᵢ/k² · sourceₙ(k)] via one combined k-field → 3 iFFTs."""
+        b = self._backend
+        N = self.N
+        kx, ky, kz, ik2 = self._setup_k_backend()
+        sources = self._sources_k()
+        ck = coeffs[0] * sources[0]
+        for c, s in zip(coeffs[1:], sources[1:]):
+            ck = ck + c * s
+        ck = ik2 * ck
+        return (
+            b.to_numpy(b.irfftn(1j * kx * ck, (N, N, N))),
+            b.to_numpy(b.irfftn(1j * ky * ck, (N, N, N))),
+            b.to_numpy(b.irfftn(1j * kz * ck, (N, N, N))),
+        )
+
+    # ------------------------------------------------------------------
+    # Public interface (shared by all orders)
+    # ------------------------------------------------------------------
+
     def get_displacement(self, z: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return the LPT displacement field (Ψx, Ψy, Ψz) at redshift z.
 
         Each component has shape (N, N, N) in units of Mpc/h.
         Lagrangian positions q on a regular grid are displaced as:
             x = q + Ψ(q)
+
+        Costs 3 inverse FFTs after the first call (sources are cached).
         """
+        return self._combine(self._growth_coeffs(z))
+
+    def get_velocity(self, z: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Peculiar velocity (vx, vy, vz) at redshift z in km/s.
+
+        v = a(z) H(z)/h Σₙ fₙ(z) Dₙ(z) Ψ⁽ⁿ⁾, with the EdS approximation
+        fₙ ≈ n·f₁ (accurate to < 1 % at z > 2).  Reuses the cached
+        displacement sources, so it also costs just 3 inverse FFTs.
+
+        Returns:
+            (vx, vy, vz) — each shape (N, N, N), units km/s.
+        """
+        return self._combine(self._velocity_coeffs(z))
 
     # ------------------------------------------------------------------
     # Convenience methods
@@ -409,39 +529,9 @@ class ZeldovichApproximation(LPTBase):
 
     Displacement: Ψ⁽¹⁾ = ℱ⁻¹[ i k/k² · δ(k) ] scaled by D₁(z).
 
-    All FFTs run on the active backend device (GPU if available).
+    All FFTs run on the active backend device (GPU if available); the base
+    class defaults implement 1LPT, so nothing to override here.
     """
-
-    def get_displacement(self, z: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        N, L = self.N, self.L
-        b = self._backend
-        D1 = self._D1(z)
-
-        kx, ky, kz, ik2 = self._setup_k_backend()
-        dk = b.as_array(self.delta_k)  # move to device once
-
-        # Ψᵢ(k) = i kᵢ / k² · δ(k)  (DC is zero via ik2)
-        psi_x = D1 * b.to_numpy(b.irfftn(1j * kx * ik2 * dk, (N, N, N)))
-        psi_y = D1 * b.to_numpy(b.irfftn(1j * ky * ik2 * dk, (N, N, N)))
-        psi_z = D1 * b.to_numpy(b.irfftn(1j * kz * ik2 * dk, (N, N, N)))
-
-        return psi_x, psi_y, psi_z
-
-    def get_velocity(self, z: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Peculiar velocity (vx, vy, vz) at redshift z in km/s.
-
-        v = a(z) H(z)/h f₁(z) Ψ⁽¹⁾(q, z)
-
-        where H(z)/h is in km/s/(Mpc/h) and Ψ⁽¹⁾ = D₁(z) × base displacement.
-
-        Returns:
-            (vx, vy, vz) — each shape (N, N, N), units km/s.
-        """
-        a = 1.0 / (1.0 + z)
-        Hz = hubble(z, self.parameters) / self.parameters.cosmology.h0
-        factor = a * Hz * self._f1(z)
-        psi_x, psi_y, psi_z = self.get_displacement(z)
-        return factor * psi_x, factor * psi_y, factor * psi_z
 
 
 # ============================================================
@@ -458,85 +548,27 @@ class SecondOrderLPT(LPTBase):
     where φ₁,ᵢⱼ ≡ ∂²φ₁/∂xᵢ∂xⱼ are the second-derivative fields of the
     1LPT potential φ₁ (with ∇²φ₁ = δ).
 
-    All intermediate arrays stay on the backend device; only the final Ψ
-    components are transferred to CPU numpy.
+    The 2LPT source field Δ⁽²⁾(k) is z-independent; it is computed once,
+    cached on the backend device, and recombined with (D₁, D₂) per redshift.
     """
 
-    def get_displacement(self, z: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        N, L = self.N, self.L
+    def _compute_sources_k(self) -> list:
         b = self._backend
-        D1, D2 = self._D1(z), self._D2(z)
-
         kx, ky, kz, ik2 = self._setup_k_backend()
-        dk = b.as_array(self.delta_k)
-
-        # ── 1LPT ────────────────────────────────────────────────────────
-        psi1_x_k = 1j * kx * ik2 * dk
-        psi1_y_k = 1j * ky * ik2 * dk
-        psi1_z_k = 1j * kz * ik2 * dk
-
-        # ── 2LPT source (all backend ops, stays on device) ──────────────
+        dk = self._dk_backend()
         d = self._phi1_derivs_b(dk, kx, ky, kz, ik2)
         source2 = (
             d['xx'] * d['yy'] - d['xy'] ** 2
             + d['xx'] * d['zz'] - d['xz'] ** 2
             + d['yy'] * d['zz'] - d['yz'] ** 2
         )
-        source2_k = b.rfftn(source2)
-        psi2_x_k = 1j * kx * ik2 * source2_k
-        psi2_y_k = 1j * ky * ik2 * source2_k
-        psi2_z_k = 1j * kz * ik2 * source2_k
+        return [dk, b.rfftn(source2)]
 
-        # ── Combine + single to_numpy per component ──────────────────────
-        irfft = lambda xk: b.irfftn(xk, (N, N, N))
-        psi_x = b.to_numpy(D1 * irfft(psi1_x_k) + D2 * irfft(psi2_x_k))
-        psi_y = b.to_numpy(D1 * irfft(psi1_y_k) + D2 * irfft(psi2_y_k))
-        psi_z = b.to_numpy(D1 * irfft(psi1_z_k) + D2 * irfft(psi2_z_k))
+    def _growth_coeffs(self, z: float) -> list[float]:
+        return [self._D1(z), self._D2(z)]
 
-        return psi_x, psi_y, psi_z
-
-    def get_velocity(self, z: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Peculiar velocity (vx, vy, vz) at redshift z in km/s.
-
-        v = a H/h [f₁ D₁ Ψ⁽¹⁾ + f₂ D₂ Ψ⁽²⁾]
-
-        Uses EdS approximation f₂ ≈ 2 f₁ (accurate to < 1 % at z > 2).
-
-        Returns:
-            (vx, vy, vz) — each shape (N, N, N), units km/s.
-        """
-        N, L = self.N, self.L
-        b = self._backend
-        a = 1.0 / (1.0 + z)
-        Hz = hubble(z, self.parameters) / self.parameters.cosmology.h0
-        f1 = self._f1(z)
-        D1, D2 = self._D1(z), self._D2(z)
-        vD1 = a * Hz * f1 * D1
-        vD2 = a * Hz * 2.0 * f1 * D2  # f₂ ≈ 2f₁ in EdS
-
-        kx, ky, kz, ik2 = self._setup_k_backend()
-        dk = b.as_array(self.delta_k)
-
-        psi1_x_k = 1j * kx * ik2 * dk
-        psi1_y_k = 1j * ky * ik2 * dk
-        psi1_z_k = 1j * kz * ik2 * dk
-
-        d = self._phi1_derivs_b(dk, kx, ky, kz, ik2)
-        source2 = (
-            d['xx'] * d['yy'] - d['xy'] ** 2
-            + d['xx'] * d['zz'] - d['xz'] ** 2
-            + d['yy'] * d['zz'] - d['yz'] ** 2
-        )
-        source2_k = b.rfftn(source2)
-        psi2_x_k = 1j * kx * ik2 * source2_k
-        psi2_y_k = 1j * ky * ik2 * source2_k
-        psi2_z_k = 1j * kz * ik2 * source2_k
-
-        irfft = lambda xk: b.irfftn(xk, (N, N, N))
-        v_x = b.to_numpy(vD1 * irfft(psi1_x_k) + vD2 * irfft(psi2_x_k))
-        v_y = b.to_numpy(vD1 * irfft(psi1_y_k) + vD2 * irfft(psi2_y_k))
-        v_z = b.to_numpy(vD1 * irfft(psi1_z_k) + vD2 * irfft(psi2_z_k))
-        return v_x, v_y, v_z
+    def _velocity_orders(self) -> list[float]:
+        return [1.0, 2.0]   # f₂ ≈ 2f₁ in EdS
 
 
 # ============================================================
@@ -560,10 +592,12 @@ class ThirdOrderLPT(LPTBase):
         D₃ₐ(z) ≈  1/3   × D₁³(z)
         D₃ᵦ(z) ≈ −5/21  × D₁³(z)
 
-    All intermediate arrays stay on the backend device.
+    All three source fields (Δ⁽²⁾, Δ⁽³ᵃ⁾, Δ⁽³ᵇ⁾) are z-independent; they are
+    computed once, cached on the backend device, and recombined with the
+    growth factors per redshift (3 inverse FFTs per call).
     """
 
-    def _phi2_derivs_b(self, d1, kx, ky, kz, ik2):
+    def _phi2_derivs_b(self, source2_k, kx, ky, kz, ik2):
         """Second derivatives of φ₂ as backend arrays (real-valued).
 
         φ₂,ᵢⱼ(k) = +kᵢkⱼ/k² · Δ⁽²⁾(k).  Note the positive sign (opposite
@@ -571,17 +605,11 @@ class ThirdOrderLPT(LPTBase):
         second spatial derivative cancels.
 
         Args:
-            d1: dict of φ₁ second-derivative backend arrays (from
-                :meth:`_phi1_derivs_b`).
+            source2_k: Δ⁽²⁾(k) as a backend array (already FFT'd by the
+                caller — avoids recomputing the 2LPT source).
         """
         b = self._backend
         N = self.N
-        source2 = (
-            d1['xx'] * d1['yy'] - d1['xy'] ** 2
-            + d1['xx'] * d1['zz'] - d1['xz'] ** 2
-            + d1['yy'] * d1['zz'] - d1['yz'] ** 2
-        )
-        source2_k = b.rfftn(source2)
 
         def _deriv(ki, kj):
             return b.irfftn(ki * kj * ik2 * source2_k, (N, N, N))
@@ -597,146 +625,43 @@ class ThirdOrderLPT(LPTBase):
     def _D3b(self, z: float) -> float:
         return (-5.0 / 21.0) * self._D1(z) ** 3
 
-    def get_displacement(self, z: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        N, L = self.N, self.L
+    def _compute_sources_k(self) -> list:
         b = self._backend
-        D1, D2 = self._D1(z), self._D2(z)
-        D3a, D3b = self._D3a(z), self._D3b(z)
-
         kx, ky, kz, ik2 = self._setup_k_backend()
-        dk = b.as_array(self.delta_k)
+        dk = self._dk_backend()
 
-        # ── 1LPT ────────────────────────────────────────────────────────
-        psi1_x_k = 1j * kx * ik2 * dk
-        psi1_y_k = 1j * ky * ik2 * dk
-        psi1_z_k = 1j * kz * ik2 * dk
-
-        # ── φ₁ second derivs (shared by 2LPT, 3LPT-a, 3LPT-b) ──────────
+        # φ₁ second derivs (shared by 2LPT, 3LPT-a, 3LPT-b)
         d1 = self._phi1_derivs_b(dk, kx, ky, kz, ik2)
 
-        # ── 2LPT ────────────────────────────────────────────────────────
+        # 2LPT
         source2 = (
             d1['xx'] * d1['yy'] - d1['xy'] ** 2
             + d1['xx'] * d1['zz'] - d1['xz'] ** 2
             + d1['yy'] * d1['zz'] - d1['yz'] ** 2
         )
         source2_k = b.rfftn(source2)
-        psi2_x_k = 1j * kx * ik2 * source2_k
-        psi2_y_k = 1j * ky * ik2 * source2_k
-        psi2_z_k = 1j * kz * ik2 * source2_k
 
-        # ── 3LPT type (a): det[ φ⁽¹⁾,ᵢⱼ ] ─────────────────────────────
+        # 3LPT type (a): det[ φ⁽¹⁾,ᵢⱼ ]
         source3a = (
             d1['xx'] * (d1['yy'] * d1['zz'] - d1['yz'] ** 2)
             - d1['xy'] * (d1['xy'] * d1['zz'] - d1['yz'] * d1['xz'])
             + d1['xz'] * (d1['xy'] * d1['yz'] - d1['yy'] * d1['xz'])
         )
         source3a_k = b.rfftn(source3a)
-        psi3a_x_k = 1j * kx * ik2 * source3a_k
-        psi3a_y_k = 1j * ky * ik2 * source3a_k
-        psi3a_z_k = 1j * kz * ik2 * source3a_k
 
-        # ── 3LPT type (b): symmetric φ⁽¹⁾ × φ⁽²⁾ cross term ────────────
-        d2 = self._phi2_derivs_b(d1, kx, ky, kz, ik2)
+        # 3LPT type (b): symmetric φ⁽¹⁾ × φ⁽²⁾ cross term
+        d2 = self._phi2_derivs_b(source2_k, kx, ky, kz, ik2)
         source3b = (
             d1['xx'] * d2['yy'] + d2['xx'] * d1['yy'] - 2 * d1['xy'] * d2['xy']
             + d1['xx'] * d2['zz'] + d2['xx'] * d1['zz'] - 2 * d1['xz'] * d2['xz']
             + d1['yy'] * d2['zz'] + d2['yy'] * d1['zz'] - 2 * d1['yz'] * d2['yz']
         )
         source3b_k = b.rfftn(source3b)
-        psi3b_x_k = 1j * kx * ik2 * source3b_k
-        psi3b_y_k = 1j * ky * ik2 * source3b_k
-        psi3b_z_k = 1j * kz * ik2 * source3b_k
 
-        # ── Combine + single to_numpy per component ──────────────────────
-        irfft = lambda xk: b.irfftn(xk, (N, N, N))
-        psi_x = b.to_numpy(
-            D1 * irfft(psi1_x_k) + D2 * irfft(psi2_x_k)
-            + D3a * irfft(psi3a_x_k) + D3b * irfft(psi3b_x_k)
-        )
-        psi_y = b.to_numpy(
-            D1 * irfft(psi1_y_k) + D2 * irfft(psi2_y_k)
-            + D3a * irfft(psi3a_y_k) + D3b * irfft(psi3b_y_k)
-        )
-        psi_z = b.to_numpy(
-            D1 * irfft(psi1_z_k) + D2 * irfft(psi2_z_k)
-            + D3a * irfft(psi3a_z_k) + D3b * irfft(psi3b_z_k)
-        )
+        return [dk, source2_k, source3a_k, source3b_k]
 
-        return psi_x, psi_y, psi_z
+    def _growth_coeffs(self, z: float) -> list[float]:
+        return [self._D1(z), self._D2(z), self._D3a(z), self._D3b(z)]
 
-    def get_velocity(self, z: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Peculiar velocity (vx, vy, vz) at redshift z in km/s.
-
-        v = aH/h [f₁D₁Ψ⁽¹⁾ + f₂D₂Ψ⁽²⁾ + f₃ₐD₃ₐΨ⁽³ᵃ⁾ + f₃ᵦD₃ᵦΨ⁽³ᵇ⁾]
-
-        EdS growth rates: fₙ ≈ n·f₁ for Dₙ ∝ D₁ⁿ.
-
-        Returns:
-            (vx, vy, vz) — each shape (N, N, N), units km/s.
-        """
-        N, L = self.N, self.L
-        b = self._backend
-        a = 1.0 / (1.0 + z)
-        Hz = hubble(z, self.parameters) / self.parameters.cosmology.h0
-        f1 = self._f1(z)
-        D1, D2 = self._D1(z), self._D2(z)
-        D3a, D3b = self._D3a(z), self._D3b(z)
-        vD1  = a * Hz * f1       * D1
-        vD2  = a * Hz * 2.0 * f1 * D2
-        vD3a = a * Hz * 3.0 * f1 * D3a
-        vD3b = a * Hz * 3.0 * f1 * D3b
-
-        kx, ky, kz, ik2 = self._setup_k_backend()
-        dk = b.as_array(self.delta_k)
-
-        psi1_x_k = 1j * kx * ik2 * dk
-        psi1_y_k = 1j * ky * ik2 * dk
-        psi1_z_k = 1j * kz * ik2 * dk
-
-        d1 = self._phi1_derivs_b(dk, kx, ky, kz, ik2)
-        source2 = (
-            d1['xx'] * d1['yy'] - d1['xy'] ** 2
-            + d1['xx'] * d1['zz'] - d1['xz'] ** 2
-            + d1['yy'] * d1['zz'] - d1['yz'] ** 2
-        )
-        source2_k = b.rfftn(source2)
-        psi2_x_k = 1j * kx * ik2 * source2_k
-        psi2_y_k = 1j * ky * ik2 * source2_k
-        psi2_z_k = 1j * kz * ik2 * source2_k
-
-        source3a = (
-            d1['xx'] * (d1['yy'] * d1['zz'] - d1['yz'] ** 2)
-            - d1['xy'] * (d1['xy'] * d1['zz'] - d1['yz'] * d1['xz'])
-            + d1['xz'] * (d1['xy'] * d1['yz'] - d1['yy'] * d1['xz'])
-        )
-        source3a_k = b.rfftn(source3a)
-        psi3a_x_k = 1j * kx * ik2 * source3a_k
-        psi3a_y_k = 1j * ky * ik2 * source3a_k
-        psi3a_z_k = 1j * kz * ik2 * source3a_k
-
-        d2 = self._phi2_derivs_b(d1, kx, ky, kz, ik2)
-        source3b = (
-            d1['xx'] * d2['yy'] + d2['xx'] * d1['yy'] - 2 * d1['xy'] * d2['xy']
-            + d1['xx'] * d2['zz'] + d2['xx'] * d1['zz'] - 2 * d1['xz'] * d2['xz']
-            + d1['yy'] * d2['zz'] + d2['yy'] * d1['zz'] - 2 * d1['yz'] * d2['yz']
-        )
-        source3b_k = b.rfftn(source3b)
-        psi3b_x_k = 1j * kx * ik2 * source3b_k
-        psi3b_y_k = 1j * ky * ik2 * source3b_k
-        psi3b_z_k = 1j * kz * ik2 * source3b_k
-
-        irfft = lambda xk: b.irfftn(xk, (N, N, N))
-        v_x = b.to_numpy(
-            vD1 * irfft(psi1_x_k) + vD2 * irfft(psi2_x_k)
-            + vD3a * irfft(psi3a_x_k) + vD3b * irfft(psi3b_x_k)
-        )
-        v_y = b.to_numpy(
-            vD1 * irfft(psi1_y_k) + vD2 * irfft(psi2_y_k)
-            + vD3a * irfft(psi3a_y_k) + vD3b * irfft(psi3b_y_k)
-        )
-        v_z = b.to_numpy(
-            vD1 * irfft(psi1_z_k) + vD2 * irfft(psi2_z_k)
-            + vD3a * irfft(psi3a_z_k) + vD3b * irfft(psi3b_z_k)
-        )
-        return v_x, v_y, v_z
+    def _velocity_orders(self) -> list[float]:
+        return [1.0, 2.0, 3.0, 3.0]   # fₙ ≈ n·f₁ in EdS

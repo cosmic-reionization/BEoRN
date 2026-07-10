@@ -19,17 +19,9 @@ from __future__ import annotations
 import logging
 import warnings
 import numpy as np
-from scipy.interpolate import interp1d
 
-try:
-    from numpy import trapezoid as _trapz
-except ImportError:
-    from numpy import trapz as _trapz
-
-from ..cosmo import D
-from ..constants import rhoc0
 from ..structs import Parameters, HaloCatalog
-from .linear_power import get_power_spectrum, PowerSpectrum
+from .linear_power import PowerSpectrum
 
 logger = logging.getLogger(__name__)
 
@@ -56,91 +48,53 @@ class CHMF:
         delta_c: float = 1.686,
         **ps_kwargs,
     ):
+        # Runtime import: beorn.mass_function.base imports beorn.lpt at module
+        # load, so a top-level import here would be circular.
+        from ..mass_function.base import MassFunction
+
         self.parameters = parameters
         self.delta_c = delta_c
-        self.power_spectrum: PowerSpectrum = get_power_spectrum(
-            ps_method, parameters, **ps_kwargs
-        )
-        self._precompute_sigma()
+        # sigma^2(M) machinery is delegated to the shared MassFunction base
+        # (same 1000 ln-k nodes, 200-point log-M table, top-hat window that
+        # used to be duplicated here) — one sigma^2 implementation for both
+        # the unconditional HMF and the CHMF.
+        self._mf = MassFunction(parameters, window='tophat',
+                                ps_method=ps_method, **ps_kwargs)
+        self.power_spectrum: PowerSpectrum = self._mf.power_spectrum
 
     # ------------------------------------------------------------------
-    # Physical constants in BEoRN units (Mpc/h)
+    # Physical constants in BEoRN units (Mpc/h) — delegated to MassFunction
     # ------------------------------------------------------------------
 
     @property
     def rho_m(self) -> float:
-        """Mean comoving matter density in M_sun (Mpc/h)^{-3}.
-
-        rhoc0 = 2.775e11 h^2 Msun/Mpc^3.  Converting to (Mpc/h)^{-3}:
-        1 Mpc = h0 Mpc/h  =>  rho_m = Om * rhoc0 / h0.
-        """
-        return self.parameters.cosmology.Om * rhoc0 / self.parameters.cosmology.h0
+        """Mean comoving matter density in M_sun (Mpc/h)^{-3}."""
+        return self._mf.rho_m
 
     def R_of_M(self, M: float | np.ndarray) -> float | np.ndarray:
         """Top-hat smoothing radius for mass M in Mpc/h."""
-        return (3.0 * M / (4.0 * np.pi * self.rho_m)) ** (1.0 / 3.0)
+        return self._mf.R_of_M(M)
 
     def M_of_R(self, R: float) -> float:
         """Mass enclosed in top-hat sphere of radius R (Mpc/h) in M_sun."""
-        return (4.0 / 3.0) * np.pi * R ** 3 * self.rho_m
+        return self._mf.M_of_R(R)
 
     # ------------------------------------------------------------------
-    # sigma^2(M) precomputation
+    # sigma^2(M, z) — delegated to MassFunction
     # ------------------------------------------------------------------
-
-    def _precompute_sigma(self) -> None:
-        """Build a cubic log-log interpolator for sigma^2(M) at z=0.
-
-        Uses 200 log-spaced mass points over [10^6, 10^17] M_sun and
-        integrates k^3 P(k) W^2(kR) / (2 pi^2) over ln k with 1000 k nodes.
-        """
-        N_k = 1000
-        lnk = np.linspace(np.log(1e-4), np.log(1e3), N_k)
-        k = np.exp(lnk)
-
-        M_grid = np.logspace(6, 17, 200)
-        R_grid = self.R_of_M(M_grid)  # Mpc/h, shape (200,)
-
-        kR = np.outer(k, R_grid)  # (N_k, 200)
-        # Top-hat window W(x) = 3(sin x - x cos x)/x^3, Taylor-expanded for x < 1e-3
-        W = np.where(
-            kR < 1e-3,
-            1.0 - kR ** 2 / 10.0 + kR ** 4 / 280.0,
-            3.0 * (np.sin(kR) - kR * np.cos(kR)) / kR ** 3,
-        )
-
-        Pk = self.power_spectrum.P(k, z=0.0)  # (N_k,)
-
-        # sigma^2 = (1/2pi^2) int k^3 P(k) W^2(kR) d ln k
-        integrand = k[:, None] ** 3 * Pk[:, None] * W ** 2 / (2.0 * np.pi ** 2)
-        sigma2_grid = _trapz(integrand, lnk, axis=0)  # (200,)
-
-        self._sigma2_interp = interp1d(
-            np.log(M_grid),
-            np.log(sigma2_grid),
-            kind='cubic',
-            fill_value='extrapolate',
-        )
-        logger.debug(
-            "CHMF sigma^2 precomputed: "
-            "sigma(M=1e12)=%.4f, sigma(M=1e8)=%.4f",
-            np.sqrt(np.exp(self._sigma2_interp(np.log(1e12)))),
-            np.sqrt(np.exp(self._sigma2_interp(np.log(1e8)))),
-        )
 
     def sigma2_z0(self, M: float | np.ndarray) -> float | np.ndarray:
         """sigma^2(M) at z=0, interpolated from the precomputed grid."""
         M = np.asarray(M, dtype=float)
-        return np.exp(self._sigma2_interp(np.log(M)))
+        return np.exp(self._mf._sigma2_interp(np.log(M)))
 
     def _D1(self, z: float) -> float:
         """Linear growth factor D(z), normalised to D(0) = 1."""
-        a = 1.0 / (1.0 + z)
-        return D(a, self.parameters) / D(1.0, self.parameters)
+        return self._mf._D1(z)
 
     def sigma2(self, M: float | np.ndarray, z: float) -> float | np.ndarray:
         """sigma^2(M, z) = D1(z)^2 * sigma^2(M, z=0)."""
-        return self._D1(z) ** 2 * self.sigma2_z0(M)
+        return self._mf.sigma2(M, z)
 
     # ------------------------------------------------------------------
     # Halo mass functions
@@ -270,6 +224,98 @@ class CHMFSampler:
         W_k = np.exp(-0.5 * k2 * R_smooth ** 2)
         return np.fft.irfftn(np.fft.rfftn(delta) * W_k, s=(N, N, N))
 
+    def _environment(self, delta_field: np.ndarray, R_env: float | None):
+        """Resolve the conditioning field and environment mass.
+
+        Returns:
+            (delta_env, M_env) — the (possibly smoothed) conditioning field
+            and the environmental mass scale in M_sun.
+        """
+        params = self.parameters
+        cell_size = params.simulation.Lbox / params.simulation.Ncell
+        if R_env is None:
+            return delta_field, self.chmf.rho_m * cell_size ** 3
+        M_env = self.chmf.M_of_R(R_env)
+        if R_env > cell_size:
+            return self._smooth_field(delta_field, R_env), M_env
+        return delta_field, M_env
+
+    def _mass_bins(self, M_env: float, n_mass_bins: int):
+        """Log-spaced mass bins between halo_mass_min and min(M_max, M_env)."""
+        params = self.parameters
+        M_min = params.source.halo_mass_min
+        M_max_req = params.source.halo_mass_max
+
+        if M_env <= M_min:
+            raise ValueError(
+                f"Environmental mass M_env = {M_env:.2e} Msun is smaller than "
+                f"halo_mass_min = {M_min:.2e} Msun.  Use a larger R_env or a "
+                f"coarser grid (smaller N or larger L)."
+            )
+
+        M_max = min(M_max_req, M_env * 0.999)
+        if M_max < M_max_req:
+            warnings.warn(
+                f"CHMF can only sample halos with M < M_env = {M_env:.2e} Msun "
+                f"(cell mass for N={params.simulation.Ncell}, "
+                f"L={params.simulation.Lbox} Mpc/h).  "
+                f"Capping M_max at {M_max:.2e} Msun.  "
+                f"Increase R_env or use a coarser grid to access higher masses.",
+                stacklevel=3,
+            )
+
+        M_edges = np.logspace(np.log10(M_min), np.log10(M_max), n_mass_bins + 1)
+        M_centers = np.sqrt(M_edges[:-1] * M_edges[1:])
+        dln_M = np.diff(np.log(M_edges))
+        return M_centers, dln_M
+
+    def expected_counts(
+        self,
+        delta_field: np.ndarray,
+        z: float,
+        R_env: float | None = None,
+        n_mass_bins: int = 40,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Expected halo counts per cell and mass bin — the Poisson intensity.
+
+        This is the dense field the Poisson sampler draws from:
+        ``lam[b, i, j, k] = dn/dlnM(M_b | delta[i,j,k]) * dlnM_b * V_cell``.
+        It is the building block for **expected-number painting** (issue #42,
+        G6): any halo-count-linear field equals ``sum_b lam_b * w(M_b)``
+        exactly in expectation, with no discrete sampling — smooth in the
+        conditioning field and the cosmology, hence the differentiable
+        alternative to :meth:`sample`.
+
+        Args:
+            delta_field: Linear conditioning overdensity, shape (N, N, N)
+                (see :meth:`sample` for why it must be the linear field).
+            z:           Redshift.
+            R_env:       Environmental smoothing scale in Mpc/h (as in
+                :meth:`sample`).
+            n_mass_bins: Number of log-spaced mass bins.
+
+        Returns:
+            (M_centers, lam) — bin-centre masses (n_mass_bins,) in M_sun and
+            expected counts of shape (n_mass_bins, N, N, N).
+
+        Note:
+            Memory scales as ``n_mass_bins * N^3 * 8`` bytes (e.g. 40 bins at
+            128^3 is ~0.7 GB) — reduce ``n_mass_bins`` or evaluate
+            :meth:`CHMF.hmf_chmf_field` per bin for large grids.
+        """
+        params = self.parameters
+        V_cell = (params.simulation.Lbox / params.simulation.Ncell) ** 3
+
+        delta_env, M_env = self._environment(delta_field, R_env)
+        sigma2_env = float(self.chmf.sigma2(M_env, z))
+        M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
+
+        lam = np.empty((len(M_centers),) + delta_env.shape, dtype=np.float64)
+        for i_M, M in enumerate(M_centers):
+            n_cond = self.chmf.hmf_chmf_field(M, delta_env, sigma2_env, z)
+            lam[i_M] = np.maximum(n_cond * dln_M[i_M] * V_cell, 0.0)
+        return M_centers, lam
+
     # ------------------------------------------------------------------
     # Main interface
     # ------------------------------------------------------------------
@@ -290,8 +336,12 @@ class CHMFSampler:
         within their host cells.
 
         Args:
-            delta_field: Linear matter overdensity at cell resolution,
-                shape ``(N, N, N)``.  Typically from :meth:`LPTBase.get_density`.
+            delta_field: **Linear** matter overdensity at cell resolution,
+                shape ``(N, N, N)`` — use :meth:`LPTBase.get_linear_density`
+                (with the cell-equivalent top-hat radius), *not* the CIC
+                :meth:`LPTBase.get_density`: EPS self-consistency requires a
+                Gaussian conditioning field with Var = sigma^2(M_env), and the
+                CIC field's shot-noise tails blow up the CHMF near M_env.
             z:           Redshift at which to sample.
             R_env:       Environmental smoothing scale in Mpc/h.  If ``None``
                          (default) the cell size is used as the conditioning scale
@@ -314,44 +364,11 @@ class CHMFSampler:
         cell_size = L / N
         V_cell = cell_size ** 3
 
-        # ── Environmental scale and sigma ──────────────────────────────
-        if R_env is None:
-            # Condition on each cell: M_env = rho_m * V_cell
-            M_env = self.chmf.rho_m * V_cell
-            delta_env = delta_field
-        else:
-            M_env = self.chmf.M_of_R(R_env)
-            if R_env > cell_size:
-                delta_env = self._smooth_field(delta_field, R_env)
-            else:
-                delta_env = delta_field
-
+        # ── Environment, sigma and mass bins ───────────────────────────
+        delta_env, M_env = self._environment(delta_field, R_env)
         sigma2_env = float(self.chmf.sigma2(M_env, z))
-
-        # ── Mass range ─────────────────────────────────────────────────
-        M_min = params.source.halo_mass_min
-        M_max_req = params.source.halo_mass_max
-
-        if M_env <= M_min:
-            raise ValueError(
-                f"Environmental mass M_env = {M_env:.2e} Msun is smaller than "
-                f"halo_mass_min = {M_min:.2e} Msun.  Use a larger R_env or a "
-                f"coarser grid (smaller N or larger L)."
-            )
-
-        M_max = min(M_max_req, M_env * 0.999)
-        if M_max < M_max_req:
-            warnings.warn(
-                f"CHMF can only sample halos with M < M_env = {M_env:.2e} Msun "
-                f"(cell mass for N={N}, L={L} Mpc/h).  "
-                f"Capping M_max at {M_max:.2e} Msun.  "
-                f"Increase R_env or use a coarser grid to access higher masses.",
-                stacklevel=2,
-            )
-
-        M_edges = np.logspace(np.log10(M_min), np.log10(M_max), n_mass_bins + 1)
-        M_centers = np.sqrt(M_edges[:-1] * M_edges[1:])
-        dln_M = np.diff(np.log(M_edges))  # uniform in log space
+        M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
+        M_min, M_max = M_centers[0], M_centers[-1]
 
         # ── Poisson sampling ───────────────────────────────────────────
         rng = np.random.default_rng(seed)
@@ -396,3 +413,87 @@ class CHMFSampler:
             parameters=params,
             redshift=float(z),
         )
+
+
+# ============================================================
+# Differentiable conditional HMF (numpy / jax / torch)
+# ============================================================
+
+def conditional_dndlnm_diff(
+    M,
+    delta_env,
+    M_env,
+    z,
+    Om, Ob, h0, ns, sigma_8,
+    delta_c=1.686,
+    backend='numpy',
+    n_k=1000,
+    n_nodes=512,
+):
+    """EPS conditional dn/dlnM — backend-generic pure function.
+
+    Same physics as :meth:`CHMF.hmf_chmf_field`, but sigma^2 comes from the
+    direct backend integral (:func:`beorn.mass_function.differentiable.sigma2_M`)
+    and d ln(sigma_eff)/d lnM is analytic, so the result is differentiable
+    with respect to the cosmology (Om, Ob, h0, ns, sigma_8), delta_c, **and
+    the conditioning field delta_env itself** — the gradient path from halo
+    abundances back to the LPT density field (issue #42, G6).
+
+    The opt-in gpu/diff counterpart of the numpy class; runs on the device of
+    its tensor inputs (CUDA / MPS float32).
+
+    Args:
+        M:          Halo mass in M_sun (scalar).
+        delta_env:  Linear conditioning overdensity — any shape, any backend
+                    array (numpy / jax / torch tensor).
+        M_env:      Environmental mass in M_sun (scalar).
+        z:          Redshift.
+        Om, Ob, h0, ns, sigma_8: cosmological parameters (scalars or
+                    zero-dim tensors carrying gradients).
+        delta_c:    Linear collapse threshold.
+        backend:    'numpy' (default), 'jax' or 'torch'.
+
+    Returns:
+        dn/dlnM per cell in (Mpc/h)^{-3}, same shape as ``delta_env``; zero
+        where sigma^2(M) <= sigma^2(M_env) or nu_eff < 0.
+    """
+    import math
+    from ..constants import rhoc0
+    from ..cosmo.differentiable import get_backend, device_of, as_array
+    from ..mass_function.differentiable import sigma2_M
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, delta_env, Om, Ob, h0, ns, sigma_8, delta_c)
+    delta_env = as_array(delta_env, name, xp, device)
+    dc = as_array(delta_c, name, xp, device)
+    Om_b = as_array(Om, name, xp, device)
+    h0_b = as_array(h0, name, xp, device)
+
+    s2_M, dln_M = sigma2_M(M, z, Om, Ob, h0, ns, sigma_8, backend=backend,
+                           n_k=n_k, n_nodes=n_nodes, return_dln_dlnM=True)
+    s2_env = sigma2_M(M_env, z, Om, Ob, h0, ns, sigma_8, backend=backend,
+                      n_k=n_k, n_nodes=n_nodes)
+
+    # sigma2_M runs on the device of its own (possibly plain-scalar) inputs;
+    # align its outputs with delta_env's device before mixing (torch raises
+    # on cross-device products of 0-dim tensors).
+    s2_M = as_array(s2_M, name, xp, device)
+    dln_M = as_array(dln_M, name, xp, device)
+    s2_env = as_array(s2_env, name, xp, device)
+
+    S_eff = s2_M - s2_env
+    valid = S_eff > 0
+    S_safe = xp.where(valid, S_eff, xp.ones_like(S_eff))
+
+    # d ln(sigma_eff)/d lnM = (d sigma^2/d lnM) / (2 S_eff), analytic
+    dS2_dlnM = 2.0 * s2_M * dln_M
+    dln_sigma_eff = dS2_dlnM / (2.0 * S_safe)
+
+    nu_eff = (dc - delta_env) / xp.sqrt(S_safe)
+    f_nu = math.sqrt(2.0 / math.pi) * nu_eff * xp.exp(-0.5 * nu_eff ** 2)
+    zero = xp.zeros_like(f_nu)
+    f_nu = xp.where(nu_eff > 0, f_nu, zero)          # clamp collapsed cells
+    f_nu = xp.where(valid, f_nu, zero)               # S_eff <= 0 -> 0
+
+    rho_m = Om_b * rhoc0 / h0_b
+    return (rho_m / M) * xp.abs(dln_sigma_eff) * f_nu

@@ -70,9 +70,18 @@ def as_const(x, name, xp, device=None):
 
 
 def as_array(x, name, xp, device=None):
-    """Convert an input that may carry gradients, preserving tracers/tensors."""
+    """Convert an input that may carry gradients, preserving tracers/tensors.
+
+    Torch tensors on a different device are moved to *device* (``.to`` keeps
+    the autograd graph); float64 is cast to float32 when the target is MPS
+    (Apple GPU has no float64).
+    """
     if name == 'torch':
         if xp.is_tensor(x):
+            if device is not None and x.device != device:
+                if str(device).startswith('mps') and x.dtype == xp.float64:
+                    return x.to(device=device, dtype=xp.float32)
+                return x.to(device=device)
             return x
         return xp.as_tensor(np.asarray(x, dtype=float),
                             dtype=_torch_dtype(xp, device), device=device)
