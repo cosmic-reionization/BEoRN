@@ -76,7 +76,20 @@ class SourceParameters:
     """Distribution used to sample per-halo f_st during painting."""
 
     f_st_paint_sigma: float = 0.5
-    """Width parameter for the f_st sampling distribution (log-space sigma for lognormal)."""
+    """Width parameter for the f_st sampling distribution (log-space sigma for lognormal).
+    Used as the constant scatter when f_st_paint_sigma0 is None (default, backward-compatible)."""
+
+    f_st_paint_sigma0: float | None = None
+    """Mass-dependent scatter model: sigma_dex(Mh) = f_st_paint_sigma0 + f_st_paint_sigma1 *
+    log10(Mh / f_st_paint_sigma_mpiv), calibrated per fit_thesan_fst.md section 6. ``None``
+    (default) falls back to the constant ``f_st_paint_sigma`` for backward compatibility."""
+
+    f_st_paint_sigma1: float = 0.0
+    """Slope of the mass-dependent scatter model, in dex per dex of log10(Mh / mpiv).
+    ``0.0`` (default) recovers a mass-independent scatter equal to f_st_paint_sigma0."""
+
+    f_st_paint_sigma_mpiv: float = 1e11
+    """Pivot halo mass [Msun/h] for the mass-dependent scatter model."""
 
     f_st_paint_min: float = 0.01
     """Lower clipping bound for sampled f_st during painting."""
@@ -413,6 +426,9 @@ class Parameters:
     _PAINT_ONLY_SOURCE_KEYS = frozenset({
         "f_st_paint_distribution",
         "f_st_paint_sigma",
+        "f_st_paint_sigma0",
+        "f_st_paint_sigma1",
+        "f_st_paint_sigma_mpiv",
         "f_st_paint_min",
         "f_st_paint_max",
         "f_st_paint_seed",
