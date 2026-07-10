@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from types import SimpleNamespace
 
-from beorn.painting.coordinator import PaintingCoordinator
+from beorn.painting.coordinator import PaintingCoordinator, sigma_dex_for_mass
 from beorn.structs.coeval_cube import CoevalCube
 from beorn.structs.parameters import Parameters
 from beorn.structs.radiation_profiles import RadiationProfilesFStarGrid
@@ -20,13 +20,27 @@ from beorn.structs.temporal_cube import TemporalCube
 
 class DummyHaloCatalog:
     def __init__(self, masses, alpha_vals, selected=None):
-        self.masses = np.asarray(masses)
-        self.alpha_vals = np.asarray(alpha_vals)
-        self.alphas = self.alpha_vals
+        self._all_masses = np.asarray(masses)
+        self._all_alpha_vals = np.asarray(alpha_vals)
         if selected is None:
-            self.selected = np.arange(self.masses.size)
+            self.selected = np.arange(self._all_masses.size)
         else:
             self.selected = np.asarray(selected)
+
+    @property
+    def masses(self):
+        # Matches real HaloCatalog.at_indices semantics: .masses always reflects only
+        # the halos this instance represents (indexed via .selected), not the full
+        # original array passed at construction time.
+        return self._all_masses[self.selected]
+
+    @property
+    def alpha_vals(self):
+        return self._all_alpha_vals[self.selected]
+
+    @property
+    def alphas(self):
+        return self.alpha_vals
 
     @property
     def size(self):
@@ -36,16 +50,16 @@ class DummyHaloCatalog:
         alpha_low, alpha_high = alpha_range
         mass_low, mass_high = mass_range
         mask = (
-            (self.alpha_vals[self.selected] >= alpha_low)
-            & (self.alpha_vals[self.selected] < alpha_high)
-            & (self.masses[self.selected] >= mass_low)
-            & (self.masses[self.selected] < mass_high)
+            (self.alpha_vals >= alpha_low)
+            & (self.alpha_vals < alpha_high)
+            & (self.masses >= mass_low)
+            & (self.masses < mass_high)
         )
         return np.where(mask)[0]
 
     def at_indices(self, idx):
         idx = np.asarray(idx)
-        return DummyHaloCatalog(self.masses, self.alpha_vals, self.selected[idx])
+        return DummyHaloCatalog(self._all_masses, self._all_alpha_vals, self.selected[idx])
 
     def to_mesh(self):
         return np.zeros((4, 4, 4), dtype=float)
@@ -101,6 +115,7 @@ def make_parameters(seed=12345):
         ),
     )
     params.unique_hash = lambda: "testhash"
+    params.beorn_hash = lambda: "testhash"
     return params
 
 
@@ -143,6 +158,28 @@ def make_coordinator(seed=12345, halo_catalog=None):
     return PaintingCoordinator(params, loader, DummyHandler(), cache_handler=None)
 
 
+def test_sigma_dex_for_mass_matches_linear_model():
+    Mh = np.array([1e10, 1e11, 1e12])
+    sigma = sigma_dex_for_mass(Mh, sigma0=0.22, sigma1=-0.04, mpiv=1e11)
+    expected = 0.22 - 0.04 * np.log10(Mh / 1e11)
+    np.testing.assert_allclose(sigma, expected)
+
+
+def test_sigma_dex_for_mass_decreases_with_mass_for_negative_sigma1():
+    Mh = np.array([1e9, 1e10, 1e11, 1e12])
+    sigma = sigma_dex_for_mass(Mh, sigma0=0.22, sigma1=-0.04, mpiv=1e11)
+    assert np.all(np.diff(sigma) < 0)
+
+
+def test_sigma_dex_for_mass_is_clipped_to_floor():
+    # Very negative sigma0 with steep positive sigma1 would go negative at low mass
+    # without the floor.
+    Mh = np.array([1e5, 1e20])
+    sigma = sigma_dex_for_mass(Mh, sigma0=-5.0, sigma1=0.01, mpiv=1e11, floor=1e-3)
+    assert np.all(sigma >= 1e-3)
+    assert np.isclose(sigma[0], 1e-3)
+
+
 def test_make_f_st_rng_reproducible_per_snapshot():
     coordinator = make_coordinator(seed=2468)
 
@@ -164,8 +201,9 @@ def test_sample_f_st_for_halos_reproducible_given_snapshot_rng():
     rng1 = coordinator._make_f_st_rng(1)
     rng2 = coordinator._make_f_st_rng(1)
 
-    s1 = coordinator._sample_f_st_for_halos(20, rng1)
-    s2 = coordinator._sample_f_st_for_halos(20, rng2)
+    halo_masses = np.full(20, 1e10)
+    s1 = coordinator._sample_f_st_for_halos(halo_masses, rng1)
+    s2 = coordinator._sample_f_st_for_halos(halo_masses, rng2)
 
     np.testing.assert_allclose(s1, s2)
     assert np.all(s1 >= coordinator.parameters.source.f_st_paint_min)
@@ -244,7 +282,7 @@ def test_sample_f_st_for_halos_uniform_distribution_respects_bounds():
     coordinator.parameters.source.f_st_paint_max = 0.07
 
     rng = coordinator._make_f_st_rng(0)
-    sampled = coordinator._sample_f_st_for_halos(1000, rng)
+    sampled = coordinator._sample_f_st_for_halos(np.full(1000, 1e10), rng)
 
     assert np.all(sampled >= 0.03)
     assert np.all(sampled <= 0.07)
@@ -312,7 +350,7 @@ def test_sample_f_st_for_halos_normal_distribution_is_clipped():
     coordinator.parameters.source.f_st_paint_max = 0.15
 
     rng = coordinator._make_f_st_rng(0)
-    sampled = coordinator._sample_f_st_for_halos(1000, rng)
+    sampled = coordinator._sample_f_st_for_halos(np.full(1000, 1e10), rng)
 
     assert np.all(sampled >= 0.02)
     assert np.all(sampled <= 0.15)
@@ -328,7 +366,7 @@ def test_sample_f_st_for_halos_lognormal_distribution_is_clipped():
     coordinator.parameters.source.f_st_paint_max = 0.12
 
     rng = coordinator._make_f_st_rng(0)
-    sampled = coordinator._sample_f_st_for_halos(1000, rng)
+    sampled = coordinator._sample_f_st_for_halos(np.full(1000, 1e10), rng)
 
     assert np.all(sampled >= 0.01)
     assert np.all(sampled <= 0.12)
@@ -342,11 +380,109 @@ def test_sample_f_st_for_halos_unknown_distribution_raises():
     rng = coordinator._make_f_st_rng(0)
 
     try:
-        coordinator._sample_f_st_for_halos(5, rng)
+        coordinator._sample_f_st_for_halos(np.full(5, 1e10), rng)
     except ValueError as exc:
         assert "Unknown f_st painting distribution" in str(exc)
     else:
         raise AssertionError("Expected ValueError for unknown f_st painting distribution")
+
+
+def test_sample_f_st_for_halos_lognormal_defaults_to_constant_sigma_when_sigma0_unset():
+    # f_st_paint_sigma0 defaults to None -- must reproduce the old mass-independent
+    # constant-sigma behavior exactly (backward compatibility).
+    coordinator = make_coordinator(seed=606)
+    coordinator.parameters.source.f_st = 0.02
+    coordinator.parameters.source.f_st_paint_sigma = 0.4
+    coordinator.parameters.source.f_st_paint_min = 1e-4
+    coordinator.parameters.source.f_st_paint_max = 0.9
+
+    rng = coordinator._make_f_st_rng(0)
+    low_mass = np.full(20000, 1e9)
+    high_mass = np.full(20000, 1e12)
+    sampled_low = coordinator._sample_f_st_for_halos(low_mass, rng)
+    sampled_high = coordinator._sample_f_st_for_halos(high_mass, rng)
+
+    std_low = np.std(np.log10(sampled_low))
+    std_high = np.std(np.log10(sampled_high))
+    expected_std = 0.4 * np.log10(np.e)  # natural-log sigma -> dex sigma
+    np.testing.assert_allclose(std_low, expected_std, rtol=0.05)
+    np.testing.assert_allclose(std_high, expected_std, rtol=0.05)
+
+
+def test_sample_f_st_for_halos_lognormal_sigma_varies_with_halo_mass():
+    coordinator = make_coordinator(seed=707)
+    coordinator.parameters.source.f_st = 0.02
+    coordinator.parameters.source.f_st_paint_sigma0 = 0.3
+    coordinator.parameters.source.f_st_paint_sigma1 = -0.05
+    coordinator.parameters.source.f_st_paint_sigma_mpiv = 1e11
+    coordinator.parameters.source.f_st_paint_min = 1e-5
+    coordinator.parameters.source.f_st_paint_max = 0.9
+
+    rng = coordinator._make_f_st_rng(0)
+    low_mass = np.full(20000, 1e9)
+    high_mass = np.full(20000, 1e12)
+    sampled_low = coordinator._sample_f_st_for_halos(low_mass, rng)
+    sampled_high = coordinator._sample_f_st_for_halos(high_mass, rng)
+
+    std_low_dex = np.std(np.log10(sampled_low))
+    std_high_dex = np.std(np.log10(sampled_high))
+
+    expected_low = sigma_dex_for_mass(np.array([1e9]), 0.3, -0.05, 1e11)[0]
+    expected_high = sigma_dex_for_mass(np.array([1e12]), 0.3, -0.05, 1e11)[0]
+
+    # sigma1 < 0: lower-mass halos must show larger scatter than higher-mass halos.
+    assert std_low_dex > std_high_dex
+    np.testing.assert_allclose(std_low_dex, expected_low, rtol=0.05)
+    np.testing.assert_allclose(std_high_dex, expected_high, rtol=0.05)
+
+
+def test_sample_f_st_for_halos_end_to_end_recovers_calibrated_mass_dependent_scatter():
+    """Integration check mirroring fst_stochastic/validate_mass_dependent_fst_sampling.py
+    (Component 0), but driven through the real PaintingCoordinator._sample_f_st_for_halos
+    and _nearest_f_st_indices with a real Parameters object (not a SimpleNamespace mock),
+    over 50k synthetic halos spanning 1e9-1e12 Msun/h. Catches wiring bugs (attribute
+    lookups, sign errors, index-mapping issues) that the pure-function unit tests and the
+    standalone reference script cannot, since those never touch the shipped class."""
+    params = Parameters()
+    params.source.f_st = 0.02
+    params.source.f_st_paint_sigma0 = 0.2227   # snap 068, z=6.11 (fst_scatter_highdet_freeg2.txt)
+    params.source.f_st_paint_sigma1 = -0.0407
+    params.source.f_st_paint_sigma_mpiv = 1e11
+    params.source.f_st_paint_min = 1e-6
+    params.source.f_st_paint_max = 0.9
+    params.source.f_st_paint_seed = 20260702
+
+    loader = DummyLoader(DummyHaloCatalog(masses=np.array([1e10]), alpha_vals=np.array([1.0])))
+    coordinator = PaintingCoordinator(params, loader, DummyHandler(), cache_handler=None)
+
+    rng = coordinator._make_f_st_rng(0)
+    n_halos = 50_000
+    log_mh = rng.uniform(9.0, 12.0, n_halos)
+    Mh = 10 ** log_mh
+
+    sampled = coordinator._sample_f_st_for_halos(Mh, rng)
+
+    # _nearest_f_st_indices wiring: valid indices, halo count conserved (mirrors the
+    # total_halos == halo_catalog.size invariant enforced in paint_single_fstar).
+    f_st_grid = np.logspace(-6, np.log10(0.9), 25)
+    f_st_indices = coordinator._nearest_f_st_indices(sampled, f_st_grid)
+    assert f_st_indices.size == n_halos
+    assert f_st_indices.min() >= 0
+    assert f_st_indices.max() < f_st_grid.size
+
+    resid_dex = np.log10(sampled) - np.log10(params.source.f_st)
+    edges = np.linspace(9.0, 12.0, 13)
+    for k in range(12):
+        in_bin = (log_mh >= edges[k]) & (log_mh < edges[k + 1])
+        Mh_mid = 10 ** (0.5 * (edges[k] + edges[k + 1]))
+        sig_ana = sigma_dex_for_mass(
+            np.array([Mh_mid]), params.source.f_st_paint_sigma0,
+            params.source.f_st_paint_sigma1, params.source.f_st_paint_sigma_mpiv,
+        )[0]
+        sig_emp = np.std(resid_dex[in_bin])
+        assert abs(sig_emp / sig_ana - 1.0) < 0.10, (
+            f"bin [{edges[k]:.2f},{edges[k+1]:.2f}]: analytic={sig_ana:.4f} empirical={sig_emp:.4f}"
+        )
 
 
 def test_paint_single_fstar_mixed_mass_bins_paints_all_halos_once(monkeypatch):
@@ -504,6 +640,26 @@ def test_paint_cache_namespace_changes_with_distribution_sigma_seed():
     assert "dist_uniform" in ns2
     assert "sigma_1.25" in ns2
     assert "seed_123" in ns2
+
+
+def test_paint_cache_namespace_uses_sigma0_sigma1_when_mass_dependent():
+    coordinator = make_coordinator(seed=909)
+    profiles = make_profiles()
+
+    ns_const = coordinator._paint_cache_namespace(profiles)
+    assert "sigma0_" not in ns_const
+
+    coordinator.parameters.source.f_st_paint_sigma0 = 0.222658
+    coordinator.parameters.source.f_st_paint_sigma1 = -0.040749
+    ns_dep = coordinator._paint_cache_namespace(profiles)
+
+    assert ns_dep != ns_const
+    assert "sigma0_0.222658" in ns_dep
+    assert "sigma1_-0.040749" in ns_dep
+    # The constant-sigma value is unused in mass-dependent mode and must not
+    # appear in the namespace (it previously mislabeled the cache).
+    sigma_const = coordinator.parameters.source.f_st_paint_sigma
+    assert f"sigma_{sigma_const}" not in ns_dep
 
 
 def test_paint_single_legacy_cache_uses_legacy_namespace():
