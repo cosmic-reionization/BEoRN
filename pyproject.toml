@@ -26,6 +26,10 @@ dev = [
 extra = [
     "21cmfast>=3.4.0,<4",
     "hmf>=3.4",
+    "colossus>=1.3",
+]
+disco_eb = [
+    "disco-eb @ git+https://github.com/ohahn/DISCO-EB.git",
 ]
 numba = [
     "numba",
