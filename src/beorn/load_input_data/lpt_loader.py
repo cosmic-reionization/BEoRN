@@ -37,6 +37,10 @@ class LPTHaloLoader(BaseLoader):
         n_mass_bins:  Number of log-spaced mass bins for the CHMF sampling
                       (default ``40``).
         delta_c:      Linear collapse threshold (default ``1.686``).
+        hmf_model:    ``'PS'`` (default) — pure EPS conditional sampling.
+                      ``'ST'`` — Barkana & Loeb (2004) hybrid: rescale so the
+                      mean mass function matches Sheth-Tormen (as in
+                      21cmFAST-family codes).
         **ps_kwargs:  Extra keyword arguments forwarded to the power spectrum
                       constructor (e.g. ``wiggle=True``).
     """
@@ -50,6 +54,7 @@ class LPTHaloLoader(BaseLoader):
         R_env: float | None = None,
         n_mass_bins: int = 40,
         delta_c: float = 1.686,
+        hmf_model: str = 'PS',
         **ps_kwargs,
     ):
         super().__init__(parameters)
@@ -66,7 +71,7 @@ class LPTHaloLoader(BaseLoader):
             self.lpt_solver = lpt_solver
 
         chmf = CHMF(parameters, ps_method=ps_method, delta_c=delta_c, **ps_kwargs)
-        self.sampler = CHMFSampler(parameters, chmf=chmf)
+        self.sampler = CHMFSampler(parameters, chmf=chmf, hmf_model=hmf_model)
 
         # Top-hat scale for linear density field conditioning.
         # Using the sphere-equivalent radius for the cell volume so that

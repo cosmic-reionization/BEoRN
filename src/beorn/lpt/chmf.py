@@ -121,6 +121,35 @@ class CHMF:
         f_nu = np.sqrt(2.0 / np.pi) * nu * np.exp(-0.5 * nu ** 2)
         return (self.rho_m / M) * np.abs(dln_sigma_dlnM) * f_nu
 
+    def st_ps_ratio(self, M: np.ndarray, z: float) -> np.ndarray:
+        """Sheth-Tormen / Press-Schechter ratio of the unconditional HMFs.
+
+        R(M, z) = f_ST(nu) / f_PS(nu) with nu = delta_c / sigma(M, z); the
+        rho_m/M and d ln sigma/d ln M factors cancel.  Multiplying the
+        conditional PS mass function by this ratio is the hybrid prescription
+        of Barkana & Loeb (2004) (see e.g. Ghara, Choudhury & Datta 2015,
+        appendix A): the delta-dependence keeps the EPS shape while the
+        volume average matches the simulation-calibrated ST mass function
+        exactly (because the volume average of conditional PS is exactly PS).
+
+        Args:
+            M:  Halo masses in M_sun (scalar or 1-D array).
+            z:  Redshift.
+
+        Returns:
+            Dimensionless ratio, same shape as M.
+        """
+        from ..mass_function.models import _f_nu, _normalise_A
+        # models._f_nu uses the nu = (delta_c / sigma)^2 convention
+        nu2 = self.delta_c ** 2 / np.asarray(self.sigma2(M, z), dtype=float)
+        f_st = _f_nu(nu2, 0.3, 0.707, _normalise_A(0.3), backend='numpy')
+        f_ps = _f_nu(nu2, 0.0, 1.0, 0.5, backend='numpy')
+        return f_st / f_ps
+
+    def hmf_st(self, M: np.ndarray, z: float) -> np.ndarray:
+        """Unconditional Sheth-Tormen dn/d ln M in (Mpc/h)^{-3}."""
+        return self.hmf_ps(M, z) * self.st_ps_ratio(M, z)
+
     def hmf_chmf_field(
         self,
         M: float,
@@ -184,6 +213,11 @@ class CHMFSampler:
                      ``ps_kwargs``.
         ps_method:   Power spectrum method forwarded to :class:`CHMF`.
         delta_c:     Linear collapse threshold (default 1.686).
+        hmf_model:   ``'PS'`` (default) — pure EPS conditional sampling whose
+                     volume average is Press-Schechter.  ``'ST'`` — rescale
+                     each mass bin by the unconditional ST/PS ratio (Barkana &
+                     Loeb 2004 hybrid) so the volume average matches
+                     Sheth-Tormen instead, as done by 21cmFAST-family codes.
         **ps_kwargs: Forwarded to the power spectrum constructor.
     """
 
@@ -193,12 +227,28 @@ class CHMFSampler:
         chmf: CHMF | None = None,
         ps_method: str = 'eisenstein_hu',
         delta_c: float = 1.686,
+        hmf_model: str = 'PS',
         **ps_kwargs,
     ):
         self.parameters = parameters
         self.chmf = chmf if chmf is not None else CHMF(
             parameters, ps_method, delta_c, **ps_kwargs
         )
+        hmf_model = hmf_model.upper()
+        if hmf_model not in ('PS', 'ST'):
+            raise ValueError(
+                f"Unknown hmf_model {hmf_model!r}. Choose 'PS' or 'ST'."
+            )
+        self.hmf_model = hmf_model
+
+    def _calibration_ratios(self, M_centers: np.ndarray, z: float) -> np.ndarray:
+        """Per-mass-bin calibration factor for the expected counts.
+
+        1 for pure EPS ('PS'); the unconditional ST/PS ratio for 'ST'.
+        """
+        if self.hmf_model == 'ST':
+            return np.asarray(self.chmf.st_ps_ratio(M_centers, z), dtype=float)
+        return np.ones(len(M_centers))
 
     # ------------------------------------------------------------------
     # Helpers
@@ -309,11 +359,12 @@ class CHMFSampler:
         delta_env, M_env = self._environment(delta_field, R_env)
         sigma2_env = float(self.chmf.sigma2(M_env, z))
         M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
+        ratios = self._calibration_ratios(M_centers, z)
 
         lam = np.empty((len(M_centers),) + delta_env.shape, dtype=np.float64)
         for i_M, M in enumerate(M_centers):
             n_cond = self.chmf.hmf_chmf_field(M, delta_env, sigma2_env, z)
-            lam[i_M] = np.maximum(n_cond * dln_M[i_M] * V_cell, 0.0)
+            lam[i_M] = np.maximum(n_cond * ratios[i_M] * dln_M[i_M] * V_cell, 0.0)
         return M_centers, lam
 
     # ------------------------------------------------------------------
@@ -368,6 +419,7 @@ class CHMFSampler:
         delta_env, M_env = self._environment(delta_field, R_env)
         sigma2_env = float(self.chmf.sigma2(M_env, z))
         M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
+        ratios = self._calibration_ratios(M_centers, z)
         M_min, M_max = M_centers[0], M_centers[-1]
 
         # ── Poisson sampling ───────────────────────────────────────────
@@ -377,7 +429,7 @@ class CHMFSampler:
 
         for i_M, M in enumerate(M_centers):
             n_cond = self.chmf.hmf_chmf_field(M, delta_env, sigma2_env, z)
-            N_expected = np.maximum(n_cond * dln_M[i_M] * V_cell, 0.0)
+            N_expected = np.maximum(n_cond * ratios[i_M] * dln_M[i_M] * V_cell, 0.0)
             N_sample = rng.poisson(N_expected)  # shape (N, N, N) int
 
             occupied = np.argwhere(N_sample > 0)  # (K, 3)
@@ -429,6 +481,7 @@ def conditional_dndlnm_diff(
     backend='numpy',
     n_k=1000,
     n_nodes=512,
+    hmf_model='PS',
 ):
     """EPS conditional dn/dlnM — backend-generic pure function.
 
@@ -452,6 +505,11 @@ def conditional_dndlnm_diff(
                     zero-dim tensors carrying gradients).
         delta_c:    Linear collapse threshold.
         backend:    'numpy' (default), 'jax' or 'torch'.
+        hmf_model:  ``'PS'`` (default) — pure EPS conditional.  ``'ST'`` —
+                    multiply by the unconditional ST/PS ratio (Barkana & Loeb
+                    2004 hybrid) so the volume average matches Sheth-Tormen;
+                    the ratio is a closed-form function of nu, so the result
+                    stays differentiable in all arguments.
 
     Returns:
         dn/dlnM per cell in (Mpc/h)^{-3}, same shape as ``delta_env``; zero
@@ -496,4 +554,19 @@ def conditional_dndlnm_diff(
     f_nu = xp.where(valid, f_nu, zero)               # S_eff <= 0 -> 0
 
     rho_m = Om_b * rhoc0 / h0_b
-    return (rho_m / M) * xp.abs(dln_sigma_eff) * f_nu
+    result = (rho_m / M) * xp.abs(dln_sigma_eff) * f_nu
+
+    if hmf_model.upper() == 'ST':
+        # Barkana & Loeb (2004) hybrid: unconditional ST/PS ratio
+        # f_ST/f_PS = A sqrt(q) (1 + (q nu2)^-p) exp(-(q-1) nu2 / 2)
+        # with nu2 = (delta_c / sigma(M, z))^2 — closed form, differentiable.
+        from ..mass_function.models import _normalise_A
+        p_st, q_st, A_st = 0.3, 0.707, _normalise_A(0.3)
+        nu2 = dc ** 2 / s2_M
+        ratio = (A_st * math.sqrt(q_st) * (1.0 + (q_st * nu2) ** (-p_st))
+                 * xp.exp(-0.5 * (q_st - 1.0) * nu2))
+        result = result * ratio
+    elif hmf_model.upper() != 'PS':
+        raise ValueError(f"Unknown hmf_model {hmf_model!r}. Choose 'PS' or 'ST'.")
+
+    return result
