@@ -16,6 +16,7 @@ See https://thesan-project.com for data format documentation.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -119,6 +120,13 @@ class ThesanLoader(MergerTreeLoader):
             and the ``snapshot_redshifts`` dataset.
         is_high_res (bool): ``True`` for THESAN-DARK 1 (2100³ particles),
             ``False`` (default) for THESAN-DARK 2 (1050³ particles).
+        density_cache_dir (Path | str | None): When set, painted density
+            meshes are cached as ``.npy`` files in this directory, keyed by
+            snapshot, mesh geometry, mass-assignment scheme, and subbox.
+            Painting a mesh requires streaming the full particle set
+            (~minutes per snapshot); the cached mesh loads in milliseconds.
+            Point multiple runs at the same directory to share the cache —
+            the mesh is independent of all source/painting parameters.
     """
 
     simulation_code = "THESAN"
@@ -136,6 +144,7 @@ class ThesanLoader(MergerTreeLoader):
         *,
         is_high_res: bool = False,
         subbox: SubboxConfig | None = None,
+        density_cache_dir: Path | str | None = None,
     ):
         super().__init__(parameters)
 
@@ -148,6 +157,7 @@ class ThesanLoader(MergerTreeLoader):
         # When set, all spatial I/O (halos and density particles) is restricted
         # to the buffered subregion and coordinates are remapped to [0, lbox_eff).
         self.subbox           = subbox
+        self.density_cache_dir = Path(density_cache_dir) if density_cache_dir is not None else None
 
         self.logger.info(f"Initialized ThesanLoader — root: {self.thesan_root}")
         if subbox is not None:
@@ -324,6 +334,29 @@ class ThesanLoader(MergerTreeLoader):
 
     # ── Density and velocity fields ────────────────────────────────────────
 
+    def _density_cache_path(self, redshift_index: int) -> Path | None:
+        """Cache file for the painted density mesh of one snapshot, or None.
+
+        The key covers everything the mesh depends on: the snapshot, the mesh
+        geometry (Ncell/Lbox — already overridden to the effective values in
+        subbox mode), the mass-assignment scheme, and the subbox region.  The
+        mesh is independent of all source/painting parameters, so the cache can
+        be shared between runs with different astrophysics.
+        """
+        if self.density_cache_dir is None:
+            return None
+        snapshot_path = self._density_directories[redshift_index]
+        mass_assignment, _ = self._particle_mapping_config()
+        sim = self.parameters.simulation
+        tag = f"{snapshot_path.name}_N{sim.Ncell}_L{sim.Lbox:.6g}_{mass_assignment}"
+        if self.subbox is not None:
+            o = self.subbox.origin
+            tag += (
+                f"_subbox_o{o[0]:.6g}-{o[1]:.6g}-{o[2]:.6g}"
+                f"_s{self.subbox.size:.6g}_b{self.subbox.buffer:.6g}"
+            )
+        return self.density_cache_dir / f"delta_{tag}.npy"
+
     def load_density_field(self, redshift_index: int) -> np.ndarray:
         """Paint DM particles onto a mesh and return the overdensity field δ = ρ/⟨ρ⟩ − 1.
 
@@ -332,7 +365,15 @@ class ThesanLoader(MergerTreeLoader):
         never allocated; peak RAM per iteration is O(chunk_size), typically ~100 MB.
         map_particles_to_mesh accumulates into the mesh, so calling it once per
         chunk is equivalent to calling it once on the concatenated array.
+
+        When ``density_cache_dir`` is set, the resulting mesh is cached on disk
+        and reloaded instead of re-streaming the particle snapshot.
         """
+        cache_path = self._density_cache_path(redshift_index)
+        if cache_path is not None and cache_path.exists():
+            self.logger.info(f"Loading cached density mesh from {cache_path}")
+            return np.load(cache_path)
+
         snapshot_path = self._density_directories[redshift_index]
         snapshots = sorted(snapshot_path.glob("snap_*.hdf5"))
 
@@ -375,7 +416,18 @@ class ThesanLoader(MergerTreeLoader):
                 )
                 del pos
 
-        return mesh / np.mean(mesh, dtype=np.float64) - 1
+        delta = mesh / np.mean(mesh, dtype=np.float64) - 1
+
+        if cache_path is not None:
+            # Atomic write (tmp + rename): concurrent MPI ranks computing the
+            # same snapshot race harmlessly — both produce identical content.
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = cache_path.with_suffix(f".tmp{os.getpid()}.npy")
+            np.save(tmp_path, delta)
+            os.replace(tmp_path, cache_path)
+            self.logger.info(f"Cached density mesh to {cache_path}")
+
+        return delta
 
     def load_rsd_fields(self, redshift_index: int):
         """Return per-axis velocity meshes for redshift-space distortions.
