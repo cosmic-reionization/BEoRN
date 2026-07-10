@@ -31,6 +31,7 @@ def make_parameters():
             f_st_grid_min=0.01,
             f_st_grid_max=0.03,
             f_st_grid_n=3,
+            f_st_paint_distribution="linear",
             energy_cutoff_min_xray=500.0,
             energy_cutoff_max_xray=2000.0,
             halo_mass_min=1e7,

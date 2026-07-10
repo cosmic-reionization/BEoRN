@@ -22,6 +22,7 @@ class DummyHaloCatalog:
     def __init__(self, masses, alpha_vals, selected=None):
         self.masses = np.asarray(masses)
         self.alpha_vals = np.asarray(alpha_vals)
+        self.alphas = self.alpha_vals
         if selected is None:
             self.selected = np.arange(self.masses.size)
         else:
@@ -379,6 +380,49 @@ def test_paint_single_fstar_mixed_mass_bins_paints_all_halos_once(monkeypatch):
     coordinator.paint_single_fstar(0, profiles)
 
     np.testing.assert_array_equal(np.sort(np.asarray(painted_halo_ids)), np.arange(halo_catalog.size))
+
+
+def test_paint_single_fstar_fails_early_for_alpha_specific_mass_gap(monkeypatch):
+    halo_catalog = DummyHaloCatalog(
+        masses=np.array([2.0e8, 2.0e9]),
+        alpha_vals=np.array([0.7, 1.2]),
+    )
+    coordinator = make_coordinator(seed=24680, halo_catalog=halo_catalog)
+    coordinator.parameters.simulation.halo_mass_accretion_alpha = np.array([0.5, 1.0, 1.5])
+    coordinator.parameters.simulation.halo_mass_bin_min = 1.0e8
+    coordinator.parameters.simulation.halo_mass_bin_max = 1.0e10
+
+    profiles = RadiationProfilesFStarGrid(
+        parameters=SimpleNamespace(),
+        z_history=np.array([12.0, 10.0]),
+        halo_mass_bins=np.array(
+            [
+                [[1.0e8, 1.0e8], [1.0e8, 1.0e8]],
+                [[1.0e9, 1.0e9], [5.0e8, 5.0e8]],
+                [[1.0e10, 1.0e10], [1.0e9, 1.0e9]],
+            ]
+        ),
+        f_st_grid=np.array([0.01, 0.05, 0.1, 0.2]),
+        rho_xray=np.ones((3, 2, 2, 4, 2)),
+        rho_heat=np.ones((3, 2, 2, 4, 2)),
+        rho_alpha=np.ones((5, 2, 2, 4, 2)),
+        R_bubble=np.ones((2, 2, 4, 2)),
+        r_lyal=np.logspace(-5, 2, 5),
+        r_grid_cell=np.logspace(-2, 1, 3),
+    )
+
+    paint_calls = {"count": 0}
+
+    def fail_if_called(*args, **kwargs):
+        paint_calls["count"] += 1
+        raise AssertionError("paint_single_mass_bin should not be reached when coverage preflight fails")
+
+    monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fail_if_called)
+
+    with pytest.raises(RuntimeError, match="outside the precomputed mass/alpha coverage"):
+        coordinator.paint_single_fstar(0, profiles)
+
+    assert paint_calls["count"] == 0
 
 
 class DummyLegacyProfiles:
@@ -783,34 +827,54 @@ def test_mpi_paint_single_fstar_cache_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(CoevalCube, "write", _test_cube_write, raising=True)
     monkeypatch.setattr(CoevalCube, "read", _test_cube_read, raising=True)
 
-    if rank == 0:
-        cube = coordinator.paint_single_fstar(0, profiles)
-        assert paint_calls["count"] > 0
-        n_paint_groups = paint_calls["count"]
-        np.testing.assert_allclose(cube.Grid_xHII, float(n_paint_groups) * np.ones((4, 4, 4)))
-        np.testing.assert_allclose(cube.Grid_Temp, 2.0 * float(n_paint_groups) * np.ones((4, 4, 4)))
-        np.testing.assert_allclose(cube.Grid_xal, 3.0 * float(n_paint_groups) / (4 * np.pi) * np.ones((4, 4, 4)))
+    # Each rank-conditional block is wrapped in try/except so that if a rank
+    # fails before a collective operation, comm.Abort() terminates all ranks
+    # immediately instead of leaving the other rank hanging forever.
+    try:
+        if rank == 0:
+            cube = coordinator.paint_single_fstar(0, profiles)
+            assert paint_calls["count"] > 0
+            n_paint_groups = paint_calls["count"]
+            np.testing.assert_allclose(cube.Grid_xHII, float(n_paint_groups) * np.ones((4, 4, 4)))
+            np.testing.assert_allclose(cube.Grid_Temp, 2.0 * float(n_paint_groups) * np.ones((4, 4, 4)))
+            np.testing.assert_allclose(cube.Grid_xal, 3.0 * float(n_paint_groups) / (4 * np.pi) * np.ones((4, 4, 4)))
+    except Exception as exc:
+        print(f"[rank {rank}] Phase-1 assertion failed: {exc}", flush=True)
+        comm.Abort(1)
 
     # Ensure rank 0 finished writing before rank 1 tries to load.
     comm.Barrier()
 
-    if rank == 1:
-        def fail_if_called(*args, **kwargs):
-            raise AssertionError("rank 1 should load painted output from cache without repainting")
+    try:
+        if rank == 1:
+            namespace = coordinator._paint_cache_namespace(profiles)
+            expected_path = (
+                Path(shared_root_str) / namespace
+                / f"CoevalCube_{coordinator.parameters.unique_hash()}_z0.npz"
+            )
+            print(f"[rank {rank}] Looking for cache file: {expected_path}", flush=True)
+            print(f"[rank {rank}] File exists: {expected_path.exists()}", flush=True)
 
-        monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fail_if_called)
-        cube = coordinator.paint_single_fstar(0, profiles)
-        assert paint_calls["count"] == 0
+            def fail_if_called(*args, **kwargs):
+                raise AssertionError("rank 1 should load painted output from cache without repainting")
 
-    namespace_dir = Path(shared_root_str) / coordinator._paint_cache_namespace(profiles)
-    assert namespace_dir.exists()
+            monkeypatch.setattr(PaintingCoordinator, "paint_single_mass_bin", fail_if_called)
+            cube = coordinator.paint_single_fstar(0, profiles)
+            assert paint_calls["count"] == 0
 
-    payload = (
-        float(np.sum(cube.Grid_xHII)),
-        float(np.sum(cube.Grid_Temp)),
-        float(np.sum(cube.Grid_xal)),
-        float(cube.z),
-    )
+        namespace_dir = Path(shared_root_str) / coordinator._paint_cache_namespace(profiles)
+        assert namespace_dir.exists(), f"[rank {rank}] namespace_dir missing: {namespace_dir}"
+
+        payload = (
+            float(np.sum(cube.Grid_xHII)),
+            float(np.sum(cube.Grid_Temp)),
+            float(np.sum(cube.Grid_xal)),
+            float(cube.z),
+        )
+    except Exception as exc:
+        print(f"[rank {rank}] Phase-2 assertion failed: {exc}", flush=True)
+        comm.Abort(1)
+
     gathered = comm.gather(payload, root=0)
     if rank == 0:
         assert len(gathered) == 2

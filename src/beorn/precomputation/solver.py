@@ -116,16 +116,23 @@ class RadiationProfileSolver:
             comm = MPI.COMM_WORLD
             rank = comm.Get_rank()
             if rank == 0:
-                profiles = self.solve()
-                handler.write_file(self.parameters, profiles, cache_namespace=self.profile_cache_namespace())
-                if profiles._file_path is not None:
-                    self.parameters.to_yaml(
-                        profiles._file_path.with_suffix('.yaml'),
-                        exclude_keys=_PROFILES_YAML_EXCLUDE,
+                try:
+                    profiles = self.solve()
+                    handler.write_file(self.parameters, profiles, cache_namespace=self.profile_cache_namespace())
+                    if profiles._file_path is not None:
+                        self.parameters.to_yaml(
+                            profiles._file_path.with_suffix('.yaml'),
+                            exclude_keys=_PROFILES_YAML_EXCLUDE,
+                        )
+                    logger.info(f"Rank {rank} computed profiles and saved them to cache.")
+                    # notify other ranks that computation is done
+                    comm.Barrier()
+                except Exception:
+                    logger.exception(
+                        "Rank 0 failed during profile computation. "
+                        "Calling MPI_Abort to unblock other ranks."
                     )
-                logger.info(f"Rank {rank} computed profiles and saved them to cache.")
-                # notify other ranks that computation is done
-                comm.Barrier()
+                    comm.Abort(1)
             else:
                 # wait for rank 0 to finish computation and saving
                 comm.Barrier()
@@ -264,18 +271,20 @@ class RadiationProfileSolver:
         baryon_density = (Ob * constants.rhoc0) / (constants.m_p_in_Msun * h0)
         # scale factors corresponding to the redshifts
         scale_factors = 1 / (self.z_bins + 1)
-        # b_0(z) - physical baryon density
-        physical_baryon_density = baryon_density / scale_factors** 3
         # clumping factor
         clumping_factor = self.parameters.solver.clumping
 
-        nb0_interp  = interp1d(scale_factors, physical_baryon_density, fill_value = 'extrapolate')
+        # physical_baryon_density = baryon_density / a**3 is an exact analytic
+        # formula; computing it via interp1d of pre-tabulated values introduces
+        # numerical fragility for large baryon_density values (~2e67 in code
+        # units) and can return NaN at the boundary in some environments.
+        # We therefore compute it analytically inside volume_derivative.
         Ngam_interp = interp1d(scale_factors, Ngam_dot, axis = -1, fill_value = 'extrapolate')
 
         def volume_derivative(a, volume):
             z = 1 / a - 1
             photon_number = Ngam_interp(a)
-            baryon_number = nb0_interp(a)
+            baryon_number = baryon_density / a ** 3   # physical baryon number density
             # logger.debug(f"{photon_number.shape=}, {volume.shape=}")
             volume = volume.reshape(photon_number.shape)
             return km_per_Mpc / (hubble(z, self.parameters) * a) * (photon_number / baryon_density - alpha_HII(1e4) * clumping_factor / cm_per_Mpc ** 3 * h0 ** 3 * baryon_number * volume).flatten()  # eq 65 from barkana and loeb
@@ -296,13 +305,76 @@ class RadiationProfileSolver:
             rtol = rtol,
             atol = atol,
         )
-        if not sol.success:
+        if not sol.success or not isinstance(sol.y, np.ndarray):
+            mass_centers = self.parameters.solver.halo_mass_bin_centers
+            alpha_centers = self.parameters.solver.halo_mass_accretion_alpha_bin_centers
+
+            # ── component-level diagnostics at t0 ──────────────────────────
+            a0 = scale_factors[0]
+            z0 = self.z_bins[0]
+            photon0   = Ngam_interp(a0)       # (mass, alpha) at first scale factor
+            baryonN0  = baryon_density / a0 ** 3
+            H0_val    = hubble(float(z0), self.parameters)
+            prefactor = km_per_Mpc / (H0_val * a0)
+
+            # locate bins where any component is non-finite
+            phot_bad  = ~np.isfinite(photon0)   # shape (mass, alpha)
+            Ngam_nan_zslices = ~np.isfinite(Ngam_dot)  # shape (mass, alpha, z)
+            Ngam_nan_any = Ngam_nan_zslices.any(axis=-1)  # (mass, alpha)
+
+            diag_lines = [
+                f"  scale_factors monotone-increasing:  {bool(np.all(np.diff(scale_factors) > 0))}",
+                f"  scale_factors finite:               {bool(np.all(np.isfinite(scale_factors)))}",
+                f"  hubble(z={z0:.3f}):                 {H0_val:.4e}",
+                f"  prefactor km_per_Mpc/(H*a):         {prefactor:.4e}",
+                f"  baryon_density (comoving):          {baryon_density:.4e}",
+                f"  baryon_density/a0^3 (physical):     {baryonN0:.4e}",
+                f"  Ngam_dot all-finite:                {bool(np.isfinite(Ngam_dot).all())}",
+                f"  Ngam_interp(a0) all-finite:         {bool(np.isfinite(photon0).all())}",
+                f"  # bins where Ngam_interp(a0) is NaN:        {int(phot_bad.sum())}",
+                f"  # bins where Ngam_dot has ANY NaN z-slice:  {int(Ngam_nan_any.sum())}",
+            ]
+
+            # detail for first few bad bins
+            bad_indices = list(zip(*np.where(phot_bad | Ngam_nan_any)))[:8]
+            for mi, ai in bad_indices:
+                ngam_z = Ngam_dot[mi, ai, :]
+                nan_zidx = np.where(~np.isfinite(ngam_z))[0]
+                diag_lines.append(
+                    f"  BAD bin mass={mass_centers[mi]:.3e}  alpha={alpha_centers[ai]:.4f}  "
+                    f"Ngam_interp(a0)={photon0[mi, ai]:.3e}  "
+                    f"Ngam_dot[0]={ngam_z[0]:.3e}  "
+                    f"Ngam_dot NaN at z-idx={nan_zidx.tolist()}  "
+                    f"Ngam_dot range=[{ngam_z[np.isfinite(ngam_z)].min() if np.isfinite(ngam_z).any() else float('nan'):.3e}, "
+                    f"{ngam_z[np.isfinite(ngam_z)].max() if np.isfinite(ngam_z).any() else float('nan'):.3e}]"
+                )
+
             logger.warning(
-                "R_bubble ODE did not converge (rtol=%g, atol=%g): %s. "
-                "Results may be inaccurate — tighten ode_rtol/ode_atol or check inputs.",
-                rtol, atol, sol.message,
+                "R_bubble: ODE solver failed (status=%s, nfev=%s): %s  "
+                "Retrying with LSODA.\nDiagnostics:\n%s",
+                sol.status, getattr(sol, 'nfev', '?'), sol.message,
+                '\n'.join(diag_lines),
+            )
+            sol = solve_ivp(
+                volume_derivative,
+                t_span = [scale_factors[0], scale_factors[-1]],
+                y0 = v0.flatten(),
+                t_eval = scale_factors,
+                method = 'LSODA',
+            )
+        if not sol.success or not isinstance(sol.y, np.ndarray):
+            raise RuntimeError(
+                f"R_bubble ODE solver failed with both RK45 and LSODA "
+                f"(status={sol.status}, nfev={getattr(sol, 'nfev', '?')}): {sol.message}"
             )
         bubble_volume = sol.y
+        if not np.isfinite(bubble_volume).all():
+            nan_count = (~np.isfinite(bubble_volume)).sum()
+            raise RuntimeError(
+                f"R_bubble: ODE solver ({sol.status=}) returned {nan_count} "
+                f"non-finite values despite reporting success. "
+                f"Check the diagnostic WARNING above for the NaN source."
+            )
         bubble_volume.clip(min = 0, out = bubble_volume)
 
         # since solve_ivp works with 1d arrays we have a flattened version currently, where the last axis is the "time"
@@ -549,15 +621,27 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
 
     def _build_f_st_grid(self) -> np.ndarray:
         source = self.parameters.source
-        f_st_min = getattr(source, 'f_st_grid_min', 0.01)
-        f_st_max = getattr(source, 'f_st_grid_max', 0.2)
-        f_st_n = getattr(source, 'f_st_grid_n', 30)
+        distribution = getattr(source, "f_st_paint_distribution", "lognormal").lower()
+        f_st_center = float(source.f_st)
+        f_st_min = float(getattr(source, 'f_st_grid_min', 0.01))
+        f_st_max = float(getattr(source, 'f_st_grid_max', 1.0))
+        f_st_n = int(getattr(source, 'f_st_grid_n', 31))
         if f_st_n < 2:
             raise ValueError("f_st_grid_n must be at least 2")
         if f_st_min <= 0 or f_st_max <= 0:
             raise ValueError("f_st grid values must be strictly positive")
+        if f_st_max > 1.0:
+            raise ValueError(f"f_st_grid_max={f_st_max} exceeds 1.0, which is unphysical for a stellar fraction")
         if f_st_min >= f_st_max:
             raise ValueError("f_st_grid_min must be smaller than f_st_grid_max")
+        if distribution == "lognormal":
+            k_star = (f_st_n - 1) // 2
+            dlog = (np.log10(f_st_max) - np.log10(f_st_center)) / (f_st_n - 1 - k_star)
+            log_min = np.log10(f_st_center) - k_star * dlog
+            f_st_min = 10**log_min
+            logger.info(f"Redefine f_st_min to {f_st_min:.4f}")
+            logger.info("Return f_st_grid in log space")
+            return np.logspace(np.log10(f_st_min), np.log10(f_st_max), f_st_n, base=10)
         return np.linspace(f_st_min, f_st_max, f_st_n)
 
     def _parameters_with_f_st(self, f_st: float) -> Parameters:
