@@ -34,7 +34,14 @@ from .lpt import (
     ThirdOrderLPT,
 )
 from .backends import LPTBackend, NumpyBackend, TorchBackend, JaxBackend, get_backend
-from .chmf import CHMF, CHMFSampler, conditional_dndlnm_diff
+from .chmf import CHMF, CHMFSampler, conditional_dndlnm_diff, halo_field_diff
+from .differentiable import (
+    lpt_ics,
+    lpt_displacement,
+    lpt_velocity,
+    lpt_linear_density,
+    lpt_density,
+)
 
 __all__ = [
     # power spectrum
@@ -63,4 +70,11 @@ __all__ = [
     'CHMF',
     'CHMFSampler',
     'conditional_dndlnm_diff',
+    'halo_field_diff',
+    # differentiable LPT pipeline (numpy/jax/torch, device-resident)
+    'lpt_ics',
+    'lpt_displacement',
+    'lpt_velocity',
+    'lpt_linear_density',
+    'lpt_density',
 ]

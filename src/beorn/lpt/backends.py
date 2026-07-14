@@ -74,6 +74,14 @@ class LPTBackend(ABC):
         """Element-wise selection: *x* where *condition* else *y*."""
         ...
 
+    def sin(self, x):
+        """Element-wise sine (numpy fallback; overridden on device backends)."""
+        return np.sin(x)
+
+    def cos(self, x):
+        """Element-wise cosine (numpy fallback; overridden on device backends)."""
+        return np.cos(x)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NumPy backend  (multi-core via scipy.fft)
@@ -195,6 +203,12 @@ class TorchBackend(LPTBackend):
                                     device=self.device)
         return t.where(condition, x, y)
 
+    def sin(self, x):
+        return self._t.sin(x)
+
+    def cos(self, x):
+        return self._t.cos(x)
+
     def rfftn(self, x):
         return self._t.fft.rfftn(self.as_array(x))
 
@@ -232,6 +246,18 @@ class JaxBackend(LPTBackend):
                 "JAX is required for backend='jax'. "
                 "Install with: pip install jax"
             )
+        # V6 (issue #42): never run float32 silently — jax defaults to
+        # float32 unless x64 is enabled, unlike the numpy/torch-CUDA paths.
+        if not jax.config.jax_enable_x64:
+            import warnings
+            warnings.warn(
+                "JAX x64 mode is disabled — the jax LPT backend will compute "
+                "in float32 (results differ from the float64 numpy default "
+                "at the ~1e-6 level). Enable float64 with "
+                "jax.config.update('jax_enable_x64', True) before creating "
+                "arrays, or ignore this warning to commit to float32.",
+                stacklevel=3,
+            )
 
     def as_array(self, x, dtype=None):
         return self._jnp.asarray(x, dtype=dtype)
@@ -241,6 +267,12 @@ class JaxBackend(LPTBackend):
 
     def where(self, condition, x, y):
         return self._jnp.where(condition, x, y)
+
+    def sin(self, x):
+        return self._jnp.sin(x)
+
+    def cos(self, x):
+        return self._jnp.cos(x)
 
     def rfftn(self, x):
         return self._jnp.fft.rfftn(self.as_array(x))

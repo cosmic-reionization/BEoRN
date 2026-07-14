@@ -136,3 +136,72 @@ def map_particles_to_mesh(
     elif backend == 'jax':
         from .jax_backend import map_particles_to_mesh as _fn
         _fn(mesh, box_size, particle_positions, mass_assignment, weights=weights)
+
+
+def _infer_functional_backend(particle_positions) -> str:
+    """Backend name from the array type: torch tensor → 'torch', jax array →
+    'jax', anything else → 'numpy'."""
+    mod = type(particle_positions).__module__
+    if mod.startswith('torch'):
+        return 'torch'
+    if mod.startswith('jax'):
+        return 'jax'
+    return 'numpy'
+
+
+def cic_paint(
+    particle_positions,
+    weights,
+    N: int,
+    box_size: float,
+    mass_assignment: str = 'CIC',
+    backend: str = 'auto',
+):
+    """Functional particle-to-mesh painting: ``mesh = cic_paint(pos, w, N, L)``.
+
+    The functional paint contract (issue #42, G4): returns the painted mesh
+    as an array of the same family as the input positions — a jax array or a
+    torch tensor stays on its device with the autograd graph intact (no numpy
+    round-trip); numpy input returns a float32 numpy mesh.  The in-place
+    :func:`map_particles_to_mesh` API is unchanged.
+
+    Args:
+        particle_positions: (n_parts, 3) array/tensor in box units.
+        weights:   Per-particle weights, shape (n_parts,), or ``None`` → 1.
+        N:         Mesh cells per side.
+        box_size:  Box side length (same units as positions).
+        mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
+        backend:   ``'auto'`` (default — inferred from the input type),
+                   ``'numpy'``, ``'numba'``, ``'torch'``, or ``'jax'``.
+
+    Returns:
+        Mesh of shape (N, N, N): jax array / torch tensor (device-resident,
+        differentiable) or numpy float32 array.
+    """
+    if backend == 'auto':
+        backend = _infer_functional_backend(particle_positions)
+
+    if backend == 'jax':
+        from .jax_backend import paint_mesh_jax
+        return paint_mesh_jax(particle_positions, N, box_size,
+                              mass_assignment=mass_assignment, weights=weights)
+
+    if backend == 'torch':
+        from .torch_backend import paint_mesh_torch
+        return paint_mesh_torch(particle_positions, N, box_size,
+                                mass_assignment=mass_assignment,
+                                weights=weights)
+
+    if backend in ('numpy', 'numba', 'pylians'):
+        mesh = np.zeros((N, N, N), dtype=np.float32)
+        map_particles_to_mesh(
+            mesh, box_size,
+            np.asarray(particle_positions, dtype=np.float32),
+            mass_assignment=mass_assignment, backend=backend,
+            weights=None if weights is None else np.asarray(weights),
+        )
+        return mesh
+
+    raise ValueError(
+        f"Unknown backend {backend!r}. Choose from {_VALID_BACKENDS}."
+    )

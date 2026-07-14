@@ -570,3 +570,129 @@ def conditional_dndlnm_diff(
         raise ValueError(f"Unknown hmf_model {hmf_model!r}. Choose 'PS' or 'ST'.")
 
     return result
+
+
+def halo_field_diff(
+    delta_env,
+    M_env,
+    z,
+    Om, Ob, h0, ns, sigma_8,
+    *,
+    cell_volume,
+    M_min,
+    M_max=None,
+    n_mass_bins=40,
+    weights='mass',
+    eps=None,
+    delta_c=1.686,
+    backend='numpy',
+    n_k=1000,
+    n_nodes=512,
+    hmf_model='PS',
+):
+    """Differentiable halo field via expected-number painting (issue #42, G6).
+
+    Builds the per-cell, per-mass-bin Poisson intensity
+    ``lam_b = dn/dlnM(M_b | delta_env) * dlnM_b * V_cell`` from
+    :func:`conditional_dndlnm_diff` and returns the halo-count-linear field
+
+        field = sum_b w(M_b) * n_b,
+        n_b   = lam_b                          (eps is None — exact expectation)
+        n_b   = lam_b + sqrt(lam_b) * eps_b    (reparameterised shot noise)
+
+    The expectation mode is exact (the EPS mean is the Poisson mean) and
+    smooth in every argument; the stochastic mode adds Gaussian shot noise
+    with the correct Poisson variance while keeping the noise ``eps`` outside
+    the graph (reparameterisation trick), so both modes are differentiable
+    w.r.t. the cosmology, ``delta_c`` **and the conditioning field itself**.
+    The discrete :meth:`CHMFSampler.sample` catalog remains the default for
+    mocks and validation.
+
+    Mass bins are log-spaced with geometric-mean centres, mirroring
+    :meth:`CHMFSampler._mass_bins` (M_max is capped at 0.999 M_env).
+
+    Args:
+        delta_env:  Linear conditioning overdensity — any shape, any backend
+                    array (see :meth:`CHMFSampler.sample` for why it must be
+                    the linear field smoothed on M_env).
+        M_env:      Environmental mass in M_sun (scalar).
+        z:          Redshift.
+        Om, Ob, h0, ns, sigma_8: cosmological parameters (scalars or 0-dim
+                    tensors carrying gradients).
+        cell_volume: Cell volume in (Mpc/h)^3, i.e. (Lbox/Ncell)^3.
+        M_min:      Minimum halo mass in M_sun.
+        M_max:      Maximum halo mass in M_sun (default: 0.999 M_env).
+        n_mass_bins: Number of log-spaced mass bins.
+        weights:    ``'counts'`` (w = 1, halo number field), ``'mass'``
+                    (w = M_b in M_sun, halo mass field; default), or an array
+                    of length ``n_mass_bins``.
+        eps:        Optional static noise, shape ``(n_mass_bins,) +
+                    delta_env.shape`` — draw once outside the graph, e.g.
+                    ``rng.standard_normal((n_mass_bins,) + delta.shape)``.
+        delta_c:    Linear collapse threshold.
+        backend:    ``'numpy'`` (default), ``'jax'`` or ``'torch'``.
+        hmf_model:  ``'PS'`` (default) or ``'ST'`` (Barkana & Loeb 2004
+                    hybrid), as in :func:`conditional_dndlnm_diff`.
+
+    Returns:
+        (field, M_centers) — the weighted halo field (backend array, shape of
+        ``delta_env``) and the static bin-centre masses (numpy, M_sun).
+    """
+    from ..cosmo.differentiable import get_backend, device_of, as_array, as_const
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, delta_env, Om, Ob, h0, ns, sigma_8)
+    delta_env = as_array(delta_env, name, xp, device)
+
+    M_hi = 0.999 * M_env if M_max is None else min(M_max, 0.999 * M_env)
+    if M_hi <= M_min:
+        raise ValueError(
+            f"M_env = {M_env:.2e} Msun leaves no mass range above "
+            f"M_min = {M_min:.2e} Msun.")
+    M_edges = np.logspace(np.log10(M_min), np.log10(M_hi), n_mass_bins + 1)
+    M_centers = np.sqrt(M_edges[:-1] * M_edges[1:])
+    dln_M = np.diff(np.log(M_edges))
+
+    if isinstance(weights, str):
+        if weights == 'counts':
+            w_bins = np.ones(n_mass_bins)
+        elif weights == 'mass':
+            w_bins = M_centers
+        else:
+            raise ValueError(
+                f"weights must be 'counts', 'mass' or an array; got {weights!r}")
+    else:
+        w_bins = np.asarray(weights, dtype=float)
+        if w_bins.shape != (n_mass_bins,):
+            raise ValueError(
+                f"weights array must have shape ({n_mass_bins},); "
+                f"got {w_bins.shape}")
+
+    if eps is not None:
+        eps = np.asarray(eps) if not hasattr(eps, 'shape') else eps
+        expected = (n_mass_bins,) + tuple(delta_env.shape)
+        if tuple(eps.shape) != expected:
+            raise ValueError(
+                f"eps must have shape {expected}; got {tuple(eps.shape)}")
+
+    field = xp.zeros_like(delta_env)
+    for i_M, M in enumerate(M_centers):
+        lam = conditional_dndlnm_diff(
+            float(M), delta_env, M_env, z, Om, Ob, h0, ns, sigma_8,
+            delta_c=delta_c, backend=backend, n_k=n_k, n_nodes=n_nodes,
+            hmf_model=hmf_model,
+        ) * (dln_M[i_M] * cell_volume)
+
+        n_b = lam
+        if eps is not None:
+            eps_b = as_const(np.asarray(eps[i_M]), name, xp, device) \
+                if not (name == 'torch' and xp.is_tensor(eps)) else eps[i_M]
+            # safe sqrt: gradient-friendly at lam = 0
+            lam_pos = lam > 0
+            lam_safe = xp.where(lam_pos, lam, xp.ones_like(lam))
+            n_b = lam + xp.where(lam_pos, xp.sqrt(lam_safe),
+                                 xp.zeros_like(lam)) * eps_b
+
+        field = field + float(w_bins[i_M]) * n_b
+
+    return field, M_centers

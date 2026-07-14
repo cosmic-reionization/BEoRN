@@ -64,7 +64,7 @@ from abc import ABC
 import numpy as np
 
 from ..cosmo import D, hubble
-from .backends import get_backend, LPTBackend
+from .backends import get_backend, LPTBackend, NumpyBackend
 from .linear_power import PowerSpectrum, get_power_spectrum
 
 
@@ -502,6 +502,26 @@ class LPTBase(ABC):
         """
         N, L = self.N, self.L
         D1 = self._D1(z)
+
+        # Non-numpy backends: FFT on the device using the cached δ(k) and
+        # broadcastable k-grids; one host transfer at output time (G3).
+        # The numpy default keeps the legacy np.fft path byte-identical.
+        if not isinstance(self._backend, NumpyBackend):
+            b = self._backend
+            dkz = D1 * self._dk_backend()
+            if R_tophat is not None:
+                kx, ky, kz, _ = self._setup_k_backend()
+                k2 = kx ** 2 + ky ** 2 + kz ** 2
+                kR = b.where(k2 > 0, k2, 1.0) ** 0.5 * R_tophat
+                W = b.where(
+                    kR < 1e-3,
+                    1.0 - kR ** 2 / 10.0 + kR ** 4 / 280.0,
+                    3.0 * (b.sin(kR) - kR * b.cos(kR)) / kR ** 3,
+                )
+                W = b.where(k2 > 0, W, 1.0)  # preserve the DC (mean = 0) mode
+                dkz = dkz * W
+            return b.to_numpy(b.irfftn(dkz, (N, N, N))).astype(np.float32)
+
         kx, ky, kz, k2 = _kvectors(N, L)
 
         delta_kz = D1 * self.delta_k  # (N, N, N//2+1) complex
