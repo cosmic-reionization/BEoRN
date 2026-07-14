@@ -20,7 +20,7 @@ from beorn.lpt import (
     lpt_ics, lpt_displacement, lpt_velocity, lpt_linear_density, lpt_density,
     CHMF, CHMFSampler, halo_field_diff,
 )
-from beorn.particle_mapping import cic_paint
+from beorn.particle_mapping import paint_mesh
 
 jax = pytest.importorskip('jax', reason='differentiable pipeline tests need jax')
 import jax.numpy as jnp  # noqa: E402
@@ -121,20 +121,20 @@ def test_class_linear_density_backend_path(param):
 # G4 — functional paint contract
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_cic_paint_backends_agree():
+def test_paint_mesh_backends_agree():
     pos = (np.random.default_rng(2).random((500, 3)) * L).astype(np.float32)
     w = np.random.default_rng(3).random(500).astype(np.float32)
 
-    ref = cic_paint(pos, w, N, L, backend='numpy')
+    ref = paint_mesh(pos, w, N, L, backend='numpy')
     assert isinstance(ref, np.ndarray)
     assert ref.sum() == pytest.approx(w.sum(), rel=1e-5)
 
-    mj = cic_paint(jnp.asarray(pos), jnp.asarray(w), N, L)  # auto → jax
+    mj = paint_mesh(jnp.asarray(pos), jnp.asarray(w), N, L)  # auto → jax
     assert not isinstance(mj, np.ndarray)
     np.testing.assert_allclose(np.asarray(mj), ref, atol=1e-4)
 
     if _TORCH:
-        mt = cic_paint(torch.as_tensor(pos), torch.as_tensor(w), N, L)
+        mt = paint_mesh(torch.as_tensor(pos), torch.as_tensor(w), N, L)
         assert isinstance(mt, torch.Tensor)
         np.testing.assert_allclose(mt.numpy(), ref, atol=1e-4)
 
@@ -143,7 +143,7 @@ def test_cic_paint_backends_agree():
 def test_paint_mesh_torch_gradients():
     pos = torch.rand(200, 3, dtype=torch.float64) * L
     pos.requires_grad_(True)
-    mesh = cic_paint(pos, None, N, L)
+    mesh = paint_mesh(pos, None, N, L)
     (mesh ** 2).sum().backward()
     assert pos.grad is not None and torch.isfinite(pos.grad).all()
 

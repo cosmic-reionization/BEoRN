@@ -14,7 +14,7 @@ path.  The chain mirrors the classes stage by stage::
            ├─ lpt_displacement(δk, L, z, Om)   Ψ (1LPT / 2LPT)
            ├─ lpt_velocity(δk, L, z, Om)       v in km/s
            ├─ lpt_linear_density(δk, L, z, Om) IRFFT[D₁ W(kR) δ(k)]
-           └─ lpt_density(δk, L, z, Om)        Ψ → positions → cic_paint → δ(x)
+           └─ lpt_density(δk, L, z, Om)        Ψ → positions → paint_mesh → δ(x)
 
 θ = (Om, Ob, h0, ns, sigma_8).  Random noise is an explicit *input* so the
 stochasticity stays out of the differentiated graph (reparameterisation).
@@ -317,7 +317,7 @@ def lpt_density(delta_k, L, z, Om, backend='numpy', order=1,
     """Matter overdensity δ(x) via displacement + differentiable painting.
 
     Counterpart of :meth:`LPTBase.get_density`: displaces a uniform particle
-    grid by Ψ(z) and paints with :func:`beorn.particle_mapping.cic_paint`
+    grid by Ψ(z) and paints with :func:`beorn.particle_mapping.paint_mesh`
     (functional, device-resident — G4), so gradients flow from the painted
     field back through the particle positions to the cosmology.
 
@@ -326,7 +326,7 @@ def lpt_density(delta_k, L, z, Om, backend='numpy', order=1,
     Returns:
         delta — backend array of shape (N, N, N), mean-zero overdensity.
     """
-    from ..particle_mapping import cic_paint
+    from ..particle_mapping import paint_mesh
 
     name, xp = get_backend(backend)
     device = device_of(name, xp, delta_k, Om)
@@ -350,6 +350,6 @@ def lpt_density(delta_k, L, z, Om, backend='numpy', order=1,
         positions = xp.stack(
             [x.reshape(-1), y.reshape(-1), z_pos.reshape(-1)], axis=-1)
 
-    mesh = cic_paint(positions, None, N, L,
+    mesh = paint_mesh(positions, None, N, L,
                      mass_assignment=mass_assignment, backend=name)
     return mesh / mesh.mean() - 1.0

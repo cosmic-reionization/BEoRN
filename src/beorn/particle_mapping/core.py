@@ -149,7 +149,7 @@ def _infer_functional_backend(particle_positions) -> str:
     return 'numpy'
 
 
-def cic_paint(
+def paint_mesh(
     particle_positions,
     weights,
     N: int,
@@ -157,7 +157,7 @@ def cic_paint(
     mass_assignment: str = 'CIC',
     backend: str = 'auto',
 ):
-    """Functional particle-to-mesh painting: ``mesh = cic_paint(pos, w, N, L)``.
+    """Functional particle-to-mesh painting: ``mesh = paint_mesh(pos, w, N, L)``.
 
     The functional paint contract (issue #42, G4): returns the painted mesh
     as an array of the same family as the input positions — a jax array or a
