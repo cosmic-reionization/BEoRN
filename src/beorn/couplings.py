@@ -133,3 +133,107 @@ def eps_lyal(nu, parameters: Parameters):
     eps_alpha = Inu(nu)*N_al/(m_p_in_Msun * h0)
 
     return eps_alpha
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Differentiable counterparts (issue #42, Phase 2: G9) — numpy / jax / torch
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Pure functions of explicit arguments; they complement (never replace) the
+# numpy functions above.  The kappa(T) spin-de-excitation tables stay fixed
+# numpy constants; the differentiable path interpolates them *linearly* in the
+# backend (splev above is a cubic spline — the two agree to <~1e-3 relative,
+# limited by table density).
+
+def _interp_clamped(x, xp_nodes, fp_nodes, name, xp):
+    """Linear interpolation with boundary clamping (splev ext=3 behaviour).
+
+    ``xp_nodes``/``fp_nodes`` are static numpy tables; ``x`` may carry grads.
+    """
+    if name == 'torch':
+        device = x.device if xp.is_tensor(x) else None
+        xn = xp.as_tensor(np.asarray(xp_nodes, dtype=float), device=device)
+        fn = xp.as_tensor(np.asarray(fp_nodes, dtype=float), device=device)
+        if xn.dtype != x.dtype:
+            xn = xn.to(x.dtype)
+            fn = fn.to(x.dtype)
+        xq = xp.clamp(x, xn[0], xn[-1])
+        idx = xp.searchsorted(xn, xq.reshape(-1).contiguous(), right=True)
+        idx = xp.clamp(idx, 1, len(xn) - 1)
+        x0, x1 = xn[idx - 1], xn[idx]
+        f0, f1 = fn[idx - 1], fn[idx]
+        w = (xq.reshape(-1) - x0) / (x1 - x0)
+        return (f0 + w * (f1 - f0)).reshape(x.shape)
+    if name == 'jax':
+        return xp.interp(x, xp.asarray(xp_nodes), xp.asarray(fp_nodes))
+    return np.interp(x, xp_nodes, fp_nodes)
+
+
+def x_coll_diff(z, Tk, xHI, rho_b, backend='numpy'):
+    """Collisional coupling x_coll — differentiable counterpart of :func:`x_coll`.
+
+    Same physics; kappa_HH/kappa_eH come from linear backend interpolation of
+    the fixed tables (vs cubic splev in the numpy original — agreement ~1e-3).
+    Differentiable w.r.t. Tk, xHI and rho_b.
+
+    Args:
+        z:       Redshift (static float).
+        Tk:      Gas kinetic temperature [K] (backend array, may carry grads).
+        xHI:     Neutral fraction (backend array).
+        rho_b:   Baryon density [H atoms / pcm^3] (backend array or scalar).
+        backend: 'numpy' (default), 'jax' or 'torch'.
+    """
+    from .cosmo.differentiable import get_backend
+    name, xp = get_backend(backend)
+
+    n_HI = rho_b * xHI
+    n_HII = rho_b * (1 - xHI)
+    prefac = Tstar / A10 / T_cmb(z)
+
+    # log-log interpolation: kappa(T) spans many decades and is close to a
+    # power law between nodes, so linear-in-log agrees with the cubic spline
+    # of the numpy path far better than linear-in-linear.
+    logT = xp.log(Tk)
+    kappa_eH = xp.exp(_interp_clamped(
+        logT, np.log(_kappa_eH_raw['T']), np.log(_kappa_eH_raw['kappa']),
+        name, xp))
+    kappa_HH = xp.exp(_interp_clamped(
+        logT, np.log(_kappa_HH_raw['T']), np.log(_kappa_HH_raw['kappa']),
+        name, xp))
+    return prefac * (kappa_HH * n_HI + kappa_eH * n_HII)
+
+
+def s_alpha_diff(z, Tk, xHI, backend='numpy'):
+    """Lyman-alpha suppression S_alpha — differentiable counterpart of
+    :func:`S_alpha` (identical formula, backend exp/power ops).
+
+    The cube root is where-guarded: d(x^{1/3})/dx diverges at x = 0, so fully
+    ionized cells (xHI = 0) would inject NaNs into the backward pass.
+    """
+    from .cosmo.differentiable import get_backend
+    _, xp = get_backend(backend)
+    tau_GP = 3.0e5 * xHI * ((1 + z) / 7.0) ** 1.5
+    pos = tau_GP > 0
+    tau_safe = xp.where(pos, tau_GP, xp.ones_like(tau_GP))
+    cbrt = xp.where(pos, (1e-6 * tau_safe) ** (1.0 / 3.0),
+                    xp.zeros_like(tau_safe))
+    return xp.exp(-0.803 * Tk ** (-2.0 / 3.0) * cbrt)
+
+
+def dtb_diff(z, Tk, x_tot, delta_b, xHII, factor, backend='numpy'):
+    """Brightness temperature dTb [mK] — differentiable counterpart of
+    :meth:`GridDerivedPropertiesMixin._compute_dTb` (identical algebra).
+
+    Args:
+        z:       Redshift (static float).
+        Tk:      Kinetic temperature grid [K].
+        x_tot:   Total coupling x_alpha + x_coll.
+        delta_b: Baryon overdensity grid.
+        xHII:    Ionized fraction grid.
+        factor:  ``beorn.cosmo.dTb_factor(parameters)`` — static scalar.
+        backend: Accepted for API symmetry; the expression is pure broadcast
+                 algebra, so it works on any backend array unchanged.
+    """
+    del backend
+    return (factor * np.sqrt(1 + z) * (1 - T_cmb(z) / Tk)
+            * (1 - xHII) * x_tot / (1 + x_tot) * (1 + delta_b))

@@ -1,4 +1,5 @@
 .ipynb_checkpoints*
 cache/
 output/
+output_gpu
 input/

@@ -116,7 +116,9 @@ def ifft_field(fa_accum, shape: tuple, backend: str = 'numpy', workers: int = 1)
         return _irfftn(fa_accum, s=shape, workers=workers).real
     if backend == 'jax':
         import jax.numpy as jnp
-        return np.asarray(jnp.fft.irfftn(fa_accum, s=shape).real)
+        # np.array (not asarray): jax device buffers view as READ-ONLY numpy
+        # arrays, and callers mutate the result (+=, boolean assignment).
+        return np.array(jnp.fft.irfftn(fa_accum, s=shape).real)
     if backend == 'torch':
         import torch
         return torch.fft.irfftn(fa_accum, s=shape).real.cpu().numpy()
@@ -200,7 +202,7 @@ def fft_convolve_periodic(
     if backend == 'jax':
         import jax.numpy as jnp
         fk = jnp.fft.rfftn(jnp.asarray(np.fft.ifftshift(kernel)))
-        return np.asarray(jnp.fft.irfftn(fa * fk, s=shape).real)
+        return np.array(jnp.fft.irfftn(fa * fk, s=shape).real)  # writable copy
     if backend == 'torch':
         import torch
         kt = torch.as_tensor(np.fft.ifftshift(kernel).astype(np.float32), device=fa.device)

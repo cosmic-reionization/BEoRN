@@ -1,0 +1,59 @@
+# Parameter file for lpt_native_21cm.py, loaded via beorn.structs.Parameters.from_yaml.
+#
+# Only sections/fields listed here override beorn.structs.Parameters()'s
+# defaults - any field omitted from a section (or a whole section omitted)
+# keeps its default value. Values below reproduce the setup used in
+# ../lpt_native_21cm.ipynb.
+
+simulation:
+  cores: 4
+  Lbox: 100        # comoving Mpc/h
+  Ncell: 128
+
+cosmo_sim:
+  random_seed: 12345
+  snapshot_redshifts: [20.0, 19.5, 19.0, 18.5, 18.0, 17.5, 17.0, 16.5, 16.0,
+                       15.5, 15.0, 14.5, 14.0, 13.5, 13.0, 12.5, 12.0, 11.5,
+                       11.0, 10.5, 10.0, 9.5, 9.0, 8.5, 8.0, 7.5, 7.0, 6.5,
+                       6.0, 5.5]
+
+solver:
+  redshifts: [20.00, 19.75, 19.50, 19.25, 19.00, 18.75, 18.50, 18.25, 18.00,
+              17.75, 17.50, 17.25, 17.00, 16.75, 16.50, 16.25, 16.00, 15.75,
+              15.50, 15.25, 15.00, 14.75, 14.50, 14.25, 14.00, 13.75, 13.50,
+              13.25, 13.00, 12.75, 12.50, 12.25, 12.00, 11.75, 11.50, 11.25,
+              11.00, 10.75, 10.50, 10.25, 10.00,  9.75,  9.50,  9.25,  9.00,
+               8.75,  8.50,  8.25,  8.00,  7.75,  7.50,  7.25,  7.00,  6.75,
+               6.50,  6.25,  6.00,  5.75,  5.50]
+  halo_mass_bin_min: 1.0e+7
+  halo_mass_bin_max: 1.0e+15
+  halo_mass_nbin: 40
+  halo_mass_accretion_alpha: [0.785, 0.795]
+  z_source_start: 35.0
+
+cosmology:
+  Om: 0.315
+  Ob: 0.049
+  Ol: 0.685
+  h0: 0.673
+
+source:
+  energy_cutoff_min_xray: 500
+  energy_cutoff_max_xray: 10000
+  energy_min_sed_xray: 200
+  energy_max_sed_xray: 10000
+  alS_xray: 1.5
+  xray_normalisation: 1.02e+40   # 0.3 * 3.4e40
+  n_lyman_alpha_photons: 9690
+  lyman_alpha_power_law: 0.0
+  Nion: 2000
+  f0_esc: 0.2
+  pl_esc: 0.5
+  f_st: 0.2
+  g1: 0.49
+  g2: -0.61
+  g3: 4
+  g4: -4
+  Mp: 1.0768e+11   # 1.6e11 * cosmology.h0
+  Mt: 1.0e+9
+  halo_mass_min: 1.0e+8
