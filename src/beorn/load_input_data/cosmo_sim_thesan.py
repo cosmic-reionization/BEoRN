@@ -16,6 +16,8 @@ See https://thesan-project.com for data format documentation.
 """
 from __future__ import annotations
 
+import os
+from dataclasses import dataclass
 from pathlib import Path
 
 import h5py
@@ -23,6 +25,81 @@ import numpy as np
 
 from .merger_tree_base import MergerTreeLoader
 from ..particle_mapping import map_particles_to_mesh
+
+
+@dataclass
+class SubboxConfig:
+    """Defines a cubic subregion of the periodic simulation box to paint.
+
+    The painted volume is the *target* subbox expanded by a buffer on every
+    side.  Including the buffer halos in the FFT convolution prevents the
+    periodic wrap artefact from contaminating the edges of the target region:
+    sources just outside the target still illuminate its boundary correctly.
+    Discard the outer ``buffer`` Mpc/h of each face from the output grids to
+    recover the target subbox.
+
+    All quantities are in comoving Mpc/h, matching the units used inside
+    :class:`ThesanLoader` after unit conversion.
+
+    Args:
+        origin: Lower corner of the *target* subbox (before buffer), shape (3,).
+        size:   Side length of the cubic target subbox [Mpc/h].
+        buffer: Width of the buffer region added to every face [Mpc/h].
+        lbox_full: Side length of the parent periodic box [Mpc/h].
+    """
+    origin: np.ndarray   # (3,) lower corner of target, Mpc/h
+    size: float          # target side length, Mpc/h
+    buffer: float        # buffer width on each face, Mpc/h
+    lbox_full: float     # parent box side length, Mpc/h
+
+    @property
+    def lbox_eff(self) -> float:
+        """Side length of the painted region including buffer on both sides."""
+        return self.size + 2.0 * self.buffer
+
+    @property
+    def lo_corner(self) -> np.ndarray:
+        """Lower corner of the buffered region (may be negative; wraps periodically)."""
+        return self.origin - self.buffer
+
+
+def _subbox_filter(
+    positions: np.ndarray,
+    subbox: SubboxConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return a boolean mask and remapped coordinates for the buffered subbox.
+
+    Positions are shifted so that the buffered lower corner maps to the origin,
+    with periodic wrapping from the parent box applied first.  Only positions
+    that land inside ``[0, lbox_eff)`` on every axis are kept.
+
+    The mask is built one axis at a time so that only one column-sized temporary
+    (~N floats) is live at a time, rather than a full N×3 shifted copy.  This
+    matters for the 1050³ particle case where a naïve vectorised shift would
+    create an extra 13 GB intermediate and cause OOM on per-rank memory budgets.
+
+    Args:
+        positions: (N, 3) array of comoving positions in Mpc/h.
+        subbox:    Subbox configuration.
+
+    Returns:
+        inside:       Boolean mask of shape (N,), True for kept entries.
+        pos_remapped: (M, 3) positions shifted to ``[0, lbox_eff)`` for the
+                      M kept entries (already filtered; no further indexing needed).
+    """
+    lo = subbox.lo_corner
+    # Build mask column-by-column; each axis temp is freed before the next.
+    inside = np.ones(positions.shape[0], dtype=bool)
+    for i in range(3):
+        col = (positions[:, i] - lo[i]) % subbox.lbox_full
+        inside &= col < subbox.lbox_eff
+        del col
+    # Remap only the kept entries to [0, lbox_eff).
+    n_kept = int(inside.sum())
+    pos_remapped = np.empty((n_kept, 3), dtype=positions.dtype)
+    for i in range(3):
+        pos_remapped[:, i] = (positions[inside, i] - lo[i]) % subbox.lbox_full
+    return inside, pos_remapped
 
 
 class ThesanLoader(MergerTreeLoader):
@@ -43,6 +120,13 @@ class ThesanLoader(MergerTreeLoader):
             and the ``snapshot_redshifts`` dataset.
         is_high_res (bool): ``True`` for THESAN-DARK 1 (2100³ particles),
             ``False`` (default) for THESAN-DARK 2 (1050³ particles).
+        density_cache_dir (Path | str | None): When set, painted density
+            meshes are cached as ``.npy`` files in this directory, keyed by
+            snapshot, mesh geometry, mass-assignment scheme, and subbox.
+            Painting a mesh requires streaming the full particle set
+            (~minutes per snapshot); the cached mesh loads in milliseconds.
+            Point multiple runs at the same directory to share the cache —
+            the mesh is independent of all source/painting parameters.
     """
 
     simulation_code = "THESAN"
@@ -53,7 +137,15 @@ class ThesanLoader(MergerTreeLoader):
         suffix = path.stem if path.is_file() else path.name
         return int(suffix.split("_")[1])
 
-    def __init__(self, parameters, cache_file: Path | str, *, is_high_res: bool = False):
+    def __init__(
+        self,
+        parameters,
+        cache_file: Path | str,
+        *,
+        is_high_res: bool = False,
+        subbox: SubboxConfig | None = None,
+        density_cache_dir: Path | str | None = None,
+    ):
         super().__init__(parameters)
 
         self.thesan_root      = Path(self.parameters.cosmo_sim.file_root)
@@ -62,8 +154,18 @@ class ThesanLoader(MergerTreeLoader):
         self.offset_path_root = self.thesan_root / "postprocessing" / "offsets"
         self.cached_tree      = Path(cache_file)
         self.particle_count   = 2100 ** 3 if is_high_res else 1050 ** 3
+        # When set, all spatial I/O (halos and density particles) is restricted
+        # to the buffered subregion and coordinates are remapped to [0, lbox_eff).
+        self.subbox           = subbox
+        self.density_cache_dir = Path(density_cache_dir) if density_cache_dir is not None else None
 
         self.logger.info(f"Initialized ThesanLoader — root: {self.thesan_root}")
+        if subbox is not None:
+            self.logger.info(
+                f"Subbox enabled — origin={subbox.origin} Mpc/h, "
+                f"size={subbox.size} Mpc/h, buffer={subbox.buffer} Mpc/h, "
+                f"effective box={subbox.lbox_eff:.2f} Mpc/h"
+            )
 
         if not self.cached_tree.exists():
             raise FileNotFoundError(
@@ -204,76 +306,182 @@ class ThesanLoader(MergerTreeLoader):
         subhalo_to_group_map = subhalo_to_group_map[:s_ptr]
 
         # Unit conversions: kpc/h → Mpc/h, 10^10 M☉/h → M☉
-        positions /= (1e3 * self.thesan_h)   # kpc/h → Mpc
+        positions /= (1e3 * self.thesan_h)   # kpc/h → Mpc/h
         masses    *= 1e10 / self.thesan_h    # 10^10 M☉/h → M☉
+
+        if self.subbox is not None:
+            # Keep only groups whose centre falls inside the buffered subbox and
+            # remap their coordinates to [0, lbox_eff).  The subhalo→group map
+            # uses group indices into the full catalog, so we must remap it to
+            # the compressed group array produced by the spatial mask.
+            # _subbox_filter returns already-remapped positions for kept entries.
+            inside, positions = _subbox_filter(positions, self.subbox)
+            # Build a compact group array and update the subhalo→group index map.
+            old_to_new = np.full(masses.size, -1, dtype=np.int64)
+            old_to_new[inside] = np.arange(inside.sum(), dtype=np.int64)
+            masses               = masses[inside]
+            # positions is already the filtered+remapped subset from _subbox_filter.
+            # Remap subhalo→group indices; subhalos whose group was removed get -1.
+            valid_sh = (subhalo_to_group_map >= 0) & (subhalo_to_group_map < old_to_new.size)
+            new_map = np.full(subhalo_to_group_map.size, -1, dtype=np.int64)
+            new_map[valid_sh] = old_to_new[subhalo_to_group_map[valid_sh]]
+            subhalo_to_group_map = new_map
+            self.logger.debug(
+                f"Subbox halo filter: kept {inside.sum():,} / {inside.size:,} groups"
+            )
 
         return positions, masses, subhalo_to_group_map
 
     # ── Density and velocity fields ────────────────────────────────────────
 
-    def load_density_field(self, redshift_index: int) -> np.ndarray:
-        """Paint DM particles onto a mesh and return the overdensity field δ = ρ/⟨ρ⟩ − 1."""
-        snapshot_path = self._density_directories[redshift_index]
-        snapshots = list(snapshot_path.glob("snap_*.hdf5"))
+    def _density_cache_path(self, redshift_index: int) -> Path | None:
+        """Cache file for the painted density mesh of one snapshot, or None.
 
-        particle_positions = np.zeros((self.particle_count, 3), dtype=np.float32)
-        ptr = 0
-        for snap in snapshots:
-            with h5py.File(snap, "r") as f:
-                pos = f["PartType1"]["Coordinates"][:]
-                particle_positions[ptr: ptr + pos.shape[0]] = pos
-                ptr += pos.shape[0]
+        The key covers everything the mesh depends on: the snapshot, the mesh
+        geometry (Ncell/Lbox — already overridden to the effective values in
+        subbox mode), the mass-assignment scheme, and the subbox region.  The
+        mesh is independent of all source/painting parameters, so the cache can
+        be shared between runs with different astrophysics.
+        """
+        if self.density_cache_dir is None:
+            return None
+        snapshot_path = self._density_directories[redshift_index]
+        mass_assignment, _ = self._particle_mapping_config()
+        sim = self.parameters.simulation
+        tag = f"{snapshot_path.name}_N{sim.Ncell}_L{sim.Lbox:.6g}_{mass_assignment}"
+        if self.subbox is not None:
+            o = self.subbox.origin
+            tag += (
+                f"_subbox_o{o[0]:.6g}-{o[1]:.6g}-{o[2]:.6g}"
+                f"_s{self.subbox.size:.6g}_b{self.subbox.buffer:.6g}"
+            )
+        return self.density_cache_dir / f"delta_{tag}.npy"
+
+    def load_density_field(self, redshift_index: int) -> np.ndarray:
+        """Paint DM particles onto a mesh and return the overdensity field δ = ρ/⟨ρ⟩ − 1.
+
+        Particles are processed one HDF5 file at a time and painted directly into
+        the output mesh.  The full particle_count × 3 array (~14 GB for 1050³) is
+        never allocated; peak RAM per iteration is O(chunk_size), typically ~100 MB.
+        map_particles_to_mesh accumulates into the mesh, so calling it once per
+        chunk is equivalent to calling it once on the concatenated array.
+
+        When ``density_cache_dir`` is set, the resulting mesh is cached on disk
+        and reloaded instead of re-streaming the particle snapshot.
+        """
+        cache_path = self._density_cache_path(redshift_index)
+        if cache_path is not None and cache_path.exists():
+            self.logger.info(f"Loading cached density mesh from {cache_path}")
+            return np.load(cache_path)
+
+        snapshot_path = self._density_directories[redshift_index]
+        snapshots = sorted(snapshot_path.glob("snap_*.hdf5"))
 
         mesh_size = self.parameters.simulation.Ncell
         mesh = np.zeros((mesh_size, mesh_size, mesh_size), dtype=np.float32)
-
-        particle_positions *= 1e-3 / self.thesan_h  # kpc/h → Mpc/h
-        physical_size = particle_positions.max()
-
         mass_assignment, backend = self._particle_mapping_config()
-        map_particles_to_mesh(
-            mesh, physical_size, particle_positions,
-            mass_assignment=mass_assignment, backend=backend,
-        )
-        return mesh / np.mean(mesh, dtype=np.float64) - 1
+
+        if self.subbox is not None:
+            lo = self.subbox.lo_corner
+            physical_size = self.subbox.lbox_eff
+            for snap in snapshots:
+                with h5py.File(snap, "r") as f:
+                    pos = f["PartType1"]["Coordinates"][:].astype(np.float32)
+                pos *= 1e-3 / self.thesan_h              # kpc/h → Mpc/h, in-place
+                # Build mask axis-by-axis; free each column temp immediately.
+                inside = np.ones(pos.shape[0], dtype=bool)
+                for i in range(3):
+                    col = (pos[:, i] - lo[i]) % self.subbox.lbox_full
+                    inside &= col < self.subbox.lbox_eff
+                    del col
+                if inside.any():
+                    kept = pos[inside]
+                    # Remap kept positions to [0, lbox_eff) in-place.
+                    for i in range(3):
+                        kept[:, i] = (kept[:, i] - lo[i]) % self.subbox.lbox_full
+                    map_particles_to_mesh(
+                        mesh, physical_size, kept,
+                        mass_assignment=mass_assignment, backend=backend,
+                    )
+                del pos, inside
+        else:
+            physical_size = self.parameters.simulation.Lbox
+            for snap in snapshots:
+                with h5py.File(snap, "r") as f:
+                    pos = f["PartType1"]["Coordinates"][:].astype(np.float32)
+                pos *= 1e-3 / self.thesan_h              # kpc/h → Mpc/h, in-place
+                map_particles_to_mesh(
+                    mesh, physical_size, pos,
+                    mass_assignment=mass_assignment, backend=backend,
+                )
+                del pos
+
+        delta = mesh / np.mean(mesh, dtype=np.float64) - 1
+
+        if cache_path is not None:
+            # Atomic write (tmp + rename): concurrent MPI ranks computing the
+            # same snapshot race harmlessly — both produce identical content.
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = cache_path.with_suffix(f".tmp{os.getpid()}.npy")
+            np.save(tmp_path, delta)
+            os.replace(tmp_path, cache_path)
+            self.logger.info(f"Cached density mesh to {cache_path}")
+
+        return delta
 
     def load_rsd_fields(self, redshift_index: int):
-        """Return per-axis velocity meshes for redshift-space distortions."""
+        """Return per-axis velocity meshes for redshift-space distortions.
+
+        Applies the same subbox spatial filter as :meth:`load_density_field`
+        when a subbox is active, so velocity grids are consistent with the
+        density and halo grids.
+        """
         snapshot_path = self._density_directories[redshift_index]
         snapshots = list(snapshot_path.glob("snap_*.hdf5"))
-
-        particle_positions  = np.zeros((self.particle_count, 3), dtype=np.float32)
-        particle_velocities = np.zeros((self.particle_count, 3), dtype=np.float32)
-        ptr = 0
-        for snap in snapshots:
-            with h5py.File(snap, "r") as f:
-                pos = f["PartType1"]["Coordinates"][:]
-                vel = f["PartType1"]["Velocities"][:]
-                particle_positions [ptr: ptr + pos.shape[0]] = pos
-                particle_velocities[ptr: ptr + vel.shape[0]] = vel
-                ptr += pos.shape[0]
 
         mesh_size = self.parameters.simulation.Ncell
         mesh_x = np.zeros((mesh_size, mesh_size, mesh_size), dtype=np.float32)
         mesh_y = mesh_x.copy()
         mesh_z = mesh_x.copy()
 
-        particle_positions *= 1e-3 / self.thesan_h
         scale_factor = 1 / (1 + self.redshifts[redshift_index])
-        particle_velocities /= np.sqrt(scale_factor)  # peculiar km/s
-
-        Lbox = self.parameters.simulation.Lbox
+        vel_scale = 1.0 / (self.thesan_h * np.sqrt(scale_factor))  # combined unit factor
         mass_assignment, backend = self._particle_mapping_config()
-        map_particles_to_mesh(
-            mesh_x, Lbox, particle_positions,
-            mass_assignment=mass_assignment, backend=backend, weights=particle_velocities[:, 0],
-        )
-        map_particles_to_mesh(
-            mesh_y, Lbox, particle_positions,
-            mass_assignment=mass_assignment, backend=backend, weights=particle_velocities[:, 1],
-        )
-        map_particles_to_mesh(
-            mesh_z, Lbox, particle_positions,
-            mass_assignment=mass_assignment, backend=backend, weights=particle_velocities[:, 2],
-        )
+
+        if self.subbox is not None:
+            lo = self.subbox.lo_corner
+            Lbox = self.subbox.lbox_eff
+            for snap in snapshots:
+                with h5py.File(snap, "r") as f:
+                    pos = f["PartType1"]["Coordinates"][:].astype(np.float32)
+                    vel = f["PartType1"]["Velocities"][:].astype(np.float32)
+                pos *= 1e-3 / self.thesan_h
+                vel *= vel_scale                          # peculiar km/s, in-place
+                inside = np.ones(pos.shape[0], dtype=bool)
+                for i in range(3):
+                    col = (pos[:, i] - lo[i]) % self.subbox.lbox_full
+                    inside &= col < self.subbox.lbox_eff
+                    del col
+                if inside.any():
+                    kept_pos = pos[inside]
+                    kept_vel = vel[inside]
+                    for i in range(3):
+                        kept_pos[:, i] = (kept_pos[:, i] - lo[i]) % self.subbox.lbox_full
+                    map_particles_to_mesh(mesh_x, Lbox, kept_pos, mass_assignment=mass_assignment, backend=backend, weights=kept_vel[:, 0])
+                    map_particles_to_mesh(mesh_y, Lbox, kept_pos, mass_assignment=mass_assignment, backend=backend, weights=kept_vel[:, 1])
+                    map_particles_to_mesh(mesh_z, Lbox, kept_pos, mass_assignment=mass_assignment, backend=backend, weights=kept_vel[:, 2])
+                del pos, vel, inside
+        else:
+            Lbox = self.parameters.simulation.Lbox
+            for snap in snapshots:
+                with h5py.File(snap, "r") as f:
+                    pos = f["PartType1"]["Coordinates"][:].astype(np.float32)
+                    vel = f["PartType1"]["Velocities"][:].astype(np.float32)
+                pos *= 1e-3 / self.thesan_h
+                vel *= vel_scale
+                map_particles_to_mesh(mesh_x, Lbox, pos, mass_assignment=mass_assignment, backend=backend, weights=vel[:, 0])
+                map_particles_to_mesh(mesh_y, Lbox, pos, mass_assignment=mass_assignment, backend=backend, weights=vel[:, 1])
+                map_particles_to_mesh(mesh_z, Lbox, pos, mass_assignment=mass_assignment, backend=backend, weights=vel[:, 2])
+                del pos, vel
+
         return mesh_x, mesh_y, mesh_z

@@ -41,6 +41,23 @@ from ..structs.halo_catalog import HaloCatalog
 from ..load_input_data.base import BaseLoader
 
 
+def sigma_dex_for_mass(
+    Mh: np.ndarray,
+    sigma0: float,
+    sigma1: float,
+    mpiv: float,
+    floor: float = 1e-3,
+) -> np.ndarray:
+    """Mass-dependent f_st scatter in dex (log10 space), per fit_thesan_fst.md section 6.
+
+    sigma_dex(Mh) = sigma0 + sigma1 * log10(Mh / mpiv), clipped to a small positive floor
+    so the lognormal sampler never receives a non-positive sigma. Callers that need the
+    natural-log sigma for ``rng.lognormal`` must multiply the result by ``np.log(10.0)``.
+    """
+    Mh = np.asarray(Mh, dtype=float)
+    return np.maximum(sigma0 + sigma1 * np.log10(Mh / mpiv), floor)
+
+
 class PaintingCoordinator:
     @staticmethod
     def _profile_redshift_array(z_history) -> np.ndarray:
@@ -229,9 +246,15 @@ class PaintingCoordinator:
         if isinstance(profiles, RadiationProfilesFStarGrid):
             source = self.parameters.source
             distribution = self._format_cache_value(getattr(source, "f_st_paint_distribution", "lognormal"))
-            sigma = self._format_cache_value(getattr(source, "f_st_paint_sigma", 0.5))
+            sigma0 = getattr(source, "f_st_paint_sigma0", None)
+            if sigma0 is not None:
+                sigma1 = self._format_cache_value(getattr(source, "f_st_paint_sigma1", 0.0))
+                sigma_tag = f"sigma0_{self._format_cache_value(sigma0)}_sigma1_{sigma1}"
+            else:
+                sigma_tag = f"sigma_{self._format_cache_value(getattr(source, 'f_st_paint_sigma', 0.5))}"
             seed = self._format_cache_value(getattr(source, "f_st_paint_seed", None))
-            return f"painted_output_fstar_dist_{distribution}_sigma_{sigma}_seed_{seed}"
+            beorn_hash = self.parameters.beorn_hash()
+            return f"painted_output_fstar_dist_{distribution}_{sigma_tag}_seed_{seed}_{beorn_hash}"
         return "painted_output_legacy"
     
     """Orchestrate painting of 1D radiation profiles to 3D grids.
@@ -887,7 +910,7 @@ class PaintingCoordinator:
 
                     halo_subset = halo_catalog.at_indices(halo_indices)
 
-                    sampled_f_st = self._sample_f_st_for_halos(halo_subset.size, rng)
+                    sampled_f_st = self._sample_f_st_for_halos(halo_subset.masses, rng)
                     f_st_indices = self._nearest_f_st_indices(sampled_f_st, profiles.f_st_grid)
 
                     self.logger.debug(
@@ -998,26 +1021,41 @@ class PaintingCoordinator:
 
         return grid_data
     
-    def _sample_f_st_for_halos(self, halo_count: int, rng: np.random.Generator) -> np.ndarray:
+    def _sample_f_st_for_halos(self, halo_masses: np.ndarray, rng: np.random.Generator) -> np.ndarray:
         """Sample one stellar-fraction value per halo for f_st-grid painting.
 
         Optional source parameters:
         - f_st_paint_distribution: 'lognormal', 'normal', or 'uniform'
-        - f_st_paint_sigma
+        - f_st_paint_sigma: constant scatter, used when f_st_paint_sigma0 is None
+        - f_st_paint_sigma0, f_st_paint_sigma1, f_st_paint_sigma_mpiv: mass-dependent
+          scatter (lognormal distribution only) -- sigma_dex(Mh) = f_st_paint_sigma0 +
+          f_st_paint_sigma1 * log10(Mh / f_st_paint_sigma_mpiv), see sigma_dex_for_mass()
+          and fit_thesan_fst.md section 6. Ignored (falls back to f_st_paint_sigma) when
+          f_st_paint_sigma0 is None.
         - f_st_paint_min
         - f_st_paint_max
         - f_st_paint_seed
 
         Defaults:
         - distribution = 'lognormal'
-        - sigma = 0.5
+        - sigma = 0.5 (constant, mass-independent)
         - clipping range = [f_st_grid_min, f_st_grid_max]
+
+        Args:
+            halo_masses (np.ndarray): Per-halo mass [Msun/h], one entry per halo to sample.
+                Only ``.size`` is used unless ``f_st_paint_sigma0`` is set, in which case the
+                lognormal scatter width is evaluated per halo from its actual mass.
+            rng (np.random.Generator): Snapshot-seeded RNG (see ``_make_f_st_rng``).
         """
+        halo_masses = np.asarray(halo_masses, dtype=float)
+        halo_count = halo_masses.size
         source = self.parameters.source
         distribution = getattr(source, "f_st_paint_distribution", "lognormal").lower()
         sigma = float(getattr(source, "f_st_paint_sigma", 0.5))
+        sigma0 = getattr(source, "f_st_paint_sigma0", None)
+        sigma1 = float(getattr(source, "f_st_paint_sigma1", 0.0))
+        sigma_mpiv = float(getattr(source, "f_st_paint_sigma_mpiv", 1e11))
         f_st_center = float(source.f_st)
-        f_st_n = int(getattr(source, "f_st_grid_n", 31))
         f_st_min = float(getattr(source, "f_st_paint_min", getattr(source, "f_st_grid_min", 0.01)))
         f_st_max = float(getattr(source, "f_st_paint_max", getattr(source, "f_st_grid_max", 1.0)))
 
@@ -1031,13 +1069,11 @@ class PaintingCoordinator:
             raise ValueError("f_st_paint_min must be smaller than f_st_paint_max")
 
         if distribution == "lognormal":
-            k_star = (f_st_n - 1) // 2
-            dlog = (np.log10(f_st_max) - np.log10(f_st_center)) / (f_st_n - 1 - k_star)
-            log_min = np.log10(f_st_center) - k_star * dlog
-            f_st_min = 10**log_min
-            self.logger.info(f"Redefine f_st_min to {f_st_min:.4f}")
-            self.logger.info("Return f_st_grid in log space")
-            sampled = rng.lognormal(mean=np.log(f_st_center) - sigma**2/2, sigma=sigma, size=halo_count)
+            if sigma0 is not None:
+                sigma_nat = sigma_dex_for_mass(halo_masses, float(sigma0), sigma1, sigma_mpiv) * np.log(10.0)
+            else:
+                sigma_nat = sigma
+            sampled = rng.lognormal(mean=np.log(f_st_center), sigma=sigma_nat, size=halo_count)
         elif distribution == "normal":
             sampled = rng.normal(loc=f_st_center, scale=sigma, size=halo_count)
         elif distribution == "uniform":
@@ -1053,7 +1089,7 @@ class PaintingCoordinator:
     def _nearest_f_st_indices(self, sampled_f_st: np.ndarray, f_st_grid: np.ndarray) -> np.ndarray:
         """Map sampled f_st values to the nearest precomputed f_st-grid index."""
         f_st_grid = self._small_profile_array(f_st_grid)
-        return np.abs(sampled_f_st[:, None] - f_st_grid[None, :]).argmin(axis=1)
+        return np.abs(np.log(sampled_f_st[:, None]) - np.log(f_st_grid[None, :])).argmin(axis=1)
 
     def _make_f_st_rng(self, z_index: int):
         seed = getattr(self.parameters.source, "f_st_paint_seed", None)
@@ -1062,25 +1098,6 @@ class PaintingCoordinator:
         return np.random.default_rng(int(seed) + int(z_index))
 
 
-    # def _sample_f_st_for_halos(self, halo_count: int, rng: np.random.Generator) -> np.ndarray:
-    #     source = self.parameters.source
-    #     distribution = getattr(source, "f_st_paint_distribution", "lognormal").lower()
-    #     sigma = float(getattr(source, "f_st_paint_sigma", 0.5))
-    #     f_st_center = float(source.f_st)
-    #     f_st_min = float(getattr(source, "f_st_paint_min", getattr(source, "f_st_grid_min", 0.01)))
-    #     f_st_max = float(getattr(source, "f_st_paint_max", getattr(source, "f_st_grid_max", 0.2)))
-
-    #     if distribution == "lognormal":
-    #         sampled = rng.lognormal(mean=np.log(f_st_center), sigma=sigma, size=halo_count)
-    #     elif distribution == "normal":
-    #         sampled = rng.normal(loc=f_st_center, scale=sigma, size=halo_count)
-    #     elif distribution == "uniform":
-    #         sampled = rng.uniform(low=f_st_min, high=f_st_max, size=halo_count)
-    #     else:
-    #         raise ValueError(f"Unknown f_st painting distribution {distribution!r}")
-
-    #     return np.clip(sampled, f_st_min, f_st_max)
-    
     def paint_single_mass_bin(
         self,
         halo_catalog: HaloCatalog,

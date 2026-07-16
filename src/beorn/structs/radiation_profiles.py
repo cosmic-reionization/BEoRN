@@ -97,6 +97,17 @@ class RadiationProfilesFStarGrid(BaseStruct):
     """
     Stores radiation profiles on a (mass, alpha, f_st, z) grid. Radial profiles use (r, mass, alpha, f_st, z).
     """
+
+    @classmethod
+    def get_file_path(cls, directory: Path, parameters: Parameters, **kwargs) -> Path:
+        """Cache key excludes f_st painting parameters so runs that differ only
+        in f_st_paint_seed/sigma/distribution share the same profile file."""
+        prefix = cls.__name__
+        file_name = f"{prefix}_{parameters.profiles_fstar_hash()}"
+        if kwargs:
+            file_name += "_" + "_".join(f"{k}={v}" for k, v in kwargs.items())
+        return directory / f"{file_name}.h5"
+
     z_history: np.ndarray
     """Redshift range for which the profiles have been computed. Corresponds to the parameters.solver.redshifts parameter."""
 

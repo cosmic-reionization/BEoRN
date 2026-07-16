@@ -76,7 +76,20 @@ class SourceParameters:
     """Distribution used to sample per-halo f_st during painting."""
 
     f_st_paint_sigma: float = 0.5
-    """Width parameter for the f_st sampling distribution (log-space sigma for lognormal)."""
+    """Width parameter for the f_st sampling distribution (log-space sigma for lognormal).
+    Used as the constant scatter when f_st_paint_sigma0 is None (default, backward-compatible)."""
+
+    f_st_paint_sigma0: float | None = None
+    """Mass-dependent scatter model: sigma_dex(Mh) = f_st_paint_sigma0 + f_st_paint_sigma1 *
+    log10(Mh / f_st_paint_sigma_mpiv), calibrated per fit_thesan_fst.md section 6. ``None``
+    (default) falls back to the constant ``f_st_paint_sigma`` for backward compatibility."""
+
+    f_st_paint_sigma1: float = 0.0
+    """Slope of the mass-dependent scatter model, in dex per dex of log10(Mh / mpiv).
+    ``0.0`` (default) recovers a mass-independent scatter equal to f_st_paint_sigma0."""
+
+    f_st_paint_sigma_mpiv: float = 1e11
+    """Pivot halo mass [Msun/h] for the mass-dependent scatter model."""
 
     f_st_paint_min: float = 0.01
     """Lower clipping bound for sampled f_st during painting."""
@@ -408,6 +421,47 @@ class Parameters:
         }
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 
+    # Keys in the source section that control stochastic painting but do not
+    # affect the shape of the precomputed 1D radiation profiles.
+    _PAINT_ONLY_SOURCE_KEYS = frozenset({
+        "f_st_paint_distribution",
+        "f_st_paint_sigma",
+        "f_st_paint_sigma0",
+        "f_st_paint_sigma1",
+        "f_st_paint_sigma_mpiv",
+        "f_st_paint_min",
+        "f_st_paint_max",
+        "f_st_paint_seed",
+    })
+
+    def profiles_fstar_hash(self) -> str:
+        """Like :meth:`profiles_hash` but also strips f_st painting parameters.
+
+        The f_st-grid profiles depend on the physics and the grid bounds/resolution
+        (f_st_grid_min/max/n), but not on how halos are sampled from that grid
+        during painting.  This hash therefore stays stable across runs that differ
+        only in f_st_paint_seed / sigma / distribution, allowing the expensive
+        profile cube to be shared.
+        """
+        source_dict = {k: v for k, v in to_dict(self.source).items()
+                       if k not in self._PAINT_ONLY_SOURCE_KEYS}
+        d = {
+            'source': source_dict,
+            'cosmology': to_dict(self.cosmology),
+            'redshifts': list(self.solver.redshifts),
+            'fXh': self.solver.fXh,
+            'halo_mass_bin_min': self.solver.halo_mass_bin_min,
+            'halo_mass_bin_max': self.solver.halo_mass_bin_max,
+            'halo_mass_nbin': self.solver.halo_mass_nbin,
+            'halo_mass_accretion_alpha': list(self.solver.halo_mass_accretion_alpha),
+            'HI_frac': self.solver.HI_frac,
+            'clumping': self.solver.clumping,
+            'z_decoupling': self.solver.z_decoupling,
+            'z_source_start': self.solver.z_source_start,
+            't_source_age': self.source.t_source_age,
+        }
+        return hashlib.md5(str(d).encode()).hexdigest()[:8]
+
     def to_yaml(self, path: Path, exclude_keys: "set[str] | None" = None) -> None:
         """Write parameters to a human-readable YAML file at *path*.
 
@@ -465,7 +519,7 @@ class Parameters:
                 if cosmo_sim.snapshot_redshifts is not None else []
             ),
             f"  1D RT bins  : {slv.halo_mass_bin_min:.1e} - {slv.halo_mass_bin_max:.1e} Msun at z={z_min:.1f} ({slv.halo_mass_nbin} bins, traced back via exp. accretion)",
-            f"  Source      : f_st={src.f_st}, Nion={src.Nion}, f0_esc={src.f0_esc}",
+            f"  Source      : f_st={src.f_st}, Nion={src.Nion}, f0_esc={src.f0_esc}, pl_esc={src.pl_esc}",
             f"  X-ray       : norm={src.xray_normalisation:.2e}, E=[{src.energy_cutoff_min_xray}, {src.energy_cutoff_max_xray}] eV",
             f"  Lyman-alpha : n_phot={src.n_lyman_alpha_photons}, star-forming above {src.halo_mass_min:.1e} Msun",
             f"  Beorn hash  : {self.beorn_hash()}",
