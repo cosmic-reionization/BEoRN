@@ -12,8 +12,8 @@ try:
 except ImportError:
     from numpy import trapz as _trapz
 
-from .constants import sec_per_year, km_per_Mpc, c_km_s, Tcmb0, sigma_T, cm_per_Mpc, rhoc0, m_p_in_Msun
-from .structs import Parameters
+from ..constants import sec_per_year, km_per_Mpc, c_km_s, Tcmb0, sigma_T, cm_per_Mpc, rhoc0, m_p_in_Msun
+from ..structs import Parameters
 
 def hubble(z, parameters: Parameters):
     """

@@ -321,11 +321,11 @@ class CosmologyParameters:
     """
 
     # TODO - remove and set an astropy cosmology object instead of individual parameters
-    Om: float = 0.31
+    Om: float = 0.315
     Ob: float = 0.045
-    Ol: float = 0.68
+    Ol: float = 1 - 0.315
     rho_c: float = 2.775e11
-    h0: float = 0.68
+    h0: float = 0.673
     sigma_8: float = 0.83
     ns: float = 0.96
 

@@ -9,6 +9,104 @@ import numpy as np
 _SCHEMES = ('NGP', 'CIC', 'TSC', 'PCS')
 
 
+def paint_mesh_jax(
+    particle_positions,
+    N: int,
+    box_size: float,
+    mass_assignment: str = 'CIC',
+    weights=None,
+):
+    """Functional, differentiable particle-to-mesh painting (JAX).
+
+    Unlike :func:`map_particles_to_mesh` this returns the painted mesh as a
+    **jax array** without any numpy round-trip, so ``jax.grad``/``jax.jit``
+    flow through it — use it to differentiate a measured statistic of the
+    painted field with respect to the particle positions or weights (and
+    through them, the cosmology).  Output dtype follows the input positions
+    (pass float64 with x64 enabled for gradient checks).
+
+    Args:
+        particle_positions: (n_parts, 3) array (numpy or jax) in box units.
+        N:         Mesh cells per side.
+        box_size:  Box side length (same units as positions).
+        mass_assignment: 'NGP', 'CIC', 'TSC', or 'PCS'.
+        weights:   Optional per-particle weights, shape (n_parts,).
+
+    Returns:
+        jax array of shape (N, N, N).
+    """
+    try:
+        import jax.numpy as jnp
+    except ImportError as e:
+        raise ImportError(
+            "JAX is required for paint_mesh_jax. "
+            "Install it with: pip install beorn[jax]"
+        ) from e
+
+    scheme = mass_assignment.upper()
+    if scheme not in _SCHEMES:
+        raise ValueError(
+            f"JAX backend: unknown mass_assignment {mass_assignment!r}. "
+            f"Choose from {_SCHEMES}."
+        )
+
+    scale = N / box_size
+    pos = jnp.asarray(particle_positions) * scale   # (n, 3)
+    dtype = pos.dtype
+    wt = jnp.ones(pos.shape[0], dtype=dtype) if weights is None \
+        else jnp.asarray(weights, dtype=dtype)
+    t = jnp.zeros((N, N, N), dtype=dtype)
+
+    def _scatter(t, ix, iy, iz, vals):
+        flat_idx = ix * N * N + iy * N + iz
+        return t.reshape(-1).at[flat_idx].add(vals).reshape(N, N, N)
+
+    if scheme == 'NGP':
+        ix = jnp.round(pos[:, 0]).astype(jnp.int32) % N
+        iy = jnp.round(pos[:, 1]).astype(jnp.int32) % N
+        iz = jnp.round(pos[:, 2]).astype(jnp.int32) % N
+        t = _scatter(t, ix, iy, iz, wt)
+
+    elif scheme == 'CIC':
+        i0 = jnp.floor(pos).astype(jnp.int32)
+        d1 = (pos - i0.astype(dtype))
+        d0 = 1.0 - d1
+        i0 = i0 % N
+        i1 = (i0 + 1) % N
+        for cx, wx in ((i0[:, 0], d0[:, 0]), (i1[:, 0], d1[:, 0])):
+            for cy, wy in ((i0[:, 1], d0[:, 1]), (i1[:, 1], d1[:, 1])):
+                for cz, wz in ((i0[:, 2], d0[:, 2]), (i1[:, 2], d1[:, 2])):
+                    t = _scatter(t, cx, cy, cz, wt * wx * wy * wz)
+
+    elif scheme == 'TSC':
+        i_cen = jnp.floor(pos).astype(jnp.int32)
+        for kx in (-1, 0, 1):
+            ix = (i_cen[:, 0] + kx) % N
+            wx = _w_tsc_jax(pos[:, 0] - (i_cen[:, 0] + kx).astype(dtype), jnp)
+            for ky in (-1, 0, 1):
+                iy = (i_cen[:, 1] + ky) % N
+                wy = _w_tsc_jax(pos[:, 1] - (i_cen[:, 1] + ky).astype(dtype), jnp)
+                for kz in (-1, 0, 1):
+                    iz = (i_cen[:, 2] + kz) % N
+                    wz = _w_tsc_jax(pos[:, 2] - (i_cen[:, 2] + kz).astype(dtype), jnp)
+                    t = _scatter(t, ix, iy, iz, wt * wx * wy * wz)
+
+    else:  # PCS
+        i_cen = jnp.floor(pos).astype(jnp.int32)
+        for kx in (-1, 0, 1, 2):
+            ix = (i_cen[:, 0] + kx) % N
+            wx = _w_pcs_jax(pos[:, 0] - (i_cen[:, 0] + kx).astype(dtype), jnp)
+            for ky in (-1, 0, 1, 2):
+                iy = (i_cen[:, 1] + ky) % N
+                wy = _w_pcs_jax(pos[:, 1] - (i_cen[:, 1] + ky).astype(dtype), jnp)
+                for kz in (-1, 0, 1, 2):
+                    iz = (i_cen[:, 2] + kz) % N
+                    wz = _w_pcs_jax(pos[:, 2] - (i_cen[:, 2] + kz).astype(dtype), jnp)
+                    t = _scatter(t, ix, iy, iz, wt * wx * wy * wz)
+
+    return t
+
+
 def map_particles_to_mesh(
     mesh: np.ndarray,
     box_size: float,
@@ -28,76 +126,10 @@ def map_particles_to_mesh(
         mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
         weights: Per-particle weights, shape ``(n_parts,)``.  ``None`` → 1.
     """
-    try:
-        import jax.numpy as jnp
-    except ImportError as e:
-        raise ImportError(
-            "JAX is required for backend='jax'. "
-            "Install it with: pip install beorn[jax]"
-        ) from e
-
-    scheme = mass_assignment.upper()
-    if scheme not in _SCHEMES:
-        raise ValueError(
-            f"JAX backend: unknown mass_assignment {mass_assignment!r}. "
-            f"Choose from {_SCHEMES}."
-        )
-
-    N     = mesh.shape[0]
-    scale = N / box_size
-
-    pos = jnp.array(particle_positions) * scale   # (n, 3)
-    wt  = jnp.ones(len(pos), dtype=jnp.float32) if weights is None \
-          else jnp.array(weights, dtype=jnp.float32)
-    t   = jnp.zeros((N, N, N), dtype=jnp.float32)
-
-    def _scatter(t, ix, iy, iz, vals):
-        flat_idx = ix * N * N + iy * N + iz
-        return t.reshape(-1).at[flat_idx].add(vals).reshape(N, N, N)
-
-    if scheme == 'NGP':
-        ix = jnp.round(pos[:, 0]).astype(jnp.int32) % N
-        iy = jnp.round(pos[:, 1]).astype(jnp.int32) % N
-        iz = jnp.round(pos[:, 2]).astype(jnp.int32) % N
-        t  = _scatter(t, ix, iy, iz, wt)
-
-    elif scheme == 'CIC':
-        i0 = jnp.floor(pos).astype(jnp.int32)
-        d1 = (pos - i0.astype(jnp.float32))
-        d0 = 1.0 - d1
-        i0 = i0 % N
-        i1 = (i0 + 1) % N
-        for cx, wx in ((i0[:, 0], d0[:, 0]), (i1[:, 0], d1[:, 0])):
-            for cy, wy in ((i0[:, 1], d0[:, 1]), (i1[:, 1], d1[:, 1])):
-                for cz, wz in ((i0[:, 2], d0[:, 2]), (i1[:, 2], d1[:, 2])):
-                    t = _scatter(t, cx, cy, cz, wt * wx * wy * wz)
-
-    elif scheme == 'TSC':
-        i_cen = jnp.floor(pos).astype(jnp.int32)
-        for kx in (-1, 0, 1):
-            ix = (i_cen[:, 0] + kx) % N
-            wx = _w_tsc_jax(pos[:, 0] - (i_cen[:, 0] + kx).astype(jnp.float32), jnp)
-            for ky in (-1, 0, 1):
-                iy = (i_cen[:, 1] + ky) % N
-                wy = _w_tsc_jax(pos[:, 1] - (i_cen[:, 1] + ky).astype(jnp.float32), jnp)
-                for kz in (-1, 0, 1):
-                    iz = (i_cen[:, 2] + kz) % N
-                    wz = _w_tsc_jax(pos[:, 2] - (i_cen[:, 2] + kz).astype(jnp.float32), jnp)
-                    t  = _scatter(t, ix, iy, iz, wt * wx * wy * wz)
-
-    else:  # PCS
-        i_cen = jnp.floor(pos).astype(jnp.int32)
-        for kx in (-1, 0, 1, 2):
-            ix = (i_cen[:, 0] + kx) % N
-            wx = _w_pcs_jax(pos[:, 0] - (i_cen[:, 0] + kx).astype(jnp.float32), jnp)
-            for ky in (-1, 0, 1, 2):
-                iy = (i_cen[:, 1] + ky) % N
-                wy = _w_pcs_jax(pos[:, 1] - (i_cen[:, 1] + ky).astype(jnp.float32), jnp)
-                for kz in (-1, 0, 1, 2):
-                    iz = (i_cen[:, 2] + kz) % N
-                    wz = _w_pcs_jax(pos[:, 2] - (i_cen[:, 2] + kz).astype(jnp.float32), jnp)
-                    t  = _scatter(t, ix, iy, iz, wt * wx * wy * wz)
-
+    N = mesh.shape[0]
+    pos32 = np.asarray(particle_positions, dtype=np.float32)
+    t = paint_mesh_jax(pos32, N, box_size,
+                       mass_assignment=mass_assignment, weights=weights)
     mesh[:] += np.array(t)
 
 
