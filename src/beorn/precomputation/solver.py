@@ -622,7 +622,6 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
     def _build_f_st_grid(self) -> np.ndarray:
         source = self.parameters.source
         distribution = getattr(source, "f_st_paint_distribution", "lognormal").lower()
-        f_st_center = float(source.f_st)
         f_st_min = float(getattr(source, 'f_st_grid_min', 0.01))
         f_st_max = float(getattr(source, 'f_st_grid_max', 1.0))
         f_st_n = int(getattr(source, 'f_st_grid_n', 31))

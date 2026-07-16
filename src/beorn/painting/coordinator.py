@@ -1056,7 +1056,6 @@ class PaintingCoordinator:
         sigma1 = float(getattr(source, "f_st_paint_sigma1", 0.0))
         sigma_mpiv = float(getattr(source, "f_st_paint_sigma_mpiv", 1e11))
         f_st_center = float(source.f_st)
-        f_st_n = int(getattr(source, "f_st_grid_n", 31))
         f_st_min = float(getattr(source, "f_st_paint_min", getattr(source, "f_st_grid_min", 0.01)))
         f_st_max = float(getattr(source, "f_st_paint_max", getattr(source, "f_st_grid_max", 1.0)))
 
