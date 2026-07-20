@@ -98,7 +98,11 @@ def paint_mesh_torch(
                                     accumulate=True)
 
     elif scheme == 'TSC':
-        i_cen = pos.floor().long()
+        # Stencil centred on the *nearest* cell (round), not floor: with
+        # floor the k=2 contribution is silently dropped for frac >= 0.5,
+        # breaking mass conservation by up to ~6% (matches the numpy/numba
+        # backends' TSC centring).
+        i_cen = pos.round().long()
         for kx in (-1, 0, 1):
             ix = (i_cen[:, 0] + kx) % N
             wx = _w_tsc_torch(pos[:, 0] - _dt(i_cen[:, 0] + kx))

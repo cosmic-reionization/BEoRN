@@ -79,7 +79,11 @@ def paint_mesh_jax(
                     t = _scatter(t, cx, cy, cz, wt * wx * wy * wz)
 
     elif scheme == 'TSC':
-        i_cen = jnp.floor(pos).astype(jnp.int32)
+        # Stencil centred on the *nearest* cell (round), not floor: with
+        # floor the k=2 contribution is silently dropped for frac >= 0.5,
+        # breaking mass conservation by up to ~6% (matches the numpy/numba
+        # backends' TSC centring).
+        i_cen = jnp.round(pos).astype(jnp.int32)
         for kx in (-1, 0, 1):
             ix = (i_cen[:, 0] + kx) % N
             wx = _w_tsc_jax(pos[:, 0] - (i_cen[:, 0] + kx).astype(dtype), jnp)
