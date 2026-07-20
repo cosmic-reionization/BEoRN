@@ -150,14 +150,24 @@ class TorchBackend(LPTBackend):
         device: Target device, e.g. ``'cuda'``, ``'cuda:0'``, ``'mps'``,
                 ``'cpu'``.  Defaults to ``'cuda'`` when CUDA is available,
                 else ``'cpu'``.
+        dtype:  Floating precision: ``'float64'`` (default on CUDA/CPU) or
+                ``'float32'``.  Opt-in only (issue #42, O5) — matches this
+                project's policy of never changing precision/backend
+                silently (see the JaxBackend x64 warning below): CUDA/CPU
+                keep float64 unless ``dtype='float32'`` is passed explicitly,
+                which roughly halves memory and doubles FFT/elementwise
+                throughput at the cost of ~1e-6-level precision (empirically
+                the same order as the existing MPS float32 path). Ignored on
+                MPS, which never supports float64 and is always float32.
 
     Note:
-        MPS (Apple Silicon) does not support float64.  On MPS the backend
+        MPS (Apple Silicon) does not support float64. On MPS the backend
         automatically uses float32/complex64, which reduces precision.
-        CUDA and CPU always use float64/complex128.
+        CUDA and CPU default to float64/complex128 unless ``dtype='float32'``
+        is passed.
     """
 
-    def __init__(self, device: str | None = None):
+    def __init__(self, device: str | None = None, dtype: str = 'float64'):
         try:
             import torch
             self._t = torch
@@ -170,8 +180,13 @@ class TorchBackend(LPTBackend):
             device = 'cuda' if self._t.cuda.is_available() else 'cpu'
         self.device = device
 
-        # MPS does not support float64 — fall back to float32
-        if device == 'mps':
+        if dtype not in ('float32', 'float64'):
+            raise ValueError(f"dtype must be 'float32' or 'float64'; got {dtype!r}.")
+
+        # MPS does not support float64 — fall back to float32 regardless of
+        # the requested dtype. Elsewhere, float64 is the unchanged default;
+        # float32 is opt-in only, never silent (O5).
+        if device == 'mps' or dtype == 'float32':
             self._fdtype = self._t.float32
             self._cdtype = self._t.complex64
         else:
@@ -233,9 +248,19 @@ class TorchBackend(LPTBackend):
 class JaxBackend(LPTBackend):
     """GPU/TPU backend via JAX.  Auto-dispatches to the first available
     accelerator — no device argument needed.
+
+    Args:
+        dtype: Floating precision for internally-generated arrays
+               (:meth:`zeros`, :meth:`random_normal`): ``'float64'``
+               (default) or ``'float32'``.  Opt-in only (issue #42, O5) —
+               with the default, requesting float64 while jax x64 is
+               disabled falls back to jax's own float32 canonicalisation
+               (triggering the warning below); ``dtype='float32'`` requests
+               float32 explicitly and skips that warning, since it is no
+               longer an accidental precision loss.
     """
 
-    def __init__(self):
+    def __init__(self, dtype: str = 'float64'):
         try:
             import jax
             import jax.numpy as jnp
@@ -246,16 +271,23 @@ class JaxBackend(LPTBackend):
                 "JAX is required for backend='jax'. "
                 "Install with: pip install jax"
             )
+        if dtype not in ('float32', 'float64'):
+            raise ValueError(f"dtype must be 'float32' or 'float64'; got {dtype!r}.")
+        self._fdtype = jnp.float32 if dtype == 'float32' else jnp.float64
+
         # V6 (issue #42): never run float32 silently — jax defaults to
         # float32 unless x64 is enabled, unlike the numpy/torch-CUDA paths.
-        if not jax.config.jax_enable_x64:
+        # Only warn when float32 was NOT explicitly requested: an explicit
+        # dtype='float32' is an opt-in (O5), not an accidental precision loss.
+        if dtype == 'float64' and not jax.config.jax_enable_x64:
             import warnings
             warnings.warn(
                 "JAX x64 mode is disabled — the jax LPT backend will compute "
                 "in float32 (results differ from the float64 numpy default "
                 "at the ~1e-6 level). Enable float64 with "
                 "jax.config.update('jax_enable_x64', True) before creating "
-                "arrays, or ignore this warning to commit to float32.",
+                "arrays, or pass dtype='float32' to commit to float32 "
+                "explicitly and silence this warning.",
                 stacklevel=3,
             )
 
@@ -280,13 +312,12 @@ class JaxBackend(LPTBackend):
     def irfftn(self, xk, shape):
         return self._jnp.fft.irfftn(self.as_array(xk), s=shape).real
 
-    def zeros(self, shape, dtype=np.float64):
-        return self._jnp.zeros(shape, dtype=dtype)
+    def zeros(self, shape, dtype=None):
+        return self._jnp.zeros(shape, dtype=self._fdtype if dtype is None else dtype)
 
     def random_normal(self, shape, seed=None):
         key = self._jax.random.PRNGKey(seed if seed is not None else 0)
-        return self._jax.random.normal(key, shape=shape,
-                                       dtype=self._jnp.float64)
+        return self._jax.random.normal(key, shape=shape, dtype=self._fdtype)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

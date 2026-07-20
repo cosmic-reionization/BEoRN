@@ -17,13 +17,48 @@ from abc import ABC, abstractmethod
 import math
 import numpy as np
 from scipy.integrate import quad
-from scipy.interpolate import interp1d
+from scipy.interpolate import make_interp_spline
 
 from ..cosmo import D
 from ..cosmo.differentiable import (
     get_backend, device_of, as_const, as_array, trapz_static, growth_factor,
 )
 from ..constants import Tcmb0
+
+
+def _spline_interp(x, y, k=3, fill_value=None):
+    """``scipy.interpolate.interp1d`` replacement built on ``make_interp_spline``
+    (issue #42, O11) — same interpolation order and boundary behaviour,
+    without the legacy wrapper.
+
+    Args:
+        x, y:        Strictly increasing nodes and values.
+        k:           Spline degree (3 <-> interp1d ``kind='cubic'``, 1 <->
+                     ``kind='linear'``).
+        fill_value:  ``None`` (default) -> BSpline's own polynomial
+                     extrapolation, matching ``interp1d(..., fill_value=
+                     'extrapolate')`` (interp1d already delegates to
+                     make_interp_spline internally for spline kinds, so this
+                     is numerically identical, not just similar). A scalar
+                     clamps every query outside ``[x[0], x[-1]]`` to that
+                     constant, matching ``interp1d(..., bounds_error=False,
+                     fill_value=<const>)``.
+
+    Returns:
+        A callable ``f(xq) -> yq`` (a plain ``BSpline`` when
+        ``fill_value is None``, else a thin wrapping function).
+    """
+    spline = make_interp_spline(np.asarray(x), np.asarray(y), k=k)
+    if fill_value is None:
+        return spline
+    x_lo, x_hi = float(x[0]), float(x[-1])
+
+    def _wrapped(xq):
+        xq = np.asarray(xq, dtype=float)
+        out = spline(np.clip(xq, x_lo, x_hi))
+        return np.where((xq < x_lo) | (xq > x_hi), fill_value, out)
+
+    return _wrapped
 
 
 # ======================================================================
@@ -503,16 +538,15 @@ class DiscoEB(PowerSpectrum):
 
         self._k_grid  = k_hmpc
         self._Pk_grid = Pk_hmpc
-        self._Pk_interp_log = interp1d(
-            np.log(k_hmpc), np.log(Pk_hmpc),
-            kind='cubic', bounds_error=False, fill_value='extrapolate',
+        self._Pk_interp_log = _spline_interp(
+            np.log(k_hmpc), np.log(Pk_hmpc), k=3,
         )
 
     @staticmethod
     def _compute_sigma8_from_Pk(k_hmpc: np.ndarray, Pk_hmpc: np.ndarray) -> float:
         from scipy.integrate import quad as _quad
-        log_Pk = interp1d(np.log(k_hmpc), np.log(Pk_hmpc),
-                          kind='cubic', bounds_error=False, fill_value=-np.inf)
+        log_Pk = _spline_interp(np.log(k_hmpc), np.log(Pk_hmpc), k=3,
+                                fill_value=-np.inf)
 
         def integrand(lnk: float) -> float:
             k = np.exp(lnk)
@@ -573,16 +607,15 @@ class BoltzmannSolver(PowerSpectrum):
         super().__init__(parameters, method='boltzmann', backend=backend)
         self.solver = solver
         self.ps_file = ps_file
-        self._Pk_interp: interp1d | None = None
+        self._Pk_interp = None
         if ps_file is not None:
             self._load_from_file(ps_file)
 
     def _load_from_file(self, path: str):
         data = np.loadtxt(path)
         k_file, Pk_file = data[:, 0], data[:, 1]
-        self._Pk_interp = interp1d(
-            np.log(k_file), np.log(Pk_file),
-            bounds_error=False, fill_value=-np.inf,
+        self._Pk_interp = _spline_interp(
+            np.log(k_file), np.log(Pk_file), k=1, fill_value=-np.inf,
         )
 
     def transfer(self, k: np.ndarray) -> np.ndarray:
@@ -641,11 +674,7 @@ class TabulatedPowerSpectrum(PowerSpectrum):
         if renormalize:
             Pk = Pk * self._sigma8_rescale(k, Pk)
 
-        self._Pk0_interp = interp1d(
-            np.log(k), np.log(Pk),
-            kind='linear', bounds_error=False,
-            fill_value='extrapolate',
-        )
+        self._Pk0_interp = _spline_interp(np.log(k), np.log(Pk), k=1)
 
     def _sigma8_rescale(self, k: np.ndarray, Pk: np.ndarray) -> float:
         """Amplitude multiplier so that σ₈(k, Pk) matches the target."""

@@ -76,16 +76,16 @@ def _kvectors(N: int, L: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.
     """Wavenumber arrays for an rfftn-shaped grid (N, N, N//2+1).
 
     Returns:
-        kx, ky, kz, k2 — each of shape (N, N, N//2+1).
-        kx, ky are in full-FFT ordering; kz covers [0, k_nyq].
-        Units: h/Mpc.
+        kx, ky, kz — broadcastable shapes (N,1,1), (1,N,1), (1,1,N//2+1)
+                     (h/Mpc); every caller only combines them into ``k2``,
+                     so keeping them unbroadcast avoids materialising three
+                     full (N, N, N//2+1) grids for no reason (issue #42, O3).
+        k2         — full (N, N, N//2+1): kx**2 + ky**2 + kz**2.
     """
     dk = 2.0 * np.pi / L
-    kvals_full = np.fft.fftfreq(N, d=1.0 / N) * dk   # shape (N,)
-    kvals_half = np.fft.rfftfreq(N, d=1.0 / N) * dk  # shape (N//2+1,)
-    kx = kvals_full[:, None, None] * np.ones((1, N, N // 2 + 1))
-    ky = kvals_full[None, :, None] * np.ones((N, 1, N // 2 + 1))
-    kz = kvals_half[None, None, :] * np.ones((N, N, 1))
+    kx = (np.fft.fftfreq(N, d=1.0 / N) * dk)[:, None, None]
+    ky = (np.fft.fftfreq(N, d=1.0 / N) * dk)[None, :, None]
+    kz = (np.fft.rfftfreq(N, d=1.0 / N) * dk)[None, None, :]
     k2 = kx ** 2 + ky ** 2 + kz ** 2
     return kx, ky, kz, k2
 
@@ -177,6 +177,7 @@ class LPTBase(ABC):
         self,
         seed: int | None = None,
         grf: np.ndarray | None = None,
+        n_k_nodes: int | None = 1000,
     ) -> np.ndarray:
         """Build and cache δ(k) consistent with P(k).
 
@@ -196,6 +197,13 @@ class LPTBase(ABC):
                   * ``(N, N, N//2+1)`` complex — pre-computed δ(k).  Used
                     as-is; P(k) normalisation and the ``fixed`` flag are both
                     skipped.
+            n_k_nodes: Resolution of the 1-D log-k table P(k) is evaluated on
+                  before log-log interpolation onto the full 3-D k-grid
+                  (issue #42, O8) — a closed-form transfer function is cheap
+                  per call, but ~N^3/2 elementwise evaluations still cost far
+                  more than a ~1000-node table + interpolation. ``None``
+                  disables the table and evaluates P(k) directly on the full
+                  grid (validation reference / opt-out).
 
         Returns:
             delta_k — complex array of shape (N, N, N//2+1).
@@ -210,7 +218,18 @@ class LPTBase(ABC):
         # Amplitude grid (always built in numpy — cheap scalar ops)
         kx, ky, kz, k2 = _kvectors(N, L)
         k_safe = np.where(k2 == 0, 1.0, np.sqrt(k2))
-        Pk = self.power_spectrum.P(k_safe, z=0.0)
+        if n_k_nodes is None:
+            Pk = self.power_spectrum.P(k_safe, z=0.0)
+        else:
+            # P(k) is smooth and close to a power law between nodes, so
+            # log-log linear interpolation from a 1-D table is accurate to
+            # far better than 1e-4 relative — same pattern already used for
+            # sigma^2(M) and the kappa(T) coupling tables elsewhere.
+            k_lo, k_hi = float(k_safe[k2 > 0].min()), float(k_safe.max())
+            k_1d = np.logspace(np.log10(k_lo), np.log10(k_hi), n_k_nodes)
+            Pk_1d = np.asarray(self.power_spectrum.P(k_1d, z=0.0), dtype=float)
+            log_Pk = np.interp(np.log(k_safe), np.log(k_1d), np.log(Pk_1d))
+            Pk = np.exp(log_Pk)
         Pk[k2 == 0] = 0.0
         amplitude = np.sqrt(Pk * N ** 3 / V)
 
@@ -453,11 +472,14 @@ class LPTBase(ABC):
 
         cell = L / N
         q1d = (np.arange(N) + 0.5) * cell
-        qx, qy, qz = np.meshgrid(q1d, q1d, q1d, indexing='ij')
 
-        x = (qx + psi_x) % L
-        y = (qy + psi_y) % L
-        z_pos = (qz + psi_z) % L
+        # Broadcast the 1-D Lagrangian grid directly against the displacement
+        # fields instead of materialising 3 full (N,N,N) qx/qy/qz arrays via
+        # np.meshgrid first (issue #42, O7) — same result, ~3 fewer N^3
+        # float64 allocations (e.g. ~3.2 GB saved at N=512).
+        x = (q1d[:, None, None] + psi_x) % L
+        y = (q1d[None, :, None] + psi_y) % L
+        z_pos = (q1d[None, None, :] + psi_z) % L
 
         positions = np.stack([x.ravel(), y.ravel(), z_pos.ravel()], axis=-1)
         return positions.astype(np.float32)
@@ -646,6 +668,11 @@ class ThirdOrderLPT(LPTBase):
         return (-5.0 / 21.0) * self._D1(z) ** 3
 
     def _compute_sources_k(self) -> list:
+        # Intermediates are dropped with `del` as soon as their last use is
+        # done (issue #42, O4) — d1's 6 arrays are the biggest holdout (needed
+        # through source3b), source2/source3a/source3b are transient. Pure
+        # bookkeeping: values and FFT calls are unchanged, so results are
+        # identical to before.
         b = self._backend
         kx, ky, kz, ik2 = self._setup_k_backend()
         dk = self._dk_backend()
@@ -660,6 +687,7 @@ class ThirdOrderLPT(LPTBase):
             + d1['yy'] * d1['zz'] - d1['yz'] ** 2
         )
         source2_k = b.rfftn(source2)
+        del source2
 
         # 3LPT type (a): det[ φ⁽¹⁾,ᵢⱼ ]
         source3a = (
@@ -668,6 +696,7 @@ class ThirdOrderLPT(LPTBase):
             + d1['xz'] * (d1['xy'] * d1['yz'] - d1['yy'] * d1['xz'])
         )
         source3a_k = b.rfftn(source3a)
+        del source3a
 
         # 3LPT type (b): symmetric φ⁽¹⁾ × φ⁽²⁾ cross term
         d2 = self._phi2_derivs_b(source2_k, kx, ky, kz, ik2)
@@ -676,7 +705,9 @@ class ThirdOrderLPT(LPTBase):
             + d1['xx'] * d2['zz'] + d2['xx'] * d1['zz'] - 2 * d1['xz'] * d2['xz']
             + d1['yy'] * d2['zz'] + d2['yy'] * d1['zz'] - 2 * d1['yz'] * d2['yz']
         )
+        del d1, d2
         source3b_k = b.rfftn(source3b)
+        del source3b
 
         return [dk, source2_k, source3a_k, source3b_k]
 

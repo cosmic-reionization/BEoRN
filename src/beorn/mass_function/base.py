@@ -7,7 +7,7 @@ Supports pluggable window functions (top-hat, sharp-k, smooth-k).
 from __future__ import annotations
 
 import numpy as np
-from scipy.interpolate import interp1d
+from scipy.interpolate import make_interp_spline
 
 try:
     from numpy import trapezoid as _trapz
@@ -96,11 +96,13 @@ class MassFunction:
         integrand = k[:, None] ** 3 * Pk[:, None] * W ** 2 / (2.0 * np.pi ** 2)
         sigma2_grid = _trapz(integrand, lnk, axis=0)
 
-        self._sigma2_interp = interp1d(
-            np.log(M_grid),
-            np.log(sigma2_grid),
-            kind='cubic',
-            fill_value='extrapolate',
+        # issue #42, O11: make_interp_spline (BSpline, extrapolate=True by
+        # default) replaces the legacy interp1d — identical cubic-spline
+        # behaviour (interp1d(kind='cubic') already delegates to
+        # make_interp_spline internally) including the boundary
+        # extrapolation, just without the deprecated wrapper.
+        self._sigma2_interp = make_interp_spline(
+            np.log(M_grid), np.log(sigma2_grid), k=3,
         )
 
     def _D1(self, z: float) -> float:

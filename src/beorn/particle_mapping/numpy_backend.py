@@ -40,6 +40,17 @@ try:
     from .numba_backend import _LOOP_FN as _numba_loops
     logger.debug("numpy_backend: Numba available — using JIT-compiled loops.")
 except ImportError:
+    # issue #42, O7: the pure-NumPy np.add.at loops below are ~10-50x slower
+    # than the Numba-JIT path for large particle counts — warn once so a slow
+    # painting stage doesn't look like a hang.
+    import warnings
+    warnings.warn(
+        "beorn.particle_mapping: Numba not installed — falling back to the "
+        "pure-NumPy np.add.at painting loop, which is ~10-50x slower than "
+        "the Numba-JIT path for large particle counts. "
+        "Install with `pip install beorn[numba]` for a large speedup.",
+        stacklevel=2,
+    )
     logger.debug("numpy_backend: Numba not available — using pure-NumPy loops.")
 
 

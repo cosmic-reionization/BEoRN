@@ -290,6 +290,41 @@ class CHMFSampler:
             return self._smooth_field(delta_field, R_env), M_env
         return delta_field, M_env
 
+    def _delta_grid(self, delta_env: np.ndarray, n_nodes: int) -> np.ndarray:
+        """Static 1-D delta grid spanning the field's actual range.
+
+        Per-cell, :meth:`CHMF.hmf_chmf_field` depends on ``delta_field`` only
+        through the scalar map delta -> nu_eff -> f_nu(nu_eff) (M and z fix
+        sigma_eff and the mass-function normalisation) — so instead of
+        evaluating that map (with its ``exp``) at all N^3 cells for every one
+        of the ~40 mass bins, it is evaluated at ``n_nodes`` delta values
+        spanning [delta_env.min(), delta_env.max()] and then linearly
+        interpolated onto the actual field (issue #42, O6). This cuts the
+        transcendental work from ``n_mass_bins * N^3`` to
+        ``n_mass_bins * n_nodes`` (e.g. 40*512 vs 40*128^3), leaving only a
+        cheap ``np.interp`` per bin on the full grid.
+
+        The range is taken from the data itself (not a fixed a-priori span)
+        so every actual delta_env value falls inside it — no extrapolation.
+        """
+        d_lo, d_hi = float(delta_env.min()), float(delta_env.max())
+        if d_hi <= d_lo:
+            d_hi = d_lo + 1e-6
+        return np.linspace(d_lo, d_hi, n_nodes)
+
+    def _tabulated_n_cond(self, M: float, delta_env: np.ndarray, sigma2_env: float,
+                          z: float, d_grid: np.ndarray | None) -> np.ndarray:
+        """Conditional dn/dlnM field via the O6 tabulate-then-interpolate path.
+
+        Falls back to the exact per-cell :meth:`CHMF.hmf_chmf_field` call
+        when ``d_grid`` is ``None`` (``n_delta_nodes=None`` in the public
+        methods) — kept as the validation reference and an explicit opt-out.
+        """
+        if d_grid is None:
+            return self.chmf.hmf_chmf_field(M, delta_env, sigma2_env, z)
+        lam_grid = self.chmf.hmf_chmf_field(M, d_grid, sigma2_env, z)
+        return np.interp(delta_env.ravel(), d_grid, lam_grid).reshape(delta_env.shape)
+
     def _mass_bins(self, M_env: float, n_mass_bins: int):
         """Log-spaced mass bins between halo_mass_min and min(M_max, M_env)."""
         params = self.parameters
@@ -325,6 +360,7 @@ class CHMFSampler:
         z: float,
         R_env: float | None = None,
         n_mass_bins: int = 40,
+        n_delta_nodes: int | None = 512,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Expected halo counts per cell and mass bin — the Poisson intensity.
 
@@ -343,6 +379,14 @@ class CHMFSampler:
             R_env:       Environmental smoothing scale in Mpc/h (as in
                 :meth:`sample`).
             n_mass_bins: Number of log-spaced mass bins.
+            n_delta_nodes: Resolution of the per-bin Λ(M_b, δ) lookup table
+                (issue #42, O6) — δ -> dn/dlnM is evaluated at this many
+                points spanning the field's actual delta range and linearly
+                interpolated onto the full grid, instead of evaluating the
+                exact per-cell expression (with its ``exp`` call) at all N^3
+                cells for every mass bin. ``None`` disables the table and
+                falls back to the exact per-cell evaluation (validation
+                reference / opt-out).
 
         Returns:
             (M_centers, lam) — bin-centre masses (n_mass_bins,) in M_sun and
@@ -360,10 +404,12 @@ class CHMFSampler:
         sigma2_env = float(self.chmf.sigma2(M_env, z))
         M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
         ratios = self._calibration_ratios(M_centers, z)
+        d_grid = (self._delta_grid(delta_env, n_delta_nodes)
+                 if n_delta_nodes is not None else None)
 
         lam = np.empty((len(M_centers),) + delta_env.shape, dtype=np.float64)
         for i_M, M in enumerate(M_centers):
-            n_cond = self.chmf.hmf_chmf_field(M, delta_env, sigma2_env, z)
+            n_cond = self._tabulated_n_cond(M, delta_env, sigma2_env, z, d_grid)
             lam[i_M] = np.maximum(n_cond * ratios[i_M] * dln_M[i_M] * V_cell, 0.0)
         return M_centers, lam
 
@@ -378,6 +424,7 @@ class CHMFSampler:
         R_env: float | None = None,
         n_mass_bins: int = 40,
         seed: int | None = None,
+        n_delta_nodes: int | None = 512,
     ) -> HaloCatalog:
         """Sample a halo catalog from the conditional HMF.
 
@@ -401,6 +448,9 @@ class CHMFSampler:
                          ``source.halo_mass_min`` and the environmental mass.
             seed:        Random seed for reproducible Poisson draws and
                          intra-cell position sampling.
+            n_delta_nodes: Resolution of the per-bin Λ(M_b, δ) lookup table
+                (issue #42, O6) — see :meth:`expected_counts`. ``None`` falls
+                back to the exact per-cell evaluation.
 
         Returns:
             :class:`~beorn.structs.HaloCatalog` with positions in Mpc/h and
@@ -421,6 +471,8 @@ class CHMFSampler:
         M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
         ratios = self._calibration_ratios(M_centers, z)
         M_min, M_max = M_centers[0], M_centers[-1]
+        d_grid = (self._delta_grid(delta_env, n_delta_nodes)
+                 if n_delta_nodes is not None else None)
 
         # ── Poisson sampling ───────────────────────────────────────────
         rng = np.random.default_rng(seed)
@@ -428,7 +480,7 @@ class CHMFSampler:
         masses_list: list[np.ndarray] = []
 
         for i_M, M in enumerate(M_centers):
-            n_cond = self.chmf.hmf_chmf_field(M, delta_env, sigma2_env, z)
+            n_cond = self._tabulated_n_cond(M, delta_env, sigma2_env, z, d_grid)
             N_expected = np.maximum(n_cond * ratios[i_M] * dln_M[i_M] * V_cell, 0.0)
             N_sample = rng.poisson(N_expected)  # shape (N, N, N) int
 
