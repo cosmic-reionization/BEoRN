@@ -496,8 +496,14 @@ class LPTBase(ABC):
         positions = np.stack([x.ravel(), y.ravel(), z_pos.ravel()], axis=-1)
         return positions.astype(np.float32)
 
-    def get_density(self, z: float) -> np.ndarray:
-        """Matter overdensity δ(x) at redshift z via CIC particle painting.
+    def get_density(self, z: float, mass_assignment: str = 'CIC') -> np.ndarray:
+        """Matter overdensity δ(x) at redshift z via particle painting.
+
+        Args:
+            z: Redshift.
+            mass_assignment: ``'NGP'``, ``'CIC'`` (default), ``'TSC'``, or
+                ``'PCS'`` — forwarded to
+                :func:`~beorn.particle_mapping.map_particles_to_mesh`.
 
         Returns:
             delta — shape (N, N, N), mean-zero overdensity.
@@ -507,7 +513,7 @@ class LPTBase(ABC):
         N, L = self.N, self.L
         mesh = np.zeros((N, N, N), dtype=np.float32)
         positions = self.get_positions(z)
-        map_particles_to_mesh(mesh, L, positions, mass_assignment='CIC')
+        map_particles_to_mesh(mesh, L, positions, mass_assignment=mass_assignment)
         mean = mesh.mean()
         if mean > 0:
             mesh = mesh / mean - 1.0
