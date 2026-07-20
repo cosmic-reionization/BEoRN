@@ -7,6 +7,7 @@ from .base import BaseLoader
 from ..structs import Parameters, HaloCatalog
 from ..lpt import ZeldovichApproximation, LPTBase
 from ..lpt.chmf import CHMF, CHMFSampler
+from ..lpt.linear_power import get_power_spectrum
 
 
 class LPTHaloLoader(BaseLoader):
@@ -26,9 +27,12 @@ class LPTHaloLoader(BaseLoader):
         lpt_solver:   Pre-built :class:`~beorn.lpt.LPTBase` instance.  If
                       ``None`` (default) a :class:`~beorn.lpt.ZeldovichApproximation`
                       solver is built automatically.
-        ps_method:    Power spectrum method forwarded to the solver and
-                      :class:`~beorn.lpt.chmf.CHMF` (default
-                      ``'eisenstein_hu'``).
+        ps_method:    Power spectrum method used to build the (single, shared
+                      — issue #42, O10) :class:`~beorn.lpt.linear_power.PowerSpectrum`
+                      instance passed to both the default solver and the CHMF
+                      (default ``'eisenstein_hu'``). Ignored if ``lpt_solver``
+                      is given — the CHMF then reuses ``lpt_solver.power_spectrum``
+                      instead, so both stay on the same cosmology.
         seed:         RNG seed for the LPT initial conditions
                       (default ``42``).
         R_env:        Environmental smoothing scale in Mpc/h passed to
@@ -62,15 +66,22 @@ class LPTHaloLoader(BaseLoader):
         self.n_mass_bins = n_mass_bins
         self._base_seed = seed
 
+        # issue #42, O10: build ONE PowerSpectrum instance and share it with
+        # the CHMF below, instead of each independently constructing its own
+        # (and each paying its own A_s normalisation). If a pre-built
+        # lpt_solver is supplied, its own power_spectrum is reused instead —
+        # otherwise the solver and the CHMF could silently run on different
+        # cosmologies.
         if lpt_solver is None:
+            shared_ps = get_power_spectrum(ps_method, parameters, **ps_kwargs)
             self.lpt_solver = ZeldovichApproximation(
-                parameters, ps_method=ps_method, seed=seed,
-                verbose=False, **ps_kwargs,
+                parameters, power_spectrum=shared_ps, seed=seed, verbose=False,
             )
         else:
             self.lpt_solver = lpt_solver
+            shared_ps = lpt_solver.power_spectrum
 
-        chmf = CHMF(parameters, ps_method=ps_method, delta_c=delta_c, **ps_kwargs)
+        chmf = CHMF(parameters, power_spectrum=shared_ps, delta_c=delta_c)
         self.sampler = CHMFSampler(parameters, chmf=chmf, hmf_model=hmf_model)
 
         # Top-hat scale for linear density field conditioning.

@@ -252,9 +252,16 @@ class EisensteinHu(PowerSpectrum):
         self._precompute()
 
     def _compute_A_s(self) -> float:
-        if self.backend not in (None, 'numpy') and not self.wiggle:
-            # fixed-node quadrature on the backend (same result as scipy.quad
-            # to ~1e-6 relative); avoids per-point dispatch through quad
+        if not self.wiggle:
+            # issue #42, O10: fixed-node vectorised quadrature (same result
+            # as scipy.quad to ~1e-6 relative — see sigma8_normalisation's
+            # docstring) replaces the adaptive scipy.quad call, which
+            # re-dispatches into the scalar Python integrand (and hence
+            # self.transfer(k)) at every one of its adaptively-chosen
+            # points. Used regardless of backend — the numpy path already
+            # uses the same fixed-node-trapezoid style for sigma^2(M)
+            # (mass_function/base.py), so this isn't a new numerical
+            # paradigm, just consistency with it.
             c = self.parameters.cosmology
             return float(sigma8_normalisation(
                 c.Om, c.Ob, c.h0, c.ns, c.sigma_8,

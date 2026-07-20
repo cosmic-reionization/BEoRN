@@ -38,6 +38,13 @@ class CHMF:
         ps_method:   Power spectrum method passed to :func:`get_power_spectrum`.
                      Default ``'eisenstein_hu'``.
         delta_c:     Linear collapse threshold (default 1.686).
+        power_spectrum: Pre-built :class:`~beorn.lpt.linear_power.PowerSpectrum`
+                     instance to use directly instead of constructing one from
+                     ``ps_method``/``ps_kwargs`` (issue #42, O10) — pass this
+                     to share a single instance with e.g. an :class:`LPTBase`
+                     solver instead of each building its own (and each paying
+                     its own A_s normalisation). ``ps_method``/``ps_kwargs``
+                     are ignored when set.
         **ps_kwargs: Forwarded to the power spectrum constructor.
     """
 
@@ -46,6 +53,7 @@ class CHMF:
         parameters: Parameters,
         ps_method: str = 'eisenstein_hu',
         delta_c: float = 1.686,
+        power_spectrum: PowerSpectrum | None = None,
         **ps_kwargs,
     ):
         # Runtime import: beorn.mass_function.base imports beorn.lpt at module
@@ -58,8 +66,8 @@ class CHMF:
         # (same 1000 ln-k nodes, 200-point log-M table, top-hat window that
         # used to be duplicated here) — one sigma^2 implementation for both
         # the unconditional HMF and the CHMF.
-        self._mf = MassFunction(parameters, window='tophat',
-                                ps_method=ps_method, **ps_kwargs)
+        self._mf = MassFunction(parameters, window='tophat', ps_method=ps_method,
+                                power_spectrum=power_spectrum, **ps_kwargs)
         self.power_spectrum: PowerSpectrum = self._mf.power_spectrum
 
     # ------------------------------------------------------------------

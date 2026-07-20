@@ -121,6 +121,12 @@ class LPTBase(ABC):
                      constructor (e.g. ``wiggle=True`` for the E&H with-wiggle
                      fit, or ``ps_file='Pk_camb.dat'`` for the Boltzmann
                      solver).
+        power_spectrum: Pre-built :class:`~beorn.lpt.linear_power.PowerSpectrum`
+                     instance to use directly instead of constructing one from
+                     ``ps_method``/``ps_kwargs`` (issue #42, O10) — pass this
+                     to share a single instance with other consumers (e.g.
+                     :class:`~beorn.lpt.chmf.CHMF`) instead of each building
+                     its own. ``ps_method``/``ps_kwargs`` are ignored when set.
 
     Performance note
     ----------------
@@ -141,6 +147,7 @@ class LPTBase(ABC):
         fixed: bool = True,
         verbose: bool = True,
         f1_method: str = 'fd',
+        power_spectrum: PowerSpectrum | None = None,
         **ps_kwargs,
     ):
         self.parameters = parameters
@@ -149,8 +156,13 @@ class LPTBase(ABC):
         self.verbose = verbose
         self.f1_method = f1_method
         self._backend: LPTBackend = get_backend(backend, verbose=verbose)
-        self.power_spectrum: PowerSpectrum = get_power_spectrum(
-            ps_method, parameters, **ps_kwargs
+        # issue #42, O10: accept a pre-built PowerSpectrum so callers that
+        # also need one elsewhere (e.g. LPTHaloLoader's CHMF) can share a
+        # single instance instead of each paying its own A_s normalisation.
+        # ps_method/ps_kwargs are ignored when power_spectrum is given.
+        self.power_spectrum: PowerSpectrum = (
+            power_spectrum if power_spectrum is not None
+            else get_power_spectrum(ps_method, parameters, **ps_kwargs)
         )
         self._delta_k: np.ndarray | None = None  # cached IC realisation
         self._k_cache = None            # backend k-vectors, built once
