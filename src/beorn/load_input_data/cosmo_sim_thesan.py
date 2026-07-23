@@ -127,6 +127,11 @@ class ThesanLoader(MergerTreeLoader):
             (~minutes per snapshot); the cached mesh loads in milliseconds.
             Point multiple runs at the same directory to share the cache —
             the mesh is independent of all source/painting parameters.
+        velocity_cache_dir (Path | str | None): Same idea as
+            ``density_cache_dir`` but for the three RSD velocity meshes
+            returned by :meth:`load_rsd_fields`, cached together as one
+            ``.npz`` file per snapshot. Can point at the same directory as
+            ``density_cache_dir``; the file name prefix keeps them apart.
     """
 
     simulation_code = "THESAN"
@@ -145,6 +150,7 @@ class ThesanLoader(MergerTreeLoader):
         is_high_res: bool = False,
         subbox: SubboxConfig | None = None,
         density_cache_dir: Path | str | None = None,
+        velocity_cache_dir: Path | str | None = None,
     ):
         super().__init__(parameters)
 
@@ -158,6 +164,7 @@ class ThesanLoader(MergerTreeLoader):
         # to the buffered subregion and coordinates are remapped to [0, lbox_eff).
         self.subbox           = subbox
         self.density_cache_dir = Path(density_cache_dir) if density_cache_dir is not None else None
+        self.velocity_cache_dir = Path(velocity_cache_dir) if velocity_cache_dir is not None else None
 
         self.logger.info(f"Initialized ThesanLoader — root: {self.thesan_root}")
         if subbox is not None:
@@ -225,6 +232,18 @@ class ThesanLoader(MergerTreeLoader):
     @property
     def redshifts(self) -> np.ndarray:
         return self._redshifts
+
+    @property
+    def snapshot_numbers(self) -> np.ndarray:
+        """THESAN snapshot indices (e.g. the ``050`` in ``groups_050``) available.
+
+        Parallel to :attr:`redshifts` — ``snapshot_numbers[i]`` is the raw
+        snapshot number backing ``redshifts[i]``. Useful for scripts that
+        need to select a specific ``redshift_index`` by its on-disk snapshot
+        number rather than by position in the (possibly range-filtered)
+        ``redshifts`` array.
+        """
+        return self._snap_indices
 
     def _particle_mapping_config(self) -> tuple[str, str]:
         """Return the particle-to-mesh mapping scheme and backend.
@@ -357,6 +376,28 @@ class ThesanLoader(MergerTreeLoader):
             )
         return self.density_cache_dir / f"delta_{tag}.npy"
 
+    def _velocity_cache_path(self, redshift_index: int) -> Path | None:
+        """Cache file for the painted velocity meshes of one snapshot, or None.
+
+        Same key as :meth:`_density_cache_path` (the velocity meshes depend
+        on exactly the same mesh geometry, mass-assignment scheme, and
+        subbox region); only the file prefix differs so the two caches can
+        share a directory.
+        """
+        if self.velocity_cache_dir is None:
+            return None
+        snapshot_path = self._density_directories[redshift_index]
+        mass_assignment, _ = self._particle_mapping_config()
+        sim = self.parameters.simulation
+        tag = f"{snapshot_path.name}_N{sim.Ncell}_L{sim.Lbox:.6g}_{mass_assignment}"
+        if self.subbox is not None:
+            o = self.subbox.origin
+            tag += (
+                f"_subbox_o{o[0]:.6g}-{o[1]:.6g}-{o[2]:.6g}"
+                f"_s{self.subbox.size:.6g}_b{self.subbox.buffer:.6g}"
+            )
+        return self.velocity_cache_dir / f"vel_{tag}.npz"
+
     def load_density_field(self, redshift_index: int) -> np.ndarray:
         """Paint DM particles onto a mesh and return the overdensity field δ = ρ/⟨ρ⟩ − 1.
 
@@ -435,7 +476,17 @@ class ThesanLoader(MergerTreeLoader):
         Applies the same subbox spatial filter as :meth:`load_density_field`
         when a subbox is active, so velocity grids are consistent with the
         density and halo grids.
+
+        When ``velocity_cache_dir`` is set, the resulting meshes are cached
+        on disk (as one ``.npz`` per snapshot) and reloaded instead of
+        re-streaming the particle snapshot.
         """
+        cache_path = self._velocity_cache_path(redshift_index)
+        if cache_path is not None and cache_path.exists():
+            self.logger.info(f"Loading cached velocity meshes from {cache_path}")
+            with np.load(cache_path) as cached:
+                return cached["vx"], cached["vy"], cached["vz"]
+
         snapshot_path = self._density_directories[redshift_index]
         snapshots = list(snapshot_path.glob("snap_*.hdf5"))
 
@@ -483,5 +534,13 @@ class ThesanLoader(MergerTreeLoader):
                 map_particles_to_mesh(mesh_y, Lbox, pos, mass_assignment=mass_assignment, backend=backend, weights=vel[:, 1])
                 map_particles_to_mesh(mesh_z, Lbox, pos, mass_assignment=mass_assignment, backend=backend, weights=vel[:, 2])
                 del pos, vel
+
+        if cache_path is not None:
+            # Atomic write (tmp + rename), same rationale as load_density_field.
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = cache_path.with_suffix(f".tmp{os.getpid()}.npz")
+            np.savez(tmp_path, vx=mesh_x, vy=mesh_y, vz=mesh_z)
+            os.replace(tmp_path, cache_path)
+            self.logger.info(f"Cached velocity meshes to {cache_path}")
 
         return mesh_x, mesh_y, mesh_z
