@@ -114,10 +114,20 @@ class ThesanLoader(MergerTreeLoader):
         parameters: BEoRN parameter container.  ``cosmo_sim.file_root``
             must point to the THESAN data root (the directory that contains
             ``output/``, ``postprocessing/``, etc.).
-        cache_file (Path | str): Path to the flat HDF5 tree cache produced
-            by the cache extraction cell in the notebook.  Snapshot redshifts
-            and other provenance metadata are read from its root attributes
-            and the ``snapshot_redshifts`` dataset.
+        cache_file (Path | str | None): Path to the flat HDF5 tree cache
+            produced by the cache extraction cell in the notebook.  Snapshot
+            redshifts and other provenance metadata are read from its root
+            attributes and the ``snapshot_redshifts`` dataset.
+
+            Pass ``None`` for a **density/velocity-only loader**: redshifts are
+            then read directly from the ``snapdir_XXX`` snapshot headers, and
+            the available-snapshot set is every ``snapdir_XXX`` on disk rather
+            than the intersection of ``groups_*``/``snapdir_*``/``offsets_*``
+            (painting a density or velocity mesh needs neither the merger trees
+            nor the group catalogs).  In this mode the tree- and catalog-backed
+            methods — :meth:`load_merger_tree_data` and
+            :meth:`get_halo_information_from_catalog` — are unavailable and
+            raise; use it for grid preprocessing, not for a full solver run.
         is_high_res (bool): ``True`` for THESAN-DARK 1 (2100³ particles),
             ``False`` (default) for THESAN-DARK 2 (1050³ particles).
         density_cache_dir (Path | str | None): When set, painted density
@@ -142,10 +152,34 @@ class ThesanLoader(MergerTreeLoader):
         suffix = path.stem if path.is_file() else path.name
         return int(suffix.split("_")[1])
 
+    @staticmethod
+    def _redshifts_from_snapshot_headers(density_dirs: dict[int, Path]) -> np.ndarray:
+        """Redshift per snapshot number, read from the ``snapdir_XXX`` headers.
+
+        Returns an array indexed by *snapshot number* (so it can be indexed the
+        same way as the tree cache's ``snapshot_redshifts`` dataset).  Snapshot
+        numbers with no ``snapdir`` on disk are filled with NaN, which compares
+        False against any redshift range and so drops out of the selection.
+        """
+        if not density_dirs:
+            raise FileNotFoundError(
+                "No snapdir_* directories found; cannot determine snapshot redshifts "
+                "without a tree cache."
+            )
+        redshifts = np.full(max(density_dirs) + 1, np.nan, dtype=np.float64)
+        for snap_index, snap_dir in density_dirs.items():
+            try:
+                snap_file = next(snap_dir.glob("snap_*.hdf5"))
+            except StopIteration:
+                continue
+            with h5py.File(snap_file, "r") as f:
+                redshifts[snap_index] = float(f["Header"].attrs["Redshift"])
+        return redshifts
+
     def __init__(
         self,
         parameters,
-        cache_file: Path | str,
+        cache_file: Path | str | None = None,
         *,
         is_high_res: bool = False,
         subbox: SubboxConfig | None = None,
@@ -158,7 +192,7 @@ class ThesanLoader(MergerTreeLoader):
         self.tree_root        = self.thesan_root / "postprocessing" / "trees" / "LHaloTree"
         self.snapshot_path_root = self.thesan_root / "output"
         self.offset_path_root = self.thesan_root / "postprocessing" / "offsets"
-        self.cached_tree      = Path(cache_file)
+        self.cached_tree      = Path(cache_file) if cache_file is not None else None
         self.particle_count   = 2100 ** 3 if is_high_res else 1050 ** 3
         # When set, all spatial I/O (halos and density particles) is restricted
         # to the buffered subregion and coordinates are remapped to [0, lbox_eff).
@@ -174,17 +208,11 @@ class ThesanLoader(MergerTreeLoader):
                 f"effective box={subbox.lbox_eff:.2f} Mpc/h"
             )
 
-        if not self.cached_tree.exists():
+        if self.cached_tree is not None and not self.cached_tree.exists():
             raise FileNotFoundError(
                 f"Tree cache not found: {self.cached_tree}. "
                 "Run the cache extraction cell in the notebook first."
             )
-
-        # Read snapshot redshifts from the HDF5 cache (stored as a dataset
-        # alongside the provenance attributes — no separate YAML needed).
-        with h5py.File(self.cached_tree, "r") as f:
-            redshifts = f["snapshot_redshifts"][:]
-        self.logger.info(f"Loaded {redshifts.size} snapshot redshifts from {self.cached_tree}")
 
         # Index available directories by snapshot number (parsed from the name,
         # e.g. "groups_100" → 100).  Using a dict means only the snapshots you
@@ -196,26 +224,50 @@ class ThesanLoader(MergerTreeLoader):
         offset_files = {self._snapshot_index_from_name(p): p
                         for p in self.offset_path_root.glob("offsets_*")}
 
+        if self.cached_tree is not None:
+            # Read snapshot redshifts from the HDF5 cache (stored as a dataset
+            # alongside the provenance attributes — no separate YAML needed).
+            with h5py.File(self.cached_tree, "r") as f:
+                redshifts = f["snapshot_redshifts"][:]
+            self.logger.info(
+                f"Loaded {redshifts.size} snapshot redshifts from {self.cached_tree}"
+            )
+            # Trees and catalogs are in play, so every product must be present.
+            available_snapshot_indices = set(catalogs) & set(density_dirs) & set(offset_files)
+            missing_data_message = (
+                "No THESAN snapshots within the requested solver.redshifts range have a complete "
+                "set of groups_*, snapdir_*, and offsets_* data."
+            )
+        else:
+            # Density/velocity-only mode: the snapshot headers are the source of
+            # truth for redshift, and a snapdir is the only product required.
+            redshifts = self._redshifts_from_snapshot_headers(density_dirs)
+            self.logger.info(
+                f"Loaded {len(density_dirs)} snapshot redshifts from snapdir headers "
+                "(no tree cache)"
+            )
+            available_snapshot_indices = set(density_dirs)
+            missing_data_message = (
+                "No THESAN snapdir_* directories fall within the requested "
+                "solver.redshifts range."
+            )
+
         # Restrict to the solver redshift range
         z_min = min(self.parameters.solver.redshifts)
         z_max = max(self.parameters.solver.redshifts)
         indices = np.where((redshifts >= z_min) & (redshifts <= z_max))[0]
-        available_snapshot_indices = sorted(set(catalogs) & set(density_dirs) & set(offset_files))
         self._snap_indices = np.array(
             [int(i) for i in indices if int(i) in available_snapshot_indices],
             dtype=int,
         )
 
         if self._snap_indices.size == 0:
-            raise FileNotFoundError(
-                "No THESAN snapshots within the requested solver.redshifts range have a complete "
-                "set of groups_*, snapdir_*, and offsets_* data."
-            )
+            raise FileNotFoundError(missing_data_message)
 
         self._redshifts = redshifts[self._snap_indices]
-        self._catalog_directories = [catalogs[i] for i in self._snap_indices]
+        self._catalog_directories = [catalogs.get(i) for i in self._snap_indices]
         self._density_directories = [density_dirs.get(i) for i in self._snap_indices]
-        self._offset_files = [offset_files[i] for i in self._snap_indices]
+        self._offset_files = [offset_files.get(i) for i in self._snap_indices]
 
         self.logger.info(
             f"THESAN snapshots: {self._redshifts.size} "
@@ -271,6 +323,12 @@ class ThesanLoader(MergerTreeLoader):
         It must contain four datasets: ``tree_halo_ids``, ``tree_snap_num``,
         ``tree_mass``, ``tree_main_progenitor``.
         """
+        if self.cached_tree is None:
+            raise RuntimeError(
+                "This ThesanLoader was built without a tree cache "
+                "(cache_file=None), so merger-tree data is unavailable. "
+                "Construct it with cache_file=<tree_cache_v2.hdf5> for a full run."
+            )
         with h5py.File(self.cached_tree, "r") as f:
             tree_halo_ids       = f["tree_halo_ids"][:]
             tree_snap_num       = f["tree_snap_num"][:]
