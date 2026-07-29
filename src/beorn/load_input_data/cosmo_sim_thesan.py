@@ -554,7 +554,10 @@ class ThesanLoader(MergerTreeLoader):
         mesh_z = mesh_x.copy()
 
         scale_factor = 1 / (1 + self.redshifts[redshift_index])
-        vel_scale = 1.0 / (self.thesan_h * np.sqrt(scale_factor))  # combined unit factor
+        # THESAN stores DM velocities as km*sqrt(a)/s; peculiar velocity in km/s
+        # is sqrt(a) * v_raw (a_scaling=0.5, no h-scaling — unlike Coordinates,
+        # which are ckpc/h). See thesan-project.com/thesan/snapshots.html.
+        vel_scale = np.sqrt(scale_factor)
         mass_assignment, backend = self._particle_mapping_config()
 
         if self.subbox is not None:
