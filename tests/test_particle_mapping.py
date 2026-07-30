@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from beorn.particle_mapping.core import map_particles_to_mesh
+from beorn.particle_mapping.core import map_particles_to_mesh, paint_displacement_field
 
 
 def _mesh(N=16):
@@ -146,3 +146,72 @@ def test_all_schemes_same_total_mass():
         totals[scheme] = m.sum()
     for scheme, total in totals.items():
         assert total == pytest.approx(n, rel=1e-3), f"{scheme} total mismatch"
+
+
+# ── Fused grid+displacement painter (issue #47) ───────────────────────────────
+
+def _displacement(N, box_size=1.0, seed=0, amplitude=0.3):
+    """Small random displacement field, shape (N,N,N) per axis."""
+    rng = np.random.default_rng(seed)
+    cell = box_size / N
+    return tuple(
+        (rng.standard_normal((N, N, N)) * amplitude * cell).astype(np.float64)
+        for _ in range(3)
+    )
+
+
+def _reference_mesh(N, box_size, psi_x, psi_y, psi_z, scheme):
+    """Non-fused reference: build the (N^3,3) position array the original
+    (get_positions-style) way and paint with map_particles_to_mesh."""
+    q1d = (np.arange(N) + 0.5) * (box_size / N)
+    x = (q1d[:, None, None] + psi_x) % box_size
+    y = (q1d[None, :, None] + psi_y) % box_size
+    z = (q1d[None, None, :] + psi_z) % box_size
+    positions = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=-1).astype(np.float32)
+    mesh = _mesh(N)
+    map_particles_to_mesh(mesh, box_size, positions, mass_assignment=scheme)
+    return mesh
+
+
+@pytest.mark.parametrize('scheme,rel', [
+    ('NGP', 1e-5), ('CIC', 1e-4), ('TSC', 1e-4), ('PCS', 1e-3),
+])
+def test_fused_conserves_total_weight(scheme, rel):
+    N = 16
+    psi_x, psi_y, psi_z = _displacement(N, seed=1)
+    mesh = _mesh(N)
+    paint_displacement_field(mesh, 1.0, psi_x, psi_y, psi_z, mass_assignment=scheme, backend='numpy')
+    assert mesh.sum() == pytest.approx(N ** 3, rel=rel)
+
+
+@pytest.mark.parametrize('scheme', ['NGP', 'CIC', 'TSC', 'PCS'])
+def test_fused_matches_nonfused_reference(scheme):
+    """Fused path (paint_displacement_field) must agree with the original
+    get_positions + map_particles_to_mesh path for the same displacement
+    field — issue #47's required parity check before the fused path can sit
+    alongside (or replace) the existing get_density implementation."""
+    N = 16
+    psi_x, psi_y, psi_z = _displacement(N, seed=3)
+    ref = _reference_mesh(N, 1.0, psi_x, psi_y, psi_z, scheme)
+    fused = _mesh(N)
+    paint_displacement_field(fused, 1.0, psi_x, psi_y, psi_z, mass_assignment=scheme, backend='numpy')
+    np.testing.assert_allclose(fused, ref, rtol=1e-4, atol=1e-5)
+
+
+def test_fused_weighted_cic_sum_equals_total_weight():
+    N = 16
+    psi_x, psi_y, psi_z = _displacement(N, seed=4)
+    weights = np.random.default_rng(5).random((N, N, N)).astype(np.float32)
+    mesh = _mesh(N)
+    paint_displacement_field(mesh, 1.0, psi_x, psi_y, psi_z,
+                              mass_assignment='CIC', backend='numpy', weights=weights)
+    assert mesh.sum() == pytest.approx(weights.sum(), rel=1e-4)
+
+
+def test_fused_invalid_mass_assignment_raises():
+    N = 16
+    psi_x, psi_y, psi_z = _displacement(N, seed=6)
+    mesh = _mesh(N)
+    with pytest.raises(ValueError, match="unknown mass_assignment"):
+        paint_displacement_field(mesh, 1.0, psi_x, psi_y, psi_z,
+                                  mass_assignment='bogus', backend='numpy')

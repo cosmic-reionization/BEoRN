@@ -106,7 +106,7 @@ def map_particles_to_mesh(
             end = min(start + batchsize, n_part)
             pos = particle_positions[start:end] * scale
             w   = None if weights is None else weights[start:end]
-            _fn(mesh, N, pos, w)
+            _fn(mesh, N, pos[:, 0], pos[:, 1], pos[:, 2], w)
 
 
 # ── Pure-NumPy kernel helpers ─────────────────────────────────────────────────
@@ -124,58 +124,72 @@ def _w_pcs(d: np.ndarray) -> np.ndarray:
 
 
 # ── Pure-NumPy per-scheme batch painters ─────────────────────────────────────
+#
+# Each takes cell-unit positions as three separate 1-D arrays (px, py, pz)
+# rather than one combined (n, 3) array. This lets `paint_displacement_field`
+# (issue #47) feed per-axis arrays straight from the grid+displacement
+# broadcast, without ever materialising the (N^3, 3) stacked positions array
+# that `map_particles_to_mesh`'s callers build; `map_particles_to_mesh` itself
+# just slices its own combined `pos` array column-wise into the same shape.
 
-def _ngp_batch(mesh, N, pos, w):
-    ix = np.round(pos[:, 0]).astype(np.int32) % N
-    iy = np.round(pos[:, 1]).astype(np.int32) % N
-    iz = np.round(pos[:, 2]).astype(np.int32) % N
-    wt = np.ones(len(pos), dtype=np.float32) if w is None else w.astype(np.float32)
+def _ngp_batch(mesh, N, px, py, pz, w):
+    ix = np.round(px).astype(np.int32) % N
+    iy = np.round(py).astype(np.int32) % N
+    iz = np.round(pz).astype(np.int32) % N
+    wt = np.ones(len(px), dtype=np.float32) if w is None else w.astype(np.float32)
     np.add.at(mesh, (ix, iy, iz), wt)
 
 
-def _cic_batch(mesh, N, pos, w):
-    i0 = np.floor(pos).astype(np.int32)
-    d1 = (pos - i0).astype(np.float32)
-    d0 = 1.0 - d1
-    i0 %= N
-    i1  = (i0 + 1) % N
-    wt  = np.ones(len(pos), dtype=np.float32) if w is None else w.astype(np.float32)
-    for cx, wx in ((i0[:, 0], d0[:, 0]), (i1[:, 0], d1[:, 0])):
-        for cy, wy in ((i0[:, 1], d0[:, 1]), (i1[:, 1], d1[:, 1])):
-            for cz, wz in ((i0[:, 2], d0[:, 2]), (i1[:, 2], d1[:, 2])):
+def _cic_batch(mesh, N, px, py, pz, w):
+    wt = np.ones(len(px), dtype=np.float32) if w is None else w.astype(np.float32)
+    stencils = []
+    for p in (px, py, pz):
+        i0 = np.floor(p).astype(np.int32)
+        d1 = (p - i0).astype(np.float32)
+        d0 = 1.0 - d1
+        i0 %= N
+        i1 = (i0 + 1) % N
+        stencils.append(((i0, d0), (i1, d1)))
+    for cx, wx in stencils[0]:
+        for cy, wy in stencils[1]:
+            for cz, wz in stencils[2]:
                 np.add.at(mesh, (cx, cy, cz), wt * wx * wy * wz)
 
 
-def _tsc_batch(mesh, N, pos, w):
+def _tsc_batch(mesh, N, px, py, pz, w):
     # TSC needs the stencil centred on the *nearest* cell (round), not floor.
     # With floor the k=2 contribution is silently dropped for frac >= 0.5,
     # breaking mass conservation by up to ~6%.
-    i_cen = np.round(pos).astype(np.int32)
-    wt    = np.ones(len(pos), dtype=np.float32) if w is None else w.astype(np.float32)
+    wt = np.ones(len(px), dtype=np.float32) if w is None else w.astype(np.float32)
+    i_cen_x = np.round(px).astype(np.int32)
+    i_cen_y = np.round(py).astype(np.int32)
+    i_cen_z = np.round(pz).astype(np.int32)
     for kx in (-1, 0, 1):
-        ix = (i_cen[:, 0] + kx) % N
-        wx = _w_tsc(pos[:, 0] - (i_cen[:, 0] + kx))
+        ix = (i_cen_x + kx) % N
+        wx = _w_tsc(px - (i_cen_x + kx))
         for ky in (-1, 0, 1):
-            iy = (i_cen[:, 1] + ky) % N
-            wy = _w_tsc(pos[:, 1] - (i_cen[:, 1] + ky))
+            iy = (i_cen_y + ky) % N
+            wy = _w_tsc(py - (i_cen_y + ky))
             for kz in (-1, 0, 1):
-                iz = (i_cen[:, 2] + kz) % N
-                wz = _w_tsc(pos[:, 2] - (i_cen[:, 2] + kz))
+                iz = (i_cen_z + kz) % N
+                wz = _w_tsc(pz - (i_cen_z + kz))
                 np.add.at(mesh, (ix, iy, iz), wt * wx * wy * wz)
 
 
-def _pcs_batch(mesh, N, pos, w):
-    i_cen = np.floor(pos).astype(np.int32)
-    wt    = np.ones(len(pos), dtype=np.float32) if w is None else w.astype(np.float32)
+def _pcs_batch(mesh, N, px, py, pz, w):
+    wt = np.ones(len(px), dtype=np.float32) if w is None else w.astype(np.float32)
+    i_cen_x = np.floor(px).astype(np.int32)
+    i_cen_y = np.floor(py).astype(np.int32)
+    i_cen_z = np.floor(pz).astype(np.int32)
     for kx in (-1, 0, 1, 2):
-        ix = (i_cen[:, 0] + kx) % N
-        wx = _w_pcs(pos[:, 0] - (i_cen[:, 0] + kx))
+        ix = (i_cen_x + kx) % N
+        wx = _w_pcs(px - (i_cen_x + kx))
         for ky in (-1, 0, 1, 2):
-            iy = (i_cen[:, 1] + ky) % N
-            wy = _w_pcs(pos[:, 1] - (i_cen[:, 1] + ky))
+            iy = (i_cen_y + ky) % N
+            wy = _w_pcs(py - (i_cen_y + ky))
             for kz in (-1, 0, 1, 2):
-                iz = (i_cen[:, 2] + kz) % N
-                wz = _w_pcs(pos[:, 2] - (i_cen[:, 2] + kz))
+                iz = (i_cen_z + kz) % N
+                wz = _w_pcs(pz - (i_cen_z + kz))
                 np.add.at(mesh, (ix, iy, iz), wt * wx * wy * wz)
 
 
@@ -185,3 +199,84 @@ _NUMPY_BATCH_FN = {
     'TSC': _tsc_batch,
     'PCS': _pcs_batch,
 }
+
+
+# ── Fused grid+displacement painter (issue #47) ──────────────────────────────
+
+def paint_displacement_field(
+    mesh: np.ndarray,
+    box_size: float,
+    psi_x: np.ndarray,
+    psi_y: np.ndarray,
+    psi_z: np.ndarray,
+    mass_assignment: str = 'CIC',
+    weights: np.ndarray = None,
+) -> None:
+    """Paint a regular grid displaced by (psi_x, psi_y, psi_z) onto *mesh*.
+
+    Particle p at flat index (i, j, k) sits at grid position q_ijk + psi_ijk;
+    since that structure is known ahead of time, cell indices and weights are
+    computed straight from the (q1d, psi) broadcast instead of routing through
+    an "arbitrary particle positions" array. This skips the float64 broadcast
+    temporaries and the stack/reshape copy that ``LPTBase.get_positions`` +
+    :func:`map_particles_to_mesh` require (~11 GB peak at N=512 for
+    ``get_positions`` alone, see issue #47 benchmark) — same arithmetic, less
+    memory traffic. Scheme-agnostic: NGP/CIC/TSC/PCS all just differ in their
+    weight stencil, already factored out into ``_w_tsc``/``_w_pcs``/etc.
+
+    Args:
+        mesh: float32 3-D array, shape ``(N, N, N)``.  Modified in place.
+        box_size: Side length of the simulation box (same units as psi_*).
+        psi_x, psi_y, psi_z: Displacement field components, each shape
+            ``(N, N, N)``, same units as ``box_size``.
+        mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
+        weights: Per-grid-point weights, shape ``(N, N, N)``.  ``None`` → 1.
+    """
+    scheme = mass_assignment.upper()
+    if scheme not in _SCHEMES:
+        raise ValueError(
+            f"NumPy backend: unknown mass_assignment {mass_assignment!r}. "
+            f"Choose from {_SCHEMES}."
+        )
+
+    assert mesh.dtype == np.float32, "mesh must be float32"
+    assert mesh.ndim == 3 and mesh.shape[0] == mesh.shape[1] == mesh.shape[2], \
+        "mesh must be a cubic 3-D array"
+    N = mesh.shape[0]
+    assert psi_x.shape == psi_y.shape == psi_z.shape == (N, N, N), \
+        "psi_x/psi_y/psi_z must have shape (N,N,N) matching mesh"
+
+    scale = np.float32(N / box_size)
+    # Cell-unit Lagrangian grid — (arange(N)+0.5) already *is* the cell-unit
+    # position (the L/N cell size and the N/L scale cancel), so it never needs
+    # to round-trip through physical units the way get_positions()'s q1d does.
+    q1d = (np.arange(N, dtype=np.float32) + 0.5)
+
+    # Broadcast + cast to float32 directly, no float64 intermediates, no
+    # np.stack/reshape into a combined (N^3,3) array — just three flat views.
+    px = (q1d[:, None, None] + psi_x.astype(np.float32) * scale).ravel()
+    py = (q1d[None, :, None] + psi_y.astype(np.float32) * scale).ravel()
+    pz = (q1d[None, None, :] + psi_z.astype(np.float32) * scale).ravel()
+
+    if weights is not None:
+        assert weights.shape == (N, N, N), \
+            "weights must have shape (N,N,N) matching mesh"
+        weights = weights.ravel()
+
+    n_part = px.size
+    if _numba_loops:
+        loop      = _numba_loops[scheme]
+        batchsize = _BATCH_SIZE
+        for start in range(0, n_part, batchsize):
+            end = min(start + batchsize, n_part)
+            pos = np.stack([px[start:end], py[start:end], pz[start:end]], axis=-1)
+            wt  = (np.ones(end - start, dtype=np.float32)
+                   if weights is None else weights[start:end].astype(np.float32))
+            loop(mesh, N, pos, wt)
+    else:
+        _fn       = _NUMPY_BATCH_FN[scheme]
+        batchsize = _BATCH_SIZE_PCS if scheme == 'PCS' else _BATCH_SIZE
+        for start in range(0, n_part, batchsize):
+            end = min(start + batchsize, n_part)
+            w = None if weights is None else weights[start:end]
+            _fn(mesh, N, px[start:end], py[start:end], pz[start:end], w)

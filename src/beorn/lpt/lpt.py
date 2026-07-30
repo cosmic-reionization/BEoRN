@@ -496,7 +496,9 @@ class LPTBase(ABC):
         positions = np.stack([x.ravel(), y.ravel(), z_pos.ravel()], axis=-1)
         return positions.astype(np.float32)
 
-    def get_density(self, z: float, mass_assignment: str = 'CIC') -> np.ndarray:
+    def get_density(
+        self, z: float, mass_assignment: str = 'CIC', fused: bool = True,
+    ) -> np.ndarray:
         """Matter overdensity δ(x) at redshift z via particle painting.
 
         Args:
@@ -504,16 +506,35 @@ class LPTBase(ABC):
             mass_assignment: ``'NGP'``, ``'CIC'`` (default), ``'TSC'``, or
                 ``'PCS'`` — forwarded to
                 :func:`~beorn.particle_mapping.map_particles_to_mesh`.
+            fused: If ``True`` (default), paint directly from the displacement
+                field via
+                :func:`~beorn.particle_mapping.paint_displacement_field`
+                instead of building the ``(N^3, 3)`` position array first
+                (issue #47) — skips ``get_positions``'s float64 broadcast
+                temporaries and stack/reshape copy. Promoted to the default
+                after benchmarking on Arrhenius (aarch64 GPU node) across all
+                installed backends confirmed it never regresses: on
+                ``'numpy'`` it's a real fused kernel (1.5-3x lower peak
+                memory, ~1.1x faster at N=128-512); on ``'jax'``/``'torch'``
+                it's currently an identical-computation fallback (no gain,
+                no regression — those backends don't have a real fused
+                kernel yet, tracked as follow-up). Pass ``fused=False`` to
+                force the original position-array path.
 
         Returns:
             delta — shape (N, N, N), mean-zero overdensity.
         """
-        from ..particle_mapping import map_particles_to_mesh
-
         N, L = self.N, self.L
         mesh = np.zeros((N, N, N), dtype=np.float32)
-        positions = self.get_positions(z)
-        map_particles_to_mesh(mesh, L, positions, mass_assignment=mass_assignment)
+        if fused:
+            from ..particle_mapping import paint_displacement_field
+            psi_x, psi_y, psi_z = self.get_displacement(z)
+            paint_displacement_field(mesh, L, psi_x, psi_y, psi_z,
+                                      mass_assignment=mass_assignment)
+        else:
+            from ..particle_mapping import map_particles_to_mesh
+            positions = self.get_positions(z)
+            map_particles_to_mesh(mesh, L, positions, mass_assignment=mass_assignment)
         mean = mesh.mean()
         if mean > 0:
             mesh = mesh / mean - 1.0

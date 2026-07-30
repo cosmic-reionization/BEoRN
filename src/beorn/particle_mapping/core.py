@@ -138,6 +138,68 @@ def map_particles_to_mesh(
         _fn(mesh, box_size, particle_positions, mass_assignment, weights=weights)
 
 
+def paint_displacement_field(
+    mesh: np.ndarray,
+    box_size: float,
+    psi_x: np.ndarray,
+    psi_y: np.ndarray,
+    psi_z: np.ndarray,
+    mass_assignment: str = 'CIC',
+    backend: str = 'auto',
+    weights: np.ndarray = None,
+) -> None:
+    """Paint a regular grid displaced by (psi_x, psi_y, psi_z) onto *mesh*.
+
+    Fused entry point (issue #47): skips building the ``(N^3, 3)`` flat
+    position array that :func:`map_particles_to_mesh` expects, since a
+    particle at flat index ``(i, j, k)`` is always at ``q_ijk + psi_ijk`` —
+    not an arbitrary position. Only the ``'numpy'`` backend implements the
+    fusion so far (see :func:`beorn.particle_mapping.numpy_backend.paint_displacement_field`);
+    other backends fall back to building the position array the original way
+    and delegating to :func:`map_particles_to_mesh` (same result, no fusion
+    speedup yet — the GPU backends were flagged in #47 as a separate
+    profiling judgement call).
+
+    Args:
+        mesh (np.ndarray): Target 3-D float32 array, shape ``(N, N, N)``.
+        box_size (float): Side length of the simulation box (same units as
+            ``psi_x``/``psi_y``/``psi_z``).
+        psi_x, psi_y, psi_z (np.ndarray): Displacement field components, each
+            shape ``(N, N, N)``.
+        mass_assignment (str): ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
+        backend (str): One of ``'numpy'``, ``'numba'``, ``'pylians'``,
+            ``'torch'``, ``'jax'``, or ``'auto'`` (default).
+        weights (np.ndarray, optional): Per-grid-point weights, shape
+            ``(N, N, N)``.  ``None`` gives uniform weight 1.
+    """
+    if backend not in _VALID_BACKENDS:
+        raise ValueError(
+            f"Unknown backend {backend!r}. Choose from {_VALID_BACKENDS}."
+        )
+
+    if backend == 'auto':
+        backend = _resolve_backend()
+        logger.debug("particle_mapping: auto-selected backend=%r", backend)
+
+    if backend == 'numpy':
+        from .numpy_backend import paint_displacement_field as _fn
+        _fn(mesh, box_size, psi_x, psi_y, psi_z,
+            mass_assignment=mass_assignment, weights=weights)
+        return
+
+    # Non-fused fallback: build the (N^3,3) position array the original way
+    # and hand it to the existing painter.
+    N = mesh.shape[0]
+    q1d = (np.arange(N) + 0.5) * (box_size / N)
+    x = q1d[:, None, None] + psi_x
+    y = q1d[None, :, None] + psi_y
+    z = q1d[None, None, :] + psi_z
+    positions = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=-1).astype(np.float32)
+    w = None if weights is None else np.asarray(weights).ravel()
+    map_particles_to_mesh(mesh, box_size, positions, mass_assignment=mass_assignment,
+                           backend=backend, weights=w)
+
+
 def _infer_functional_backend(particle_positions) -> str:
     """Backend name from the array type: torch tensor → 'torch', jax array →
     'jax', anything else → 'numpy'."""
