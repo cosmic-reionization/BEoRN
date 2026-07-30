@@ -147,6 +147,16 @@ class SourceParameters:
     - 'median': median of the fitted alphas at that snapshot
     """
 
+    alpha_constant: "float | None" = None
+    """Constant mass-accretion alpha assigned to *every* halo, bypassing the merger tree.
+
+    ``None`` (default) fits alpha per halo from the merger-tree mass history (see
+    ``mass_accretion_lookback`` and ``alpha_fallback``).  When set to a float, no tree
+    data is read or walked at all and every halo receives this value — useful for a
+    deterministic run at a measured population mean (e.g. 0.4577 for THESAN-1), and much
+    cheaper since the multi-GB tree cache is never touched.  The value should lie inside
+    ``solver.halo_mass_accretion_alpha``, which still clamps it."""
+
     t_source_age: float = None
     """Maximum source age in Myr.  When set, the X-ray and ionisation integrals
     are limited to a lookback window of this duration rather than integrating

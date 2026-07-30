@@ -156,43 +156,63 @@ class MergerTreeLoader(BaseLoader):
         :meth:`fallback_alpha`).  All alphas are clipped to the paintable
         range defined by ``solver.halo_mass_accretion_alpha``.
 
+        When ``source.alpha_constant`` is set the merger tree is bypassed
+        entirely: every halo receives that value and no tree data is read.
+
         Args:
             redshift_index (int): Index into :attr:`redshifts`.
 
         Returns:
             HaloCatalog: Catalog with positions, masses, and per-halo alphas.
         """
-        # 1. Fit alpha from merger tree for halos that appear in it
-        tree_halo_ids, halo_alphas = self.get_halo_accretion_rate_from_tree(redshift_index)
-        alpha_fb = self.fallback_alpha(halo_alphas)
+        alpha_constant = getattr(self.parameters.source, "alpha_constant", None)
 
-        # 2. Load positions/masses from the group catalog
-        positions, masses, subhalo_to_group_map = self.get_halo_information_from_catalog(redshift_index)
-        n_groups = masses.size
+        if alpha_constant is not None:
+            # Constant-alpha mode: skip the tree read and the progenitor walk.
+            positions, masses, _ = self.get_halo_information_from_catalog(redshift_index)
+            full_alphas = np.full(masses.size, float(alpha_constant))
+        else:
+            # 1. Fit alpha from merger tree for halos that appear in it
+            tree_halo_ids, halo_alphas = self.get_halo_accretion_rate_from_tree(redshift_index)
+            alpha_fb = self.fallback_alpha(halo_alphas)
 
-        # 3. Map tree-derived alphas onto the full group array
-        full_alphas = np.full(n_groups, alpha_fb)
-        if tree_halo_ids.size > 0:
-            sorting = np.argsort(tree_halo_ids)
-            sorted_ids = tree_halo_ids[sorting]
-            sorted_alphas = halo_alphas[sorting]
-            group_ids = subhalo_to_group_map[sorted_ids]
-            valid = (group_ids >= 0) & (group_ids < n_groups)
-            full_alphas[group_ids[valid]] = sorted_alphas[valid]
+            # 2. Load positions/masses from the group catalog
+            positions, masses, subhalo_to_group_map = self.get_halo_information_from_catalog(redshift_index)
+            n_groups = masses.size
 
-        # 4. Replace non-finite values (inf/nan from short/missing histories)
-        full_alphas[~np.isfinite(full_alphas)] = alpha_fb
+            # 3. Map tree-derived alphas onto the full group array
+            full_alphas = np.full(n_groups, alpha_fb)
+            if tree_halo_ids.size > 0:
+                sorting = np.argsort(tree_halo_ids)
+                sorted_ids = tree_halo_ids[sorting]
+                sorted_alphas = halo_alphas[sorting]
+                group_ids = subhalo_to_group_map[sorted_ids]
+                valid = (group_ids >= 0) & (group_ids < n_groups)
+                full_alphas[group_ids[valid]] = sorted_alphas[valid]
+
+            # 4. Replace non-finite values (inf/nan from short/missing histories)
+            full_alphas[~np.isfinite(full_alphas)] = alpha_fb
 
         # 5. Clamp to the paintable alpha range
         alpha_range = self.parameters.solver.halo_mass_accretion_alpha
-        below = full_alphas < alpha_range[0]
-        above = full_alphas > alpha_range[-2]
-        full_alphas[below] = alpha_range[0]
-        full_alphas[above] = alpha_range[-2]
-        logger.debug(
-            f"z-index {redshift_index}: clamped {below.sum()} alphas below "
-            f"{alpha_range[0]:.2f} and {above.sum()} above {alpha_range[-2]:.2f}"
-        )
+        if alpha_constant is not None:
+            # Nothing to clamp — but a value outside the grid would silently paint
+            # every halo with the wrong profile bin, so fail loudly instead.
+            if not (alpha_range[0] <= alpha_constant < alpha_range[-1]):
+                raise ValueError(
+                    f"source.alpha_constant={alpha_constant} lies outside the paintable "
+                    f"alpha grid solver.halo_mass_accretion_alpha="
+                    f"[{alpha_range[0]}, {alpha_range[-1]}]."
+                )
+        else:
+            below = full_alphas < alpha_range[0]
+            above = full_alphas > alpha_range[-2]
+            full_alphas[below] = alpha_range[0]
+            full_alphas[above] = alpha_range[-2]
+            logger.debug(
+                f"z-index {redshift_index}: clamped {below.sum()} alphas below "
+                f"{alpha_range[0]:.2f} and {above.sum()} above {alpha_range[-2]:.2f}"
+            )
 
         catalog = HaloCatalog(
             positions=positions,

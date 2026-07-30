@@ -224,6 +224,26 @@ class ThesanLoader(MergerTreeLoader):
         offset_files = {self._snapshot_index_from_name(p): p
                         for p in self.offset_path_root.glob("offsets_*")}
 
+        if self.density_cache_dir is not None:
+            # A snapdir is ~2 TB, so they are routinely deleted once the density
+            # meshes have been cached.  Painting only needs the cached mesh, so
+            # accept those snapshots: the snapdir path is still constructed (the
+            # cache key is derived from its name), and load_density_field raises a
+            # clear error if a cache miss ever reaches a snapdir that is gone.
+            cache_only = []
+            for snap_index in sorted(catalogs):
+                if snap_index in density_dirs:
+                    continue
+                snapdir_name = f"snapdir_{snap_index:03d}"
+                if self._density_cache_path_for_snapdir_name(snapdir_name).exists():
+                    density_dirs[snap_index] = self.snapshot_path_root / snapdir_name
+                    cache_only.append(snap_index)
+            if cache_only:
+                self.logger.info(
+                    f"{len(cache_only)} snapshot(s) have no snapdir on disk but do have a "
+                    f"cached density mesh — accepted (snapshots {cache_only[0]}–{cache_only[-1]})"
+                )
+
         if self.cached_tree is not None:
             # Read snapshot redshifts from the HDF5 cache (stored as a dataset
             # alongside the provenance attributes — no separate YAML needed).
@@ -322,7 +342,14 @@ class ThesanLoader(MergerTreeLoader):
         The cache HDF5 file is produced by ``extract_simplified_tree.ipynb``.
         It must contain four datasets: ``tree_halo_ids``, ``tree_snap_num``,
         ``tree_mass``, ``tree_main_progenitor``.
+
+        The arrays are memoized on first use: the file holds ~3.6e8 entries (~6 GB,
+        ~30 s to read) and one alpha fit is performed per painted snapshot, so
+        re-reading it every time dominates the run.  Peak memory is unchanged — the
+        arrays were already materialised on every call.
         """
+        if getattr(self, "_tree_cache_arrays", None) is not None:
+            return self._tree_cache_arrays
         if self.cached_tree is None:
             raise RuntimeError(
                 "This ThesanLoader was built without a tree cache "
@@ -335,7 +362,8 @@ class ThesanLoader(MergerTreeLoader):
             tree_mass           = f["tree_mass"][:]
             tree_main_progenitor = f["tree_main_progenitor"][:]
         self.logger.debug(f"Loaded tree cache: {self.cached_tree} ({tree_halo_ids.size:,} entries)")
-        return tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor
+        self._tree_cache_arrays = (tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor)
+        return self._tree_cache_arrays
 
     def get_halo_information_from_catalog(
         self, redshift_index: int
@@ -422,10 +450,20 @@ class ThesanLoader(MergerTreeLoader):
         """
         if self.density_cache_dir is None:
             return None
-        snapshot_path = self._density_directories[redshift_index]
+        return self._density_cache_path_for_snapdir_name(
+            self._density_directories[redshift_index].name
+        )
+
+    def _density_cache_path_for_snapdir_name(self, snapdir_name: str) -> Path:
+        """Cache file for a snapdir identified by name (e.g. ``"snapdir_042"``).
+
+        Split out of :meth:`_density_cache_path` so ``__init__`` can test whether a
+        snapshot has a cached mesh before ``self._density_directories`` exists.
+        Requires ``density_cache_dir`` to be set.
+        """
         mass_assignment, _ = self._particle_mapping_config()
         sim = self.parameters.simulation
-        tag = f"{snapshot_path.name}_N{sim.Ncell}_L{sim.Lbox:.6g}_{mass_assignment}"
+        tag = f"{snapdir_name}_N{sim.Ncell}_L{sim.Lbox:.6g}_{mass_assignment}"
         if self.subbox is not None:
             o = self.subbox.origin
             tag += (
@@ -474,6 +512,15 @@ class ThesanLoader(MergerTreeLoader):
             return np.load(cache_path)
 
         snapshot_path = self._density_directories[redshift_index]
+        if not snapshot_path.exists():
+            # Accepted in __init__ on the strength of a cached mesh that has since
+            # gone missing (or a changed Ncell/Lbox/mass-assignment cache key).
+            # Painting an empty mesh would yield delta = nan everywhere, so stop here.
+            raise FileNotFoundError(
+                f"Snapshot directory {snapshot_path} does not exist and the density-mesh "
+                f"cache entry {cache_path} is missing, so the mesh cannot be (re)computed. "
+                "Re-run thesan_snapshot_preprocess.py for this snapshot, or restore the snapdir."
+            )
         snapshots = sorted(snapshot_path.glob("snap_*.hdf5"))
 
         mesh_size = self.parameters.simulation.Ncell

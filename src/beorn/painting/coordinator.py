@@ -336,6 +336,17 @@ class PaintingCoordinator:
         else:
             return self.paint_simple_loop(radiation_profiles, active_indices)
 
+    def resolve_painting_indices(
+        self, redshift_subset: "list[float] | None"
+    ) -> list:
+        """Public form of :meth:`_resolve_painting_indices`.
+
+        Callers that need to know *which* snapshots a later :meth:`paint_full` will
+        touch — e.g. to precompute radiation profiles on exactly those redshifts —
+        should use this rather than re-deriving the matching logic.
+        """
+        return self._resolve_painting_indices(redshift_subset)
+
     def _resolve_painting_indices(
         self, redshift_subset: "list[float] | None"
     ) -> list:
