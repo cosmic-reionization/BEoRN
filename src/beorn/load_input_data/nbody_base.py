@@ -297,6 +297,9 @@ class NBodyLoader(BaseLoader):
         Each ``factor³`` block of cells is averaged into one output cell.
         This conserves mean density: ⟨δ_coarse⟩ = ⟨δ_fine⟩.
 
+        Thin wrapper around :func:`beorn.particle_mapping.coarsen_field`
+        (shared with the fine-paint-then-downsample path, issue #48).
+
         Args:
             delta (np.ndarray): Input 3D overdensity array of shape (N, N, N).
             factor (int): Downsampling factor.  N must be divisible by factor.
@@ -307,17 +310,8 @@ class NBodyLoader(BaseLoader):
         Raises:
             ValueError: If any axis of ``delta`` is not divisible by ``factor``.
         """
-        N = delta.shape[0]
-        if any(s % factor != 0 for s in delta.shape):
-            raise ValueError(
-                f"Cannot degrade resolution by factor {factor}: "
-                f"grid shape {delta.shape} is not divisible on all axes."
-            )
-        Nc = N // factor
-        return (
-            delta.reshape(Nc, factor, Nc, factor, Nc, factor)
-                 .mean(axis=(1, 3, 5))
-        )
+        from ..particle_mapping import coarsen_field
+        return coarsen_field(delta, factor)
 
     def load_rsd_fields(self, redshift_index: int):
         """Not implemented for generic N-body loaders.

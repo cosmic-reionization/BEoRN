@@ -498,6 +498,7 @@ class LPTBase(ABC):
 
     def get_density(
         self, z: float, mass_assignment: str = 'CIC', fused: bool = True,
+        oversample: int = 1,
     ) -> np.ndarray:
         """Matter overdensity δ(x) at redshift z via particle painting.
 
@@ -519,22 +520,81 @@ class LPTBase(ABC):
                 it's currently an identical-computation fallback (no gain,
                 no regression — those backends don't have a real fused
                 kernel yet, tracked as follow-up). Pass ``fused=False`` to
-                force the original position-array path.
+                force the original position-array path. Ignored when
+                ``oversample > 1`` (see below).
+            oversample: If ``> 1`` (default ``1``, no oversampling),
+                Fourier-upsample the displacement field onto an
+                ``oversample*N`` Lagrangian grid
+                (:func:`~beorn.particle_mapping.upsample_field_fourier`),
+                paint *those* (more numerous) particles onto an
+                ``oversample*N``-cell mesh, then block-average back down to
+                ``(N, N, N)`` via
+                :func:`~beorn.particle_mapping.coarsen_field` before computing
+                the overdensity (issue #48's fine-paint-then-downsample: gets
+                P(k) close to linear theory within k_Nyquist of the analysis
+                grid with no deconvolution needed — validated at
+                ``oversample=8``, close at ``oversample=4``). Needed for
+                real-space statistics where
+                :func:`~beorn.particle_mapping.deconvolve_mas` doesn't apply
+                (persistence homology, Minkowski functionals, void-finding,
+                ...).
+
+                Painting the *same* N particles onto a finer mesh and
+                coarsening back down is a no-op — every particle's CIC/etc.
+                footprint still lands entirely within its own coarse block
+                regardless of the mesh resolution it's painted onto, so
+                block-averaging just reproduces the unfused coarse field to
+                machine precision. Recovering real sub-cell structure
+                requires more particles sampling the same underlying
+                band-limited displacement field at a finer resolution — no
+                new small-scale power is added (the upsampled field is exactly
+                the same one, just evaluated at more points), only the
+                mass-assignment discreteness/aliasing is reduced.
+
+                Always uses the non-fused position-array path internally —
+                the fused kernel doesn't yet support painting onto a mesh
+                finer than its particle grid, tracked as follow-up.
 
         Returns:
             delta — shape (N, N, N), mean-zero overdensity.
         """
         N, L = self.N, self.L
-        mesh = np.zeros((N, N, N), dtype=np.float32)
-        if fused:
-            from ..particle_mapping import paint_displacement_field
+        if oversample < 1 or not isinstance(oversample, int):
+            raise ValueError(f"oversample must be a positive int; got {oversample!r}.")
+
+        if oversample > 1:
+            from ..particle_mapping import (
+                map_particles_to_mesh, coarsen_field, upsample_field_fourier,
+            )
+            N_fine = oversample * N
             psi_x, psi_y, psi_z = self.get_displacement(z)
-            paint_displacement_field(mesh, L, psi_x, psi_y, psi_z,
-                                      mass_assignment=mass_assignment)
+            psi_x_f = upsample_field_fourier(psi_x, oversample)
+            psi_y_f = upsample_field_fourier(psi_y, oversample)
+            psi_z_f = upsample_field_fourier(psi_z, oversample)
+
+            cell_fine = L / N_fine
+            q1d_fine = (np.arange(N_fine) + 0.5) * cell_fine
+            x = (q1d_fine[:, None, None] + psi_x_f) % L
+            y = (q1d_fine[None, :, None] + psi_y_f) % L
+            z_pos = (q1d_fine[None, None, :] + psi_z_f) % L
+            positions = np.stack(
+                [x.ravel(), y.ravel(), z_pos.ravel()], axis=-1
+            ).astype(np.float32)
+
+            mesh_fine = np.zeros((N_fine, N_fine, N_fine), dtype=np.float32)
+            map_particles_to_mesh(mesh_fine, L, positions, mass_assignment=mass_assignment)
+            mesh = coarsen_field(mesh_fine, oversample)
         else:
-            from ..particle_mapping import map_particles_to_mesh
-            positions = self.get_positions(z)
-            map_particles_to_mesh(mesh, L, positions, mass_assignment=mass_assignment)
+            mesh = np.zeros((N, N, N), dtype=np.float32)
+            if fused:
+                from ..particle_mapping import paint_displacement_field
+                psi_x, psi_y, psi_z = self.get_displacement(z)
+                paint_displacement_field(mesh, L, psi_x, psi_y, psi_z,
+                                          mass_assignment=mass_assignment)
+            else:
+                from ..particle_mapping import map_particles_to_mesh
+                positions = self.get_positions(z)
+                map_particles_to_mesh(mesh, L, positions, mass_assignment=mass_assignment)
         mean = mesh.mean()
         if mean > 0:
             mesh = mesh / mean - 1.0

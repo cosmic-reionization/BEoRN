@@ -6,7 +6,6 @@ import h5py
 import numpy as np
 import logging
 import re
-import tools21cm as t2c
 from tqdm.auto import tqdm
 
 from .base_struct import BaseStruct
@@ -439,25 +438,46 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
     # Analysis                                                             #
     # ------------------------------------------------------------------ #
 
-    def power_spectrum(self, quantity: np.ndarray, parameters: Parameters) -> tuple[np.ndarray, np.ndarray]:
+    def power_spectrum(
+        self,
+        quantity: np.ndarray,
+        parameters: Parameters,
+        mass_assignment: str | None = None,
+        deconvolve: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Compute 1D power spectra for a given grid quantity over all z.
 
         Args:
             quantity (np.ndarray): Array shaped (z, nx, ny, nz) to analyse.
             parameters (Parameters): Simulation parameters providing `kbins` and `Lbox`.
+            mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'`` — the
+                scheme ``quantity`` was painted with. Required if ``deconvolve=True``.
+            deconvolve: If ``True``, undo the mass-assignment window (issue #48)
+                before binning — fixes the high-k suppression it introduces as a
+                pure numerical artefact. See
+                :func:`beorn.particle_mapping.deconvolve_mas` for why this is a
+                P(k)-only fix (not safe to apply to the field itself).
 
         Returns:
             tuple: ``(power_spectrum, bins)`` where ``power_spectrum`` has shape
             (n_z, n_k) and ``bins`` are the k-bin edges.
         """
+        from ..power_spectrum import power_spectrum_1d
+
         bin_number = parameters.simulation.kbins.size
         box_dims = parameters.simulation.Lbox
         power_spectrum = np.zeros((self.z_snapshots.size, bin_number))
 
         delta_quantity = quantity[:] / np.mean(quantity, axis=(1, 2, 3))[:, np.newaxis, np.newaxis, np.newaxis] - 1
 
+        kny = None
         for i, z in enumerate(tqdm(self.z_snapshots, desc='Power spectrum', unit='snapshot')):
-            power_spectrum[i, ...], bins = t2c.power_spectrum.power_spectrum_1d(delta_quantity[i, ...], box_dims=box_dims, kbins=bin_number)
+            power_spectrum[i, ...], bins, kny = power_spectrum_1d(
+                delta_quantity[i, ...], box_dims=box_dims, kbins=bin_number,
+                mass_assignment=mass_assignment, deconvolve=deconvolve,
+            )
+        if kny is not None:
+            logger.info(f"TemporalCube.power_spectrum: k_Nyquist = {kny:.4g}")
 
         return power_spectrum, bins
 
