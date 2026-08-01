@@ -160,15 +160,21 @@ def draw_dTb_power_spectrum_of_k(ax: plt.Axes, grid: TemporalCube, parameters: P
 
     delta_quantity = current_grid / mean_dtb - 1
     bin_number = parameters.simulation.kbins.size
+    # Power spectrum itself is always computed in h-units (matches every other
+    # internal consumer of Lbox); only the displayed bins/label below follow
+    # `use_hunits` — see issue #49.
     box_dims = parameters.simulation.Lbox
 
     ps, bins = t2c.power_spectrum.power_spectrum_1d(delta_quantity, box_dims=box_dims, kbins=bin_number)
     ps_c = ps * bins ** 3 * mean_dtb ** 2 / (2 * np.pi ** 2)
 
-    ax.semilogy(bins, ps_c, ls='-', label=f"{label} (z={z:.2f})", color=color)
+    k_unit = 'h/Mpc' if parameters.simulation.use_hunits else 'Mpc$^{-1}$'
+    bins_display = bins if parameters.simulation.use_hunits else bins * parameters.cosmology.h0
+
+    ax.semilogy(bins_display, ps_c, ls='-', label=f"{label} (z={z:.2f})", color=color)
     ax.set_ylim(1e-1, 1e3)
     ax.set_ylabel(r'$\Delta_\mathrm{21}^{{2}}$ [mK]$^2$')
-    ax.set_xlabel('k [cMpc$^{-1}$]')
+    ax.set_xlabel(f'k [{k_unit}]')
     print(f'z={z:.2f}')
     return z
 

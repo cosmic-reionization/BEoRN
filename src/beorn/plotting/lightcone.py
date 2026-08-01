@@ -44,7 +44,9 @@ def define_norm_cbar_label(data: np.ndarray, quantity: str) -> tuple:
 
 
 def plot_lightcone(lightcone: Lightcone, ax: plt.Axes, description: str, slice_number: int = None) -> None:
-    lbox = lightcone.parameters.simulation.Lbox
+    parameters = lightcone.parameters
+    lbox = parameters.Lbox_physical
+    length_unit = 'Mpc/h' if parameters.simulation.use_hunits else 'Mpc'
     redshifts = 1 / lightcone.redshifts - 1
 
     logger.debug(f"Lightcone dynamic range is {lightcone.data.min():.2e} to {lightcone.data.max():.2e}")
@@ -71,7 +73,7 @@ def plot_lightcone(lightcone: Lightcone, ax: plt.Axes, description: str, slice_n
     ax.text(0.02, 0.1, description, color='white', fontweight="bold", transform=ax.transAxes)
 
     ax.set_xlabel('a')
-    ax.set_ylabel('L (Mpc)')
+    ax.set_ylabel(f'L ({length_unit})')
 
     # Add a secondary x-axis to show the redshifts
     ax2 = ax.twiny()

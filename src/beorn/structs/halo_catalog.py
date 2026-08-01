@@ -5,6 +5,7 @@ import logging
 
 from .parameters import Parameters
 from ..particle_mapping import map_particles_to_mesh
+from ..units import length_factor
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +19,14 @@ class HaloCatalog:
     """
 
     positions: np.ndarray
-    """Halo positions in 3D space (X, Y, Z coordinates) in units of cMpc => shape=(N, 3)"""
+    """Halo positions in 3D space (X, Y, Z coordinates), in comoving Mpc/h (matching
+    ``parameters.simulation.Lbox``) => shape=(N, 3). Use :attr:`positions_physical`
+    to read these out in the unit system selected by
+    ``parameters.simulation.use_hunits`` instead."""
 
     masses: np.ndarray
-    """Halo masses in units of Msun => shape=(N,)"""
+    """Halo masses in units of Msun (already h-independent; unaffected by
+    ``parameters.simulation.use_hunits``) => shape=(N,)"""
 
     parameters: Parameters
     """The parameters of the simulation, which are used to filter the halo catalog."""
@@ -61,6 +66,19 @@ class HaloCatalog:
         Returns the number of halos in the catalog.
         """
         return self.masses.size
+
+    @property
+    def positions_physical(self) -> np.ndarray:
+        """Halo positions converted per ``parameters.simulation.use_hunits``.
+
+        Returns :attr:`positions` unchanged (Mpc/h) when ``use_hunits`` is
+        True (the default); converted to physical Mpc when False. Internal
+        consumers (:meth:`to_mesh`, :meth:`halo_mass_function`, painting) keep
+        using :attr:`positions` directly and are unaffected by this toggle —
+        this accessor exists for reading the catalog out in the requested
+        unit system for post-processing, per issue #49.
+        """
+        return self.positions * length_factor(self.parameters)
 
 
     def get_halo_indices(self, alpha_range: list[float], mass_range: list[float]) -> np.ndarray:

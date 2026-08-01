@@ -14,6 +14,7 @@ import h5py
 import logging
 
 from .helpers import bin_centers
+from ..units import length_factor
 
 logger = logging.getLogger(__name__)
 
@@ -273,18 +274,29 @@ class SimulationParameters:
     into one, e.g. degrade_resolution=4 turns a 256³ grid into 64³.
     Set Ncell to the native grid size divided by degrade_resolution."""
 
+    use_hunits: bool = True
+    """Whether lengths/masses that flow through :mod:`beorn.units` are expressed in
+    h-units (Mpc/h, Msun/h — the historical BEoRN convention) or physical units
+    (Mpc, Msun). Defaults to ``True`` so every existing script/notebook is
+    unaffected. See :mod:`beorn.units` for the conversion helpers gated by this
+    flag (issue #49)."""
+
+    @staticmethod
+    def _kbins_from(lbox: float, ncell: int) -> np.ndarray:
+        k_min = 1 / lbox
+        k_max = ncell / lbox
+        # TODO - explain the factor of 6
+        bin_count = int(6 * np.log10(k_max / k_min))
+
+        return np.logspace(np.log10(k_min), np.log10(k_max), bin_count, base=10)
+
     @property
     def kbins(self) -> np.ndarray:
         """
         Returns the k bins for the power spectrum. The bins are logarithmically spaced between k_min and k_max.
         The number of bins is determined by the size of the simulation box and the number of cells.
         """
-        k_min = 1 / self.Lbox
-        k_max = self.Ncell / self.Lbox
-        # TODO - explain the factor of 6
-        bin_count = int(6 * np.log10(k_max / k_min))
-
-        return np.logspace(np.log10(k_min), np.log10(k_max), bin_count, base=10)
+        return self._kbins_from(self.Lbox, self.Ncell)
 
     def __post_init__(self):
         # ensure the items of the store_grids are strings. When loading from hdf5 they might be bytes
@@ -369,6 +381,30 @@ class Parameters:
     cosmo_sim: CosmoSimParameters = field(default_factory = CosmoSimParameters)
     """cosmo-sim input parameters (py21cmfast, Thesan, PKDGrav, etc.)"""
 
+
+    @property
+    def Lbox_physical(self) -> float:
+        """``simulation.Lbox`` converted per ``simulation.use_hunits``.
+
+        Returns the raw value unchanged (Mpc/h) when ``use_hunits`` is True
+        (the default, matching every existing script); converted to physical
+        Mpc when False. All internal code (LPT, mass function, painting)
+        keeps reading ``simulation.Lbox`` directly and is unaffected — this
+        is a boundary/output accessor only, per issue #49.
+        """
+        return self.simulation.Lbox * length_factor(self)
+
+    @property
+    def kbins_physical(self) -> np.ndarray:
+        """``simulation.kbins`` recomputed from :attr:`Lbox_physical` instead of the raw
+        (h-unit) ``simulation.Lbox``.
+
+        Returns the same array as ``simulation.kbins`` when ``use_hunits`` is
+        True (the default, h/Mpc); in 1/Mpc when False. Boundary/output
+        accessor only — internal power-spectrum code keeps using
+        ``simulation.kbins`` directly. See issue #49.
+        """
+        return SimulationParameters._kbins_from(self.Lbox_physical, self.simulation.Ncell)
 
     def unique_hash(self) -> str:
         """

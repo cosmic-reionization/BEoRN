@@ -14,3 +14,4 @@ from . import plotting as plotting
 from . import lpt as lpt
 from . import mass_function as mass_function
 from . import power_spectrum as power_spectrum
+from . import units as units
