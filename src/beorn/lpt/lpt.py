@@ -498,7 +498,7 @@ class LPTBase(ABC):
 
     def get_density(
         self, z: float, mass_assignment: str = 'CIC', fused: bool = True,
-        oversample: int = 1,
+        oversample: int = 1, backend: str | None = None,
     ) -> np.ndarray:
         """Matter overdensity δ(x) at redshift z via particle painting.
 
@@ -554,6 +554,17 @@ class LPTBase(ABC):
                 Always uses the non-fused position-array path internally —
                 the fused kernel doesn't yet support painting onto a mesh
                 finer than its particle grid, tracked as follow-up.
+            backend: Mass-assignment backend forwarded to
+                :func:`~beorn.particle_mapping.paint_displacement_field` /
+                :func:`~beorn.particle_mapping.map_particles_to_mesh`
+                (``'numpy'``, ``'numba'``, ``'pylians'``, ``'torch'``,
+                ``'jax'``, or ``'auto'``). ``None`` (default) reads
+                ``parameters.cosmo_sim.particle_mapping_backend`` (itself
+                ``'auto'`` by default), matching
+                :meth:`~beorn.structs.HaloCatalog.to_mesh`. Note: jax/torch's
+                scatter-add mass assignment is not bit-deterministic
+                run-to-run on GPU — pass ``backend='numpy'`` explicitly if
+                you need reproducible density fields.
 
         Returns:
             delta — shape (N, N, N), mean-zero overdensity.
@@ -561,6 +572,10 @@ class LPTBase(ABC):
         N, L = self.N, self.L
         if oversample < 1 or not isinstance(oversample, int):
             raise ValueError(f"oversample must be a positive int; got {oversample!r}.")
+        resolved_backend = (
+            backend if backend is not None
+            else self.parameters.cosmo_sim.particle_mapping_backend
+        )
 
         if oversample > 1:
             from ..particle_mapping import (
@@ -582,7 +597,8 @@ class LPTBase(ABC):
             ).astype(np.float32)
 
             mesh_fine = np.zeros((N_fine, N_fine, N_fine), dtype=np.float32)
-            map_particles_to_mesh(mesh_fine, L, positions, mass_assignment=mass_assignment)
+            map_particles_to_mesh(mesh_fine, L, positions, mass_assignment=mass_assignment,
+                                   backend=resolved_backend)
             mesh = coarsen_field(mesh_fine, oversample)
         else:
             mesh = np.zeros((N, N, N), dtype=np.float32)
@@ -590,11 +606,13 @@ class LPTBase(ABC):
                 from ..particle_mapping import paint_displacement_field
                 psi_x, psi_y, psi_z = self.get_displacement(z)
                 paint_displacement_field(mesh, L, psi_x, psi_y, psi_z,
-                                          mass_assignment=mass_assignment)
+                                          mass_assignment=mass_assignment,
+                                          backend=resolved_backend)
             else:
                 from ..particle_mapping import map_particles_to_mesh
                 positions = self.get_positions(z)
-                map_particles_to_mesh(mesh, L, positions, mass_assignment=mass_assignment)
+                map_particles_to_mesh(mesh, L, positions, mass_assignment=mass_assignment,
+                                       backend=resolved_backend)
         mean = mesh.mean()
         if mean > 0:
             mesh = mesh / mean - 1.0
