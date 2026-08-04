@@ -39,6 +39,10 @@ class Lightcone:
 
         scale_factors = 1 / (grid.z[:] + 1)
 
+        # tools21cm's box_length_mpc is physical Mpc (no h) — NOT the internal
+        # Mpc/h representation used everywhere else in BEoRN, so convert
+        # explicitly (pre-existing mismatch predating issue #49 — this call
+        # used to pass raw Mpc/h straight through).
         lightcone_data, lightcone_redshifts = t2c.make_lightcone(
             filenames = range(grid.z.size),
             # file_redshifts = grid.z[:],
@@ -46,7 +50,7 @@ class Lightcone:
             reading_function = reading_function,
             los_axis = 2,
             raw_density = False,
-            box_length_mpc = parameters.simulation.Lbox,
+            box_length_mpc = parameters.Lbox_hunits / parameters.cosmology.h0,
         )
         # assert lightcone_redshifts == grid.z, "Redshifts in lightcone do not match grid redshifts."
 

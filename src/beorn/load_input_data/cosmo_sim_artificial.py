@@ -39,9 +39,9 @@ class ArtificialHaloLoader(BaseLoader):
         """
         super().__init__(parameters)
         rng = np.random.default_rng(seed)
-        self.X = rng.random(halo_count) * self.parameters.simulation.Lbox
-        self.Y = rng.random(halo_count) * self.parameters.simulation.Lbox
-        self.Z = rng.random(halo_count) * self.parameters.simulation.Lbox
+        self.X = rng.random(halo_count) * self.parameters.Lbox_hunits
+        self.Y = rng.random(halo_count) * self.parameters.Lbox_hunits
+        self.Z = rng.random(halo_count) * self.parameters.Lbox_hunits
 
         self.mass_at_z0 = np.full(halo_count, final_mass)
         self.alpha = alpha

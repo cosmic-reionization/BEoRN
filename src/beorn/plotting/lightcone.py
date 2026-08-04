@@ -45,7 +45,11 @@ def define_norm_cbar_label(data: np.ndarray, quantity: str) -> tuple:
 
 def plot_lightcone(lightcone: Lightcone, ax: plt.Axes, description: str, slice_number: int = None) -> None:
     parameters = lightcone.parameters
-    lbox = parameters.Lbox_physical
+    # simulation.Lbox already reflects the user's chosen unit system directly
+    # (Mpc/h if use_hunits, physical Mpc otherwise) -- no conversion needed
+    # for display, unlike internal computation which always goes through
+    # Lbox_hunits.
+    lbox = parameters.simulation.Lbox
     length_unit = 'Mpc/h' if parameters.simulation.use_hunits else 'Mpc'
     redshifts = 1 / lightcone.redshifts - 1
 

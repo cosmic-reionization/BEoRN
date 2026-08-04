@@ -94,8 +94,15 @@ class GridDerivedPropertiesMixin:
 
         rsd = np.array((v_x, v_z, v_z))
         # TODO make sure that the line of sight is the same as the one used later in the spectra
-        t2c.conv.LB = self.parameters.simulation.Lbox
-        dT_rsd = t2c.get_distorted_dt(self.Grid_dTb, rsd, self.z, los_axis=0, velocity_axis=0, num_particles=20)
+        # tools21cm's boxsize is physical Mpc (no h) — NOT the internal Mpc/h
+        # representation used everywhere else in BEoRN, so convert explicitly
+        # here rather than passing Lbox_hunits directly (pre-existing
+        # mismatch predating issue #49 — this call used to pass raw Mpc/h
+        # straight through to tools21cm's global `conv.LB`).
+        dT_rsd = t2c.get_distorted_dt(
+            self.Grid_dTb, rsd, self.z, los_axis=0, velocity_axis=0, num_particles=20,
+            boxsize=self.parameters.Lbox_hunits / self.parameters.cosmology.h0,
+        )
         return dT_rsd
 
 

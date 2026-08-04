@@ -225,7 +225,7 @@ class PKDGravLoader(NBodyLoader):
             catalog_array = catalog_array[np.newaxis, :]
 
         masses = catalog_array[:, 0] * self.parameters.cosmology.h0
-        positions = catalog_array[:, 1:] + self.parameters.simulation.Lbox / 2
+        positions = catalog_array[:, 1:] + self.parameters.Lbox_hunits / 2
         return masses, positions
 
     def _read_density_file(self, path: Path) -> np.ndarray:

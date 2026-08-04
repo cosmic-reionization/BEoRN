@@ -50,6 +50,7 @@ def param():
     p = Parameters()
     p.simulation.Ncell = N
     p.simulation.Lbox = L
+    p.simulation.use_hunits = True  # L is a plain Mpc/h constant shared with the "pure" reference functions below (issue #49)
     p.source.halo_mass_min = 1e9
     return p
 

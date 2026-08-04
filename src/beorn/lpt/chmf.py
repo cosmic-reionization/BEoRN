@@ -273,7 +273,7 @@ class CHMFSampler:
             Smoothed field, same shape.
         """
         N = delta.shape[0]
-        L = self.parameters.simulation.Lbox
+        L = self.parameters.Lbox_hunits
         dk = 2.0 * np.pi / L
         kvals = np.fft.fftfreq(N, d=1.0 / N) * dk
         kz_vals = np.fft.rfftfreq(N, d=1.0 / N) * dk
@@ -290,7 +290,7 @@ class CHMFSampler:
             and the environmental mass scale in M_sun.
         """
         params = self.parameters
-        cell_size = params.simulation.Lbox / params.simulation.Ncell
+        cell_size = params.Lbox_hunits / params.simulation.Ncell
         if R_env is None:
             return delta_field, self.chmf.rho_m * cell_size ** 3
         M_env = self.chmf.M_of_R(R_env)
@@ -351,7 +351,7 @@ class CHMFSampler:
             warnings.warn(
                 f"CHMF can only sample halos with M < M_env = {M_env:.2e} Msun "
                 f"(cell mass for N={params.simulation.Ncell}, "
-                f"L={params.simulation.Lbox} Mpc/h).  "
+                f"L={params.Lbox_hunits} Mpc/h).  "
                 f"Capping M_max at {M_max:.2e} Msun.  "
                 f"Increase R_env or use a coarser grid to access higher masses.",
                 stacklevel=3,
@@ -406,7 +406,7 @@ class CHMFSampler:
             :meth:`CHMF.hmf_chmf_field` per bin for large grids.
         """
         params = self.parameters
-        V_cell = (params.simulation.Lbox / params.simulation.Ncell) ** 3
+        V_cell = (params.Lbox_hunits / params.simulation.Ncell) ** 3
 
         delta_env, M_env = self._environment(delta_field, R_env)
         sigma2_env = float(self.chmf.sigma2(M_env, z))
@@ -469,7 +469,7 @@ class CHMFSampler:
         """
         params = self.parameters
         N = params.simulation.Ncell
-        L = params.simulation.Lbox
+        L = params.Lbox_hunits
         cell_size = L / N
         V_cell = cell_size ** 3
 

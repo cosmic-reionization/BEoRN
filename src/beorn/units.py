@@ -1,12 +1,23 @@
 """Conversion helpers between BEoRN's h-unit convention and physical units.
 
-BEoRN's internals (LPT, mass function, painting, ...) all compute in the
-historical h-unit convention (lengths in Mpc/h, masses in Msun/h in some
-places), gated by :attr:`~beorn.structs.parameters.SimulationParameters.use_hunits`
-(default ``True``, preserving existing behaviour). These helpers are meant to
-be applied at the boundary — where a user-facing quantity is constructed from
-or converted to a physical (non-h) value — not scattered through validated
-internal numerics. See issue #49 for the full design.
+BEoRN's internals (LPT, mass function, painting, ...) always compute in the
+historical h-unit convention (Mpc/h). Quantities split into two different
+handling patterns depending on whether the *user* ever directly sets them:
+
+- ``simulation.Lbox`` is user input whose meaning depends on
+  ``simulation.use_hunits`` (Mpc/h when True; physical Mpc when False, the
+  default) — see :attr:`~beorn.structs.parameters.Parameters.Lbox_hunits`,
+  which resolves it to the internal Mpc/h representation. This module's
+  helpers are NOT used for ``Lbox`` — do not apply ``length_factor`` to it.
+- Quantities that are always an *output* of internal computation (never a
+  raw user input), like halo positions, are always computed in Mpc/h
+  regardless of the toggle; :func:`length_factor` converts them to physical
+  units for display/post-processing only (see
+  :attr:`~beorn.structs.HaloCatalog.positions_physical`).
+
+Halo-mass-valued quantities are not yet gated by ``use_hunits`` at all
+(deferred, tracked separately) — :func:`mass_factor` exists for that future
+work but has no call sites yet. See issue #49 for the full design history.
 """
 
 from .constants import rhoc0 as _rhoc0_hunits

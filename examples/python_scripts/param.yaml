@@ -3,12 +3,14 @@
 # Only sections/fields listed here override beorn.structs.Parameters()'s
 # defaults - any field omitted from a section (or a whole section omitted)
 # keeps its default value. Values below reproduce the setup used in
-# ../lpt_native_21cm.ipynb.
+# ../lpt_native_21cm.ipynb. See ../parameters.yaml for the full set of
+# available fields with default values and descriptions.
 
 simulation:
-  cores: 4
-  Lbox: 100        # comoving Mpc/h
-  Ncell: 128
+  Ncell: 128                    # grid cells per side; total grid is Ncell^3
+  Lbox: 100                     # box length, in Mpc/h
+  cores: 4                      # cores for shared-memory parallelization (1 disables it)
+  use_hunits: true              # Lbox above is in Mpc/h, not physical Mpc
 
 cosmo_sim:
   random_seed: 12345

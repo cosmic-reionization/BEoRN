@@ -90,7 +90,7 @@ class LPTHaloLoader(BaseLoader):
         if R_env is not None:
             self._R_tophat = R_env
         else:
-            cell = parameters.simulation.Lbox / parameters.simulation.Ncell
+            cell = parameters.Lbox_hunits / parameters.simulation.Ncell
             self._R_tophat = (3.0 / (4.0 * np.pi)) ** (1.0 / 3.0) * cell
 
     # ------------------------------------------------------------------

@@ -161,9 +161,9 @@ def draw_dTb_power_spectrum_of_k(ax: plt.Axes, grid: TemporalCube, parameters: P
     delta_quantity = current_grid / mean_dtb - 1
     bin_number = parameters.simulation.kbins.size
     # Power spectrum itself is always computed in h-units (matches every other
-    # internal consumer of Lbox); only the displayed bins/label below follow
-    # `use_hunits` — see issue #49.
-    box_dims = parameters.simulation.Lbox
+    # internal consumer of Lbox_hunits); only the displayed bins/label below
+    # follow `use_hunits` — see issue #49.
+    box_dims = parameters.Lbox_hunits
 
     ps, bins = t2c.power_spectrum.power_spectrum_1d(delta_quantity, box_dims=box_dims, kbins=bin_number)
     ps_c = ps * bins ** 3 * mean_dtb ** 2 / (2 * np.pi ** 2)
