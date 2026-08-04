@@ -609,7 +609,7 @@ class PaintingCoordinator:
         nGrid = self.parameters.simulation.Ncell
         store_grids = self.parameters.simulation.store_grids
         cores = self.parameters.simulation.cores
-        fft_backend = _resolve_fft_backend(self.parameters.simulation.fft_backend)
+        fft_backend = _resolve_fft_backend(self.parameters.simulation.backend.resolve('profile_painting'))
         # GPU backends (jax/torch) run bins serially in the main process; the GPU
         # provides internal parallelism for each FFT.  CPU numpy uses ProcessPoolExecutor.
         use_gpu = fft_backend in _GPU_BACKENDS
@@ -835,7 +835,7 @@ class PaintingCoordinator:
         nGrid = self.parameters.simulation.Ncell
         store_grids = self.parameters.simulation.store_grids
         cores = self.parameters.simulation.cores
-        fft_backend = _resolve_fft_backend(self.parameters.simulation.fft_backend)
+        fft_backend = _resolve_fft_backend(self.parameters.simulation.backend.resolve('profile_painting'))
         use_gpu = fft_backend in _GPU_BACKENDS
         use_multiprocess = cores > 1 and not use_gpu
         fft_workers = 1 if use_gpu else (-1 if cores <= 1 else max(1, (os.cpu_count() or 1) // cores))
@@ -1114,7 +1114,7 @@ class PaintingCoordinator:
             on the appropriate device, or None for skipped fields.
         """
         cores = self.parameters.simulation.cores
-        fft_backend = _resolve_fft_backend(self.parameters.simulation.fft_backend)
+        fft_backend = _resolve_fft_backend(self.parameters.simulation.backend.resolve('profile_painting'))
         # GPU handles internal parallelism; don't over-subscribe CPU threads in workers.
         if fft_backend in _GPU_BACKENDS:
             fft_workers = 1
@@ -1124,7 +1124,7 @@ class PaintingCoordinator:
             fft_workers = max(1, (os.cpu_count() or 1) // cores)
 
         nGrid = self.parameters.simulation.Ncell
-        LBox = self.parameters.simulation.Lbox
+        LBox = self.parameters.Lbox_hunits
         truncate = False
         R_bubble, rho_alpha_, Temp_profile = profiles_of_bin
 

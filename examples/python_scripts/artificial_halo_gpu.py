@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def detect_gpu_backend() -> str:
-    """Return the fastest available `fft_backend`: 'jax', 'torch', or 'numpy'."""
+    """Return the fastest available backend: 'jax', 'torch', or 'numpy'."""
     try:
         import jax
         if any(d.platform != "cpu" for d in jax.devices()):
@@ -57,8 +57,8 @@ def detect_gpu_backend() -> str:
 def build_parameters() -> beorn.structs.Parameters:
     """Same source model and simulation volume as ``../artificial_halos.ipynb``.
 
-    Also fixes ``simulation.fft_backend``/``cores`` to the GPU backend this
-    machine will actually use for the production run: `beorn_hash()` (which
+    Also fixes ``simulation.backend.default``/``cores`` to the GPU backend
+    this machine will actually use for the production run: `beorn_hash()` (which
     determines where `paint_full` writes/looks for output) is computed from
     the whole `simulation` section, so the reader (`plot_results.ipynb`,
     calling this same function) must reconstruct an identical `simulation`
@@ -68,6 +68,7 @@ def build_parameters() -> beorn.structs.Parameters:
 
     parameters.simulation.cores = 4
     parameters.simulation.Lbox = 100
+    parameters.simulation.use_hunits = True  # Lbox above is in Mpc/h, not physical Mpc
     parameters.simulation.Ncell = 128
 
     parameters.solver.halo_mass_bin_min = 1e7
@@ -105,7 +106,7 @@ def build_parameters() -> beorn.structs.Parameters:
     parameters.source.halo_mass_min = 1e5
 
     backend = detect_gpu_backend()
-    parameters.simulation.fft_backend = backend
+    parameters.simulation.backend.default = backend
     # GPU backends paint mass bins serially; forked worker processes that
     # inherit a CUDA context crash (BrokenProcessPool).
     parameters.simulation.cores = 1 if backend != "numpy" else 4
@@ -140,7 +141,7 @@ def benchmark_backends(parameters, loader, profiles, output_handler, z_index: in
 
     fields, timings = {}, {}
     for be in backends:
-        parameters.simulation.fft_backend = be
+        parameters.simulation.backend.default = be
         painter = beorn.painting.PaintingCoordinator(
             parameters, loader=loader, output_handler=output_handler,
             force_recompute=True,
@@ -150,7 +151,7 @@ def benchmark_backends(parameters, loader, profiles, output_handler, z_index: in
         timings[be] = time.time() - t0
         fields[be] = (np.array(cube.Grid_xHII), np.array(cube.Grid_Temp), np.array(cube.Grid_xal))
 
-    parameters.simulation.fft_backend = "numpy"
+    parameters.simulation.backend.default = "numpy"
     parameters.simulation.cores = original_cores
 
     logger.info("paint_single backend benchmark at z=%.2f:", loader.redshifts[z_index])
@@ -166,9 +167,9 @@ def benchmark_backends(parameters, loader, profiles, output_handler, z_index: in
 
 def main() -> None:
     parameters = build_parameters()
-    backend = parameters.simulation.fft_backend
+    backend = parameters.simulation.backend.default
     cores = parameters.simulation.cores
-    logger.info("Selected fft_backend=%s for the production run", backend)
+    logger.info("Selected backend=%s for the production run", backend)
 
     cache_handler = beorn.io.Handler(CACHE_ROOT)
     loader = beorn.load_input_data.ArtificialHaloLoader(parameters, halo_count=100)
@@ -181,9 +182,9 @@ def main() -> None:
     z_index = int(np.argmin(np.abs(loader.redshifts - 9.0)))
     benchmark_backends(parameters, loader, profiles, output_handler, z_index)
 
-    # benchmark_backends leaves fft_backend/cores at its own defaults - restore
+    # benchmark_backends leaves backend/cores at its own defaults - restore
     # the production values fixed by build_parameters() before painting.
-    parameters.simulation.fft_backend = backend
+    parameters.simulation.backend.default = backend
     parameters.simulation.cores = cores
 
     painter = beorn.painting.PaintingCoordinator(
@@ -192,7 +193,7 @@ def main() -> None:
     )
     t0 = time.time()
     multi_z_quantities = painter.paint_full(profiles)
-    logger.info("paint_full finished in %.1f s (fft_backend=%s)", time.time() - t0, backend)
+    logger.info("paint_full finished in %.1f s (backend=%s)", time.time() - t0, backend)
 
     stats = beorn.structs.StatisticsEstimator(multi_z_quantities, parameters)
     stats_path = stats.save(path=OUTPUT_ROOT / f"stats_{INPUT_TAG}.h5")

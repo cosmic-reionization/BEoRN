@@ -78,6 +78,7 @@ def map_particles_to_mesh(
     mass_assignment: str = 'CIC',
     backend: str = 'auto',
     weights: np.ndarray = None,
+    deconvolve: bool = True,
 ) -> None:
     """Map particle positions onto a 3-D mesh using the requested backend.
 
@@ -95,6 +96,17 @@ def map_particles_to_mesh(
             ``'jax'``.  Defaults to ``'numpy'``.
         weights (np.ndarray, optional): Per-particle weights (e.g. velocities
             for RSD).  Shape ``(n_parts,)``.  ``None`` gives uniform weight 1.
+        deconvolve (bool): If ``True`` (default), correct the ``mass_assignment``
+            window (:func:`beorn.particle_mapping.deconvolve_mas`) in place
+            immediately after painting, using the same ``mass_assignment``
+            scheme just painted with. This removes the ``sinc^p`` suppression
+            near k_Nyquist from *any* mesh built here — the total (or
+            per-particle-weight) sum is exactly preserved (the window is 1 at
+            k=0), only pointwise structure near k_Nyquist changes. Pass
+            ``False`` to get the raw painted mesh (e.g. to test the painting
+            mechanics themselves, or when you plan to call
+            ``deconvolve_mas``/``power_spectrum_1d(..., deconvolve=True)``
+            yourself downstream instead).
 
     Backend / scheme support matrix
     --------------------------------
@@ -137,6 +149,12 @@ def map_particles_to_mesh(
         from .jax_backend import map_particles_to_mesh as _fn
         _fn(mesh, box_size, particle_positions, mass_assignment, weights=weights)
 
+    if deconvolve:
+        from .window import deconvolve_mas
+        mesh[...] = np.asarray(
+            deconvolve_mas(mesh, box_size, mass_assignment)
+        ).astype(mesh.dtype, copy=False)
+
 
 def paint_displacement_field(
     mesh: np.ndarray,
@@ -147,6 +165,7 @@ def paint_displacement_field(
     mass_assignment: str = 'CIC',
     backend: str = 'auto',
     weights: np.ndarray = None,
+    deconvolve: bool = True,
 ) -> None:
     """Paint a regular grid displaced by (psi_x, psi_y, psi_z) onto *mesh*.
 
@@ -171,6 +190,9 @@ def paint_displacement_field(
             ``'torch'``, ``'jax'``, or ``'auto'`` (default).
         weights (np.ndarray, optional): Per-grid-point weights, shape
             ``(N, N, N)``.  ``None`` gives uniform weight 1.
+        deconvolve (bool): If ``True`` (default), correct the
+            ``mass_assignment`` window in place after painting — see
+            :func:`map_particles_to_mesh`.
     """
     if backend not in _VALID_BACKENDS:
         raise ValueError(
@@ -185,19 +207,24 @@ def paint_displacement_field(
         from .numpy_backend import paint_displacement_field as _fn
         _fn(mesh, box_size, psi_x, psi_y, psi_z,
             mass_assignment=mass_assignment, weights=weights)
-        return
+    else:
+        # Non-fused fallback: build the (N^3,3) position array the original
+        # way and hand it to the existing painter.
+        N = mesh.shape[0]
+        q1d = (np.arange(N) + 0.5) * (box_size / N)
+        x = q1d[:, None, None] + psi_x
+        y = q1d[None, :, None] + psi_y
+        z = q1d[None, None, :] + psi_z
+        positions = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=-1).astype(np.float32)
+        w = None if weights is None else np.asarray(weights).ravel()
+        map_particles_to_mesh(mesh, box_size, positions, mass_assignment=mass_assignment,
+                               backend=backend, weights=w, deconvolve=False)
 
-    # Non-fused fallback: build the (N^3,3) position array the original way
-    # and hand it to the existing painter.
-    N = mesh.shape[0]
-    q1d = (np.arange(N) + 0.5) * (box_size / N)
-    x = q1d[:, None, None] + psi_x
-    y = q1d[None, :, None] + psi_y
-    z = q1d[None, None, :] + psi_z
-    positions = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=-1).astype(np.float32)
-    w = None if weights is None else np.asarray(weights).ravel()
-    map_particles_to_mesh(mesh, box_size, positions, mass_assignment=mass_assignment,
-                           backend=backend, weights=w)
+    if deconvolve:
+        from .window import deconvolve_mas
+        mesh[...] = np.asarray(
+            deconvolve_mas(mesh, box_size, mass_assignment)
+        ).astype(mesh.dtype, copy=False)
 
 
 def _infer_functional_backend(particle_positions) -> str:
@@ -218,6 +245,7 @@ def paint_mesh(
     box_size: float,
     mass_assignment: str = 'CIC',
     backend: str = 'auto',
+    deconvolve: bool = True,
 ):
     """Functional particle-to-mesh painting: ``mesh = paint_mesh(pos, w, N, L)``.
 
@@ -235,6 +263,11 @@ def paint_mesh(
         mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
         backend:   ``'auto'`` (default — inferred from the input type),
                    ``'numpy'``, ``'numba'``, ``'torch'``, or ``'jax'``.
+        deconvolve: If ``True`` (default), correct the ``mass_assignment``
+            window (:func:`beorn.particle_mapping.deconvolve_mas`) before
+            returning — see :func:`map_particles_to_mesh`. Applied via the
+            same backend as the returned mesh, so differentiability/device
+            residency is preserved.
 
     Returns:
         Mesh of shape (N, N, N): jax array / torch tensor (device-resident,
@@ -245,25 +278,32 @@ def paint_mesh(
 
     if backend == 'jax':
         from .jax_backend import paint_mesh_jax
-        return paint_mesh_jax(particle_positions, N, box_size,
+        mesh = paint_mesh_jax(particle_positions, N, box_size,
                               mass_assignment=mass_assignment, weights=weights)
 
-    if backend == 'torch':
+    elif backend == 'torch':
         from .torch_backend import paint_mesh_torch
-        return paint_mesh_torch(particle_positions, N, box_size,
+        mesh = paint_mesh_torch(particle_positions, N, box_size,
                                 mass_assignment=mass_assignment,
                                 weights=weights)
 
-    if backend in ('numpy', 'numba', 'pylians'):
+    elif backend in ('numpy', 'numba', 'pylians'):
         mesh = np.zeros((N, N, N), dtype=np.float32)
         map_particles_to_mesh(
             mesh, box_size,
             np.asarray(particle_positions, dtype=np.float32),
             mass_assignment=mass_assignment, backend=backend,
             weights=None if weights is None else np.asarray(weights),
+            deconvolve=False,
         )
-        return mesh
 
-    raise ValueError(
-        f"Unknown backend {backend!r}. Choose from {_VALID_BACKENDS}."
-    )
+    else:
+        raise ValueError(
+            f"Unknown backend {backend!r}. Choose from {_VALID_BACKENDS}."
+        )
+
+    if deconvolve:
+        from .window import deconvolve_mas
+        mesh = deconvolve_mas(mesh, box_size, mass_assignment)
+
+    return mesh

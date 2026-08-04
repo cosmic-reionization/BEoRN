@@ -138,7 +138,7 @@ class ThesanLoader(MergerTreeLoader):
             "halo_catalogs_thesan_mass_assignment",
             getattr(cosmo_sim, "particle_mass_assignment", "CIC"),
         )
-        backend = getattr(cosmo_sim, "particle_mapping_backend", "numpy")
+        backend = self.parameters.simulation.backend.resolve('mass_assignment')
         return mass_assignment, backend
 
     # ── MergerTreeLoader interface ─────────────────────────────────────────
@@ -262,7 +262,7 @@ class ThesanLoader(MergerTreeLoader):
         scale_factor = 1 / (1 + self.redshifts[redshift_index])
         particle_velocities /= np.sqrt(scale_factor)  # peculiar km/s
 
-        Lbox = self.parameters.simulation.Lbox
+        Lbox = self.parameters.Lbox_hunits
         mass_assignment, backend = self._particle_mapping_config()
         map_particles_to_mesh(
             mesh_x, Lbox, particle_positions,

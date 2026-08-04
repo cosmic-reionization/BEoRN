@@ -40,7 +40,7 @@ maps, exploiting two independent parallelism axes.
 
            subgraph snap["paint_single()  —  per snapshot"]
                Load["load_halo_catalog()\nload_density_field()"]
-               Gate{"fft_backend"}
+               Gate{"simulation.backend"}
 
                subgraph cpu_path["CPU path  (numpy)"]
                    Pool["ProcessPoolExecutor\ncores workers"]

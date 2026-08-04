@@ -54,7 +54,9 @@ to CPU numpy at output time.
 
 Units
 -----
-- Positions / displacements in Mpc/h (same as parameters.simulation.Lbox).
+- Positions / displacements in Mpc/h (same as ``parameters.Lbox_hunits`` —
+  note NOT the raw ``parameters.simulation.Lbox``, whose meaning depends on
+  ``use_hunits``; see issue #49).
 - k-vectors in h/Mpc.
 - Power spectrum in (Mpc/h)³.
 """
@@ -101,9 +103,17 @@ class LPTBase(ABC):
         parameters:  BEoRN Parameters object.
         ps_method:   Power spectrum method passed to :func:`get_power_spectrum`.
                      Default ``'eisenstein_hu'``.
-        backend:     Compute backend: ``'numpy'`` (default), ``'torch'``,
-                     ``'jax'``, ``'auto'``, or an :class:`LPTBackend` instance.
-                     ``'auto'`` picks JAX GPU > Torch CUDA > NumPy.
+        backend:     Compute backend: ``'numpy'``, ``'torch'``, ``'jax'``,
+                     ``'auto'``, or an :class:`LPTBackend` instance.
+                     ``'auto'`` picks JAX GPU > Torch CUDA > NumPy. ``None``
+                     (default) reads ``parameters.simulation.backend.resolve('lpt')``
+                     (itself ``'numpy'`` unless overridden — see
+                     :class:`~beorn.structs.BackendParameters`). Every public
+                     method (:meth:`get_displacement`, :meth:`get_velocity`,
+                     :meth:`get_linear_density`, ...) converts back to numpy
+                     before returning regardless of this choice — it's a
+                     speed knob for the internal FFTs, not a differentiability
+                     one.
         seed:        RNG seed.  Positive → normal realisation; negative →
                      paired realisation using ``abs(seed)`` with negated noise.
                      Default ``42``.
@@ -142,7 +152,7 @@ class LPTBase(ABC):
         self,
         parameters,
         ps_method: str = 'eisenstein_hu',
-        backend: str | LPTBackend = 'numpy',
+        backend: str | LPTBackend | None = None,
         seed: int = 42,
         fixed: bool = True,
         verbose: bool = True,
@@ -155,7 +165,11 @@ class LPTBase(ABC):
         self.fixed = fixed
         self.verbose = verbose
         self.f1_method = f1_method
-        self._backend: LPTBackend = get_backend(backend, verbose=verbose)
+        resolved_backend = (
+            backend if backend is not None
+            else parameters.simulation.backend.resolve('lpt')
+        )
+        self._backend: LPTBackend = get_backend(resolved_backend, verbose=verbose)
         # issue #42, O10: accept a pre-built PowerSpectrum so callers that
         # also need one elsewhere (e.g. LPTHaloLoader's CHMF) can share a
         # single instance instead of each paying its own A_s normalisation.
@@ -179,7 +193,9 @@ class LPTBase(ABC):
 
     @property
     def L(self) -> float:
-        return self.parameters.simulation.Lbox
+        """Box side length in Mpc/h — always resolved via ``Lbox_hunits``,
+        never the raw (possibly-physical-Mpc) ``simulation.Lbox`` directly."""
+        return self.parameters.Lbox_hunits
 
     # ------------------------------------------------------------------
     # Initial conditions
@@ -497,16 +513,19 @@ class LPTBase(ABC):
         return positions.astype(np.float32)
 
     def get_density(
-        self, z: float, mass_assignment: str = 'CIC', fused: bool = True,
-        oversample: int = 1, backend: str | None = None,
+        self, z: float, mass_assignment: str | None = None, fused: bool = True,
+        oversample: int | None = None, backend: str | None = None,
+        deconvolve: bool | None = None,
     ) -> np.ndarray:
         """Matter overdensity δ(x) at redshift z via particle painting.
 
         Args:
             z: Redshift.
-            mass_assignment: ``'NGP'``, ``'CIC'`` (default), ``'TSC'``, or
-                ``'PCS'`` — forwarded to
+            mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'`` —
+                forwarded to
                 :func:`~beorn.particle_mapping.map_particles_to_mesh`.
+                ``None`` (default) reads ``parameters.simulation.mass_assignment``
+                (itself ``'CIC'`` by default).
             fused: If ``True`` (default), paint directly from the displacement
                 field via
                 :func:`~beorn.particle_mapping.paint_displacement_field`
@@ -522,7 +541,8 @@ class LPTBase(ABC):
                 kernel yet, tracked as follow-up). Pass ``fused=False`` to
                 force the original position-array path. Ignored when
                 ``oversample > 1`` (see below).
-            oversample: If ``> 1`` (default ``1``, no oversampling),
+            oversample: ``None`` (default) reads ``parameters.simulation.oversample``
+                (itself ``1`` — no oversampling — by default). If ``> 1``,
                 Fourier-upsample the displacement field onto an
                 ``oversample*N`` Lagrangian grid
                 (:func:`~beorn.particle_mapping.upsample_field_fourier`),
@@ -559,22 +579,47 @@ class LPTBase(ABC):
                 :func:`~beorn.particle_mapping.map_particles_to_mesh`
                 (``'numpy'``, ``'numba'``, ``'pylians'``, ``'torch'``,
                 ``'jax'``, or ``'auto'``). ``None`` (default) reads
-                ``parameters.cosmo_sim.particle_mapping_backend`` (itself
-                ``'auto'`` by default), matching
+                ``parameters.simulation.backend.resolve('mass_assignment')``
+                (itself ``'numpy'`` unless overridden — see
+                :class:`~beorn.structs.BackendParameters`), matching
                 :meth:`~beorn.structs.HaloCatalog.to_mesh`. Note: jax/torch's
                 scatter-add mass assignment is not bit-deterministic
                 run-to-run on GPU — pass ``backend='numpy'`` explicitly if
                 you need reproducible density fields.
+            deconvolve: If given, overrides
+                ``parameters.simulation.deconvolve_mas`` (default ``True``) —
+                whether to correct the ``mass_assignment`` window
+                (:func:`~beorn.particle_mapping.deconvolve_mas`) right after
+                painting. When ``oversample > 1``, this applies to the fine
+                (``oversample*N``) mesh *before* block-averaging back down,
+                removing the window at the resolution actually painted at —
+                the coarsening's own top-hat window is unaffected either way.
+                Pass ``False`` to get the raw painted field (e.g. for
+                real-space statistics via oversampling, or if you plan to
+                call ``deconvolve_mas``/``power_spectrum_1d(...,
+                deconvolve=True)`` yourself downstream).
 
         Returns:
             delta — shape (N, N, N), mean-zero overdensity.
         """
         N, L = self.N, self.L
+        oversample = (
+            oversample if oversample is not None
+            else self.parameters.simulation.oversample
+        )
         if oversample < 1 or not isinstance(oversample, int):
             raise ValueError(f"oversample must be a positive int; got {oversample!r}.")
         resolved_backend = (
             backend if backend is not None
-            else self.parameters.cosmo_sim.particle_mapping_backend
+            else self.parameters.simulation.backend.resolve('mass_assignment')
+        )
+        resolved_mass_assignment = (
+            mass_assignment if mass_assignment is not None
+            else self.parameters.simulation.mass_assignment
+        )
+        resolved_deconvolve = (
+            deconvolve if deconvolve is not None
+            else self.parameters.simulation.deconvolve_mas
         )
 
         if oversample > 1:
@@ -597,8 +642,8 @@ class LPTBase(ABC):
             ).astype(np.float32)
 
             mesh_fine = np.zeros((N_fine, N_fine, N_fine), dtype=np.float32)
-            map_particles_to_mesh(mesh_fine, L, positions, mass_assignment=mass_assignment,
-                                   backend=resolved_backend)
+            map_particles_to_mesh(mesh_fine, L, positions, mass_assignment=resolved_mass_assignment,
+                                   backend=resolved_backend, deconvolve=resolved_deconvolve)
             mesh = coarsen_field(mesh_fine, oversample)
         else:
             mesh = np.zeros((N, N, N), dtype=np.float32)
@@ -606,13 +651,13 @@ class LPTBase(ABC):
                 from ..particle_mapping import paint_displacement_field
                 psi_x, psi_y, psi_z = self.get_displacement(z)
                 paint_displacement_field(mesh, L, psi_x, psi_y, psi_z,
-                                          mass_assignment=mass_assignment,
-                                          backend=resolved_backend)
+                                          mass_assignment=resolved_mass_assignment,
+                                          backend=resolved_backend, deconvolve=resolved_deconvolve)
             else:
                 from ..particle_mapping import map_particles_to_mesh
                 positions = self.get_positions(z)
-                map_particles_to_mesh(mesh, L, positions, mass_assignment=mass_assignment,
-                                       backend=resolved_backend)
+                map_particles_to_mesh(mesh, L, positions, mass_assignment=resolved_mass_assignment,
+                                       backend=resolved_backend, deconvolve=resolved_deconvolve)
         mean = mesh.mean()
         if mean > 0:
             mesh = mesh / mean - 1.0

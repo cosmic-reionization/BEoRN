@@ -173,8 +173,14 @@ class HaloMassFunction(MassFunction):
         window:     Filter function — ``'tophat'`` (default), ``'sharp_k'``,
                     ``'smooth_k'``, or a
                     :class:`~beorn.mass_function.window.Window` instance.
-        backend:    Compute backend — ``'numpy'`` (default), ``'jax'``,
-                    ``'torch'``.
+        backend:    Compute backend — ``'numpy'``, ``'jax'``, ``'torch'``.
+                    ``None`` (default) reads
+                    ``parameters.simulation.backend.resolve('hmf')`` (itself
+                    ``'numpy'`` unless overridden — see
+                    :class:`~beorn.structs.BackendParameters`). Unlike
+                    :class:`~beorn.lpt.LPTBase`'s own ``backend``, this one
+                    genuinely changes the returned array type — ``'jax'``/
+                    ``'torch'`` give differentiable, device-resident output.
         p, q:       Shape parameters; override model defaults or required for
                     ``model='custom'``.
         A:          Normalisation; ``None`` → self-consistent value.
@@ -211,7 +217,7 @@ class HaloMassFunction(MassFunction):
         parameters: Parameters,
         model: str = 'sheth_tormen',
         window: str = 'tophat',
-        backend: str = 'numpy',
+        backend: str | None = None,
         p: float | None = None,
         q: float | None = None,
         A: float | None = None,
@@ -219,7 +225,10 @@ class HaloMassFunction(MassFunction):
         **kwargs,
     ):
         super().__init__(parameters, window=window, **kwargs)
-        self.backend = backend
+        self.backend = (
+            backend if backend is not None
+            else parameters.simulation.backend.resolve('hmf')
+        )
         self.delta_c = delta_c
 
         if model == 'custom':

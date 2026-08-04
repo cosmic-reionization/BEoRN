@@ -20,7 +20,8 @@ class HaloCatalog:
 
     positions: np.ndarray
     """Halo positions in 3D space (X, Y, Z coordinates), in comoving Mpc/h (matching
-    ``parameters.simulation.Lbox``) => shape=(N, 3). Use :attr:`positions_physical`
+    ``parameters.Lbox_hunits`` — NOT the raw ``parameters.simulation.Lbox``, whose
+    meaning depends on ``use_hunits``) => shape=(N, 3). Use :attr:`positions_physical`
     to read these out in the unit system selected by
     ``parameters.simulation.use_hunits`` instead."""
 
@@ -72,7 +73,7 @@ class HaloCatalog:
         """Halo positions converted per ``parameters.simulation.use_hunits``.
 
         Returns :attr:`positions` unchanged (Mpc/h) when ``use_hunits`` is
-        True (the default); converted to physical Mpc when False. Internal
+        True; converted to physical Mpc when False (the default). Internal
         consumers (:meth:`to_mesh`, :meth:`halo_mass_function`, painting) keep
         using :attr:`positions` directly and are unaffected by this toggle —
         this accessor exists for reading the catalog out in the requested
@@ -109,22 +110,36 @@ class HaloCatalog:
         return indices_match
 
 
-    def to_mesh(self) -> np.ndarray:
+    def to_mesh(self, deconvolve: bool | None = None) -> np.ndarray:
         """Rasterize halo positions into a 3D number-count mesh.
 
         The mesh uses the nearest-neighbor mass-assignment scheme. The returned array represents halo counts
         (number density), not mass.
 
+        Args:
+            deconvolve: If given, overrides
+                ``parameters.simulation.deconvolve_mas`` (default ``True``) —
+                whether to correct the NGP mass-assignment window
+                (:func:`beorn.particle_mapping.deconvolve_mas`) in place right
+                after painting, before this halo-count mesh is convolved with
+                the physical ionization/heating/Lyman-alpha profile kernel
+                downstream. Only the NGP painting window is removed here —
+                the profile kernel applied afterwards is untouched.
+
         Returns:
             numpy.ndarray: 3D float32 array with shape (Ncell, Ncell, Ncell).
         """
-        physical_size = self.parameters.simulation.Lbox
+        physical_size = self.parameters.Lbox_hunits
         grid_size = self.parameters.simulation.Ncell
         mesh = np.zeros((grid_size, grid_size, grid_size), dtype=np.float32)
-        backend = self.parameters.cosmo_sim.particle_mapping_backend
+        backend = self.parameters.simulation.backend.resolve('mass_assignment')
+        resolved_deconvolve = (
+            deconvolve if deconvolve is not None
+            else self.parameters.simulation.deconvolve_mas
+        )
         map_particles_to_mesh(
             mesh, physical_size, self.positions.astype(np.float32),
-            mass_assignment="NGP", backend=backend,
+            mass_assignment="NGP", backend=backend, deconvolve=resolved_deconvolve,
         )
         return mesh
 
@@ -164,7 +179,7 @@ class HaloCatalog:
             tuple: ``(bin_edges, hmf, error)`` where ``hmf`` is in
             units of (Mpc/h)^-3 and ``error`` is the Poisson uncertainty.
         """
-        Lbox = self.parameters.simulation.Lbox
+        Lbox = self.parameters.Lbox_hunits
 
         if bin_count is None:
             bin_count = int(10 * np.log10(self.masses.max() / self.masses.min()))

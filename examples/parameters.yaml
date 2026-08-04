@@ -1,42 +1,100 @@
+# Example parameter file for a full BEoRN run (see examples/full_run.py).
+#
+# Every field below is optional: if you delete a line, BEoRN falls back to its
+# built-in default (the value shown here, unless noted otherwise). This file
+# spells out every available field so new users can see the full set of knobs
+# in one place and only need to touch the ones relevant to their run.
+
 simulation:
-  cores: 4
-  halo_mass_bin_min: 1.0e+7
-  halo_mass_bin_max: 1.0e+15
-  halo_mass_bin_n: 200
-  halo_mass_accretion_alpha: [0.785, 0.795]
-  Lbox: 100
-  Ncell: 128
+  Ncell: 128                    # grid cells per side; total grid is Ncell^3
+  Lbox: 100                     # box length, in Mpc/h
+  cores: 4                      # cores for shared-memory parallelization (1 disables it)
+  store_grids: ['delta_b', 'Grid_Temp', 'Grid_xHII', 'Grid_xal']  # base fields written to the output HDF5 file
+  degrade_resolution: 1          # block-average N-body density grids by this factor before painting
+  oversample: 1                  # internal resolution factor, downsampled back to Ncell: LPTBase.get_density's painting mesh, and py21cmfast's DIM grid (Py21cmFastLoader)
+  use_hunits: true               # express lengths/masses in h-units (Mpc/h, Msun/h) rather than physical units
+  mass_assignment: 'CIC'         # default scheme for get_density()/HaloCatalog.to_mesh(): NGP, CIC, TSC, or PCS
+  deconvolve_mas: true           # correct the mass-assignment window right after painting (removes sinc^p suppression near k_Nyquist)
+  spreading_pixel_threshold: -1  # merge connected regions below this many pixels when spreading excess ionization (-1 = use built-in default)
+  spreading_subgrid_approximation: true  # use the subgrid approximation in distance_transform_edt when spreading excess ionization
+  minimum_grid_size_heat: 4      # minimum grid size used for the heating kernel
+  minimum_grid_size_lyal: 16     # minimum grid size used for the Lyman-alpha kernel
+  compute_s_alpha_fluctuations: true  # include S_alpha fluctuations when computing x_al
+  compute_x_coll_fluctuations: true   # include x_coll fluctuations when computing x_tot
+  backend:
+    default: 'numpy'              # fallback backend for any stage below left as null ('numpy' or 'auto')
+    profile_painting: null        # backend for the ionization/heating/Lyman-alpha painting FFTs
+    mass_assignment: null         # backend for particle-to-mesh painting (map_particles_to_mesh)
+    lpt: null                     # backend for the LPT solver's internal FFTs (always converted back to numpy on return)
+    hmf: null                     # backend for the halo mass function (jax/torch keep it differentiable, no numpy conversion)
+
+solver:
+  redshifts: [25, 24.5, 24, 23.5, 23, 22.5, 22, 21.5, 21, 20.5, 20, 19.5, 19, 18.5,
+              18, 17.5, 17, 16.5, 16, 15.5, 15, 14.5, 14, 13.5, 13, 12.5, 12, 11.5,
+              11, 10.5, 10, 9.5, 9, 8.5, 8, 7.5, 7, 6.5]  # redshift grid for the 1D radiation-profile solver
+  fXh: 'constant'               # 'constant' (fXh=0.11) or 'variable' (fit fXh = xe^0.225)
+  halo_mass_accretion_alpha: [0.785, 0.795]  # range of mass-accretion-rate coefficients to solve profiles for
+  halo_mass_bin_min: 1.0e+7      # minimum halo mass bin, in Msun
+  halo_mass_bin_max: 1.0e+15     # maximum halo mass bin, in Msun
+  halo_mass_nbin: 200            # number of halo mass bins
+  HI_frac: 0.92 # 1 - 0.08       # HI number fraction (only used when running H_He_Final)
+  clumping: 1                    # rescale the background density (1 = normal 2-halo-term profile)
+  z_decoupling: 135              # redshift at which gas decouples from the CMB and cools adiabatically
+  z_source_start: 35.0           # maximum lookback redshift for X-ray/ionisation integrals
+  ode_rtol: 0.01                 # relative tolerance for ODE integrations (R_bubble, rho_heat)
+  ode_atol: 0.01                 # absolute tolerance for ODE integrations (R_bubble, rho_heat)
+  ode_method: 'RK45'             # scipy.integrate.solve_ivp method ('RK45', 'LSODA', 'Radau', 'BDF', ...)
 
 source:
-  Nion: 15000
-  energy_cutoff_min_xray: 500
-  energy_cutoff_max_xray: 2000
-  energy_min_sed_xray: 500
-  energy_max_sed_xray: 2000
-  alS_xray: 1.5
-  xray_normalisation: 1.02e+41
-  f0_esc: 0.2
-  pl_esc: 0
-  f_st: 1
-  g1: 0
-  g2: 0
-  g3: 4
-  g4: -1
-  Mp: 1.088e+11
-  Mt: 1.0e+7
-  halo_mass_min: 1.0e+5
-
-solver: 
-  fXh: 'constant'
+  source_type: 'SED'             # 'SED', 'Ghara', 'Ross', or 'constant'
+  Nion: 15000                    # number of ionizing photons per baryon in stars
+  energy_cutoff_min_xray: 500    # lower energy cutoff for the X-ray band, in eV
+  energy_cutoff_max_xray: 2000   # upper energy cutoff for the X-ray band, in eV
+  energy_min_sed_xray: 500       # minimum energy of the X-ray SED normalization, in eV
+  energy_max_sed_xray: 2000      # maximum energy of the X-ray SED normalization, in eV
+  alS_xray: 1.5                  # X-ray power-law index (photons/s/Hz ~ nu^-alS_xray)
+  xray_normalisation: 1.02e+41   # X-ray normalization, in (erg/s) * (yr/Msun)
+  n_lyman_alpha_photons: 9690    # number of Lyman-alpha photons per baryon in stars
+  lyman_alpha_power_law: 0.0     # Lyman-alpha power-law index (0 = constant, 1 = linear, 2 = quadratic)
+  f0_esc: 0.2                    # photon escape fraction f_esc = f0_esc * (M/Mp_esc)^pl_esc
+  Mp_esc: 1.0e+10                # pivot mass for the escape fraction
+  pl_esc: 0                      # power-law index for the escape fraction
+  f_st: 1                        # prefactor of the star-formation efficiency f_star(M)
+  g1: 0                          # star-formation-rate power-law index
+  g2: 0                          # star-formation-rate power-law index
+  g3: 4                          # low-mass suppression term power-law index
+  g4: -1                         # low-mass suppression term power-law index
+  Mp: 1.088e+11                  # pivot mass of the double power law describing the star-formation rate
+  Mt: 1.0e+7                     # turnover mass of the low-mass suppression term
+  halo_mass_min: 1.0e+5          # minimum mass of star-forming halos considered when painting
+  halo_mass_max: 1.0e+16         # maximum mass of star-forming halos considered when painting
+  min_xHII_value: 0              # lower limit for the ionization fraction (pixels below this are clipped to it)
+  mass_accretion_lookback: 10    # number of snapshots to look back when fitting per-halo accretion rate alpha
+  alpha_fallback: 'mean'         # fallback alpha for halos without a usable merger-tree fit: float, 'mean', or 'median'
+  t_source_age: null             # maximum source age in Myr (null = integrate back to solver.z_source_start)
+  # f_st grid precomputation (used by RadiationProfileFstSolver)
+  f_st_grid_min: 0.01            # minimum f_st value for precomputing (mass, alpha, f_st, z) radiation profiles
+  f_st_grid_max: 0.2             # maximum f_st value for precomputing (mass, alpha, f_st, z) radiation profiles
+  f_st_grid_n: 30                # number of f_st grid points for precomputing radiation profiles
+  # stochastic f_st painting controls (used by PaintingCoordinator.paint_single_fstar)
+  f_st_paint_distribution: 'lognormal'  # distribution used to sample per-halo f_st: 'lognormal', 'normal', or 'uniform'
+  f_st_paint_sigma: 0.5          # width parameter for the f_st sampling distribution
+  f_st_paint_min: 0.01           # lower clipping bound for sampled f_st
+  f_st_paint_max: 0.2            # upper clipping bound for sampled f_st
+  f_st_paint_seed: null          # optional RNG seed for reproducible per-snapshot f_st sampling
 
 cosmology:
-  Om: 0.31
-  Ob: 0.045
-  Ol: 0.68
-  rho_c: 2.775e+11
-  h: 0.68
-  sigma_8: 0.83
-  ns: 0.96
-  HI_frac: 0.92 # 1 - 0.08
-  clumping: 1
-  z_decoupling: 135
+  Om: 0.31                       # matter density parameter
+  Ob: 0.045                      # baryon density parameter
+  Ol: 0.68                       # dark energy density parameter
+  rho_c: 2.775e+11               # critical density of the universe, in Msun/h / (Mpc/h)^3
+  h0: 0.67                       # dimensionless Hubble parameter
+  sigma_8: 0.83                  # amplitude of the matter power spectrum on 8 Mpc/h scales
+  ns: 0.96                       # scalar spectral index
+
+cosmo_sim:
+  random_seed: 12345             # random seed for halo catalog / density field generation (py21cmfast loader)
+  halo_catalogs_thesan_mass_assignment: 'CIC'  # mass-assignment scheme for Thesan halo catalogs: NGP or CIC
+  snapshot_redshifts: null       # redshifts of cosmo-sim snapshots to paint (null = use the full solver.redshifts grid)
+  file_root: null                # path to the cosmo-sim input files; typically set at runtime, e.g.
+                                # parameters.cosmo_sim.file_root = FILE_ROOT (see full_run.py)

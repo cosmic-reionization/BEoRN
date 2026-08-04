@@ -25,16 +25,17 @@ class Py21cmFastLoader(BaseLoader):
         file_root (Path, optional): Directory containing pre-generated
             ``haloes_z*.h5`` and ``densities_z*.h5`` files. If ``None``,
             call :meth:`generate` before loading data.
-        high_res_factor (int, optional): Resolution enhancement factor 
-            for py21cmfast internal grid (DIM = Ncell * high_res_factor). 
-            A larger factor resolves lower halo masses at the cost of 
-            more memory and compute time.
+        oversample (int, optional): Resolution enhancement factor for
+            py21cmfast's internal grid (DIM = Ncell * oversample; HII_DIM
+            stays Ncell). A larger factor resolves lower halo masses at the
+            cost of more memory and compute time. ``None`` (default) reads
+            ``parameters.simulation.oversample``.
     """
 
-    def __init__(self, parameters: Parameters, file_root: "Path | str" = None, high_res_factor: int = 3):
+    def __init__(self, parameters: Parameters, file_root: "Path | str" = None, oversample: int | None = None):
         super().__init__(parameters)
         self.file_root = Path(file_root) if file_root is not None else None
-        self.high_res_factor = high_res_factor
+        self.oversample = oversample if oversample is not None else parameters.simulation.oversample
         if self.file_root is not None and self.file_root.is_dir():
             self._ensure_parameters_yaml(self.file_root)
 
@@ -61,21 +62,21 @@ class Py21cmFastLoader(BaseLoader):
         """
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
-        dim = sim.Ncell * self.high_res_factor
+        dim = sim.Ncell * self.oversample
         cosmo_hash = hashlib.md5(str(to_dict(self.parameters.cosmology)).encode()).hexdigest()[:8]
-        return f"py21cmfast_N{sim.Ncell}_D{dim}_L{sim.Lbox:.0f}_seed{cosmo_sim.random_seed}_{cosmo_hash}"
+        return f"py21cmfast_N{sim.Ncell}_D{dim}_L{self.parameters.Lbox_hunits:.0f}_seed{cosmo_sim.random_seed}_{cosmo_hash}"
 
     def _simulation_info(self, file_root: Path) -> str:
         """Return a formatted multi-line summary of the py21cmfast setup (no redshift list)."""
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
         cosmo = self.parameters.cosmology
-        dim = sim.Ncell * self.high_res_factor
+        dim = sim.Ncell * self.oversample
         return (
             f'py21cmfast setup:\n'
             f'  Output directory : {file_root}\n'
-            f'  Grid             : HII_DIM={sim.Ncell}, DIM={dim} (factor {self.high_res_factor}x)\n'
-            f'  Box size         : {sim.Lbox:.1f} Mpc/h ({sim.Lbox / cosmo.h0:.1f} Mpc)\n'
+            f'  Grid             : HII_DIM={sim.Ncell}, DIM={dim} (factor {self.oversample}x)\n'
+            f'  Box size         : {self.parameters.Lbox_hunits:.1f} Mpc/h ({self.parameters.Lbox_hunits / cosmo.h0:.1f} Mpc)\n'
             f'  Threads          : {sim.cores}\n'
             f'  Random seed      : {cosmo_sim.random_seed}\n'
             f'  Cosmology        : Om={cosmo.Om}, Ob={cosmo.Ob}, h={cosmo.h0}, '
@@ -89,6 +90,11 @@ class Py21cmFastLoader(BaseLoader):
         the grid/seed inputs to :class:`py21cmfast.UserParams`.  Astrophysical
         BEoRN parameters, redshift lists, and solver settings are intentionally
         omitted — redshifts can be inferred from the filenames on disk.
+
+        ``simulation.Lbox`` here is the resolved Mpc/h value
+        (:attr:`~beorn.structs.Parameters.Lbox_hunits`), not necessarily the
+        raw value the user typed — this manifest always stores the
+        unambiguous, unit-independent box size actually used.
         """
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
@@ -104,11 +110,11 @@ class Py21cmFastLoader(BaseLoader):
             },
             "simulation": {
                 "Ncell": sim.Ncell,
-                "Lbox": sim.Lbox,
+                "Lbox": self.parameters.Lbox_hunits,
                 "cores": sim.cores,
             },
             "cosmo_sim": {
-                "high_res_factor": self.high_res_factor,
+                "oversample": self.oversample,
                 "random_seed": cosmo_sim.random_seed,
             },
         }
@@ -153,7 +159,7 @@ class Py21cmFastLoader(BaseLoader):
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
         cosmo = self.parameters.cosmology
-        dim = sim.Ncell * self.high_res_factor
+        dim = sim.Ncell * self.oversample
         file_root = handler.file_root / self.input_tag
 
         all_redshifts = list(self.redshifts)
@@ -196,7 +202,7 @@ class Py21cmFastLoader(BaseLoader):
         user_params = p21c.UserParams(
             HII_DIM=sim.Ncell,
             DIM=dim,
-            BOX_LEN=sim.Lbox / cosmo.h0,
+            BOX_LEN=self.parameters.Lbox_hunits / cosmo.h0,
             USE_INTERPOLATION_TABLES=True,
             N_THREADS=sim.cores,
         )
@@ -290,7 +296,7 @@ class Py21cmFastLoader(BaseLoader):
             m = np.asarray(haloes['halo_masses'])
             positions = np.asarray(haloes['halo_coords'])
 
-        scaling = float(self.parameters.simulation.Lbox / self.parameters.simulation.Ncell)
+        scaling = float(self.parameters.Lbox_hunits / self.parameters.simulation.Ncell)
         return HaloCatalog(
             masses=m * self.parameters.cosmology.h0,
             positions=positions * scaling,

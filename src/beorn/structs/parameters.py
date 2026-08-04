@@ -14,7 +14,6 @@ import h5py
 import logging
 
 from .helpers import bin_centers
-from ..units import length_factor
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +221,67 @@ class SolverParameters:
 
 
 @dataclass(slots = True)
+class BackendParameters:
+    """Array-library backend selection for this simulation's compute-heavy
+    steps: painting/mass-assignment, the LPT solver's internal FFTs, and the
+    halo mass function.
+
+    Each stage below is ``None`` by default, meaning "use :attr:`default`" —
+    set a stage explicitly to override it independently. ``default`` itself
+    is ``'numpy'`` so that nothing silently switches to jax/torch just
+    because a GPU happens to be present; set ``default = 'auto'`` to let
+    every stage below auto-select the fastest backend available instead
+    (jax GPU/TPU > torch GPU > numba CPU JIT [``mass_assignment`` only] >
+    numpy).
+    """
+
+    default: str = 'numpy'
+    """Fallback backend used by any stage left at ``None``. ``'numpy'``
+    (default) is always safe/deterministic. ``'auto'`` auto-selects the
+    fastest backend available on this machine for every stage below that
+    hasn't been set explicitly."""
+
+    profile_painting: str | None = None
+    """Backend for :mod:`beorn.painting.helpers`'s Fourier profile-kernel
+    convolution — :class:`~beorn.painting.coordinator.PaintingCoordinator`'s
+    ionization/heating/Lyman-alpha painting stage. ``None`` (default) uses
+    :attr:`default`."""
+
+    mass_assignment: str | None = None
+    """Backend for :func:`beorn.particle_mapping.map_particles_to_mesh`,
+    used by :meth:`beorn.lpt.LPTBase.get_density`,
+    :meth:`beorn.structs.HaloCatalog.to_mesh` (always painted with the
+    ``'NGP'`` scheme there — this only selects which library executes it,
+    never the scheme), and the Thesan N-body loader's own density/RSD
+    painting. ``None`` (default) uses :attr:`default`. Not every backend
+    supports every mass-assignment scheme — see
+    :func:`~beorn.particle_mapping.map_particles_to_mesh`'s support matrix."""
+
+    lpt: str | None = None
+    """Backend for :class:`~beorn.lpt.LPTBase`'s internal FFTs (δ(k)
+    realisation, displacement, velocity, linear density). Its public methods
+    always convert back to numpy (``LPTBackend.to_numpy``) regardless of
+    this choice — a speed knob, not a differentiability one. ``None``
+    (default) uses :attr:`default`."""
+
+    hmf: str | None = None
+    """Backend for :class:`~beorn.mass_function.HaloMassFunction`. Unlike
+    the stages above, this genuinely changes the returned array type —
+    ``'jax'``/``'torch'`` give differentiable, device-resident output with
+    no conversion back to numpy. ``None`` (default) uses :attr:`default`."""
+
+    def resolve(self, stage: str) -> str:
+        """Return the explicit backend for ``stage`` if set, else :attr:`default`.
+
+        Args:
+            stage: One of ``'profile_painting'``, ``'mass_assignment'``,
+                ``'lpt'``, ``'hmf'``.
+        """
+        value = getattr(self, stage)
+        return value if value is not None else self.default
+
+
+@dataclass(slots = True)
 class SimulationParameters:
     """
     Parameters that are used to run the simulation. These are used in the generation of the halo profiles and when converting the halo profiles to a grid.
@@ -231,7 +291,11 @@ class SimulationParameters:
     """Number of pixels of the final grid. This is the number of pixels in each dimension. The total number of pixels will be Ncell^3."""
 
     Lbox: float = 100
-    """Box length, in [Mpc/h]. This is the length of the box in each dimension. The total volume will be Lbox^3."""
+    """Box length, in [Mpc/h] (default; see ``use_hunits``) or physical Mpc when
+    ``use_hunits=False``. This is the length of the box in each dimension. The
+    total volume will be Lbox^3. Internal code never reads this field directly —
+    it always goes through :attr:`Parameters.Lbox_hunits`, which resolves it to
+    Mpc/h regardless of ``use_hunits``."""
 
     store_grids: list = ('delta_b', 'Grid_Temp', 'Grid_xHII', 'Grid_xal')
     """Base grids to write to the HDF5 output file. These four fields are the independent outputs of the painting stage.
@@ -242,13 +306,17 @@ class SimulationParameters:
     cores: int = 1
     """Number of cores used in parallelization. The computation for each redshift can be parallelized with a shared memory approach. This is the number of cores used for this. Keeping the number at 1 disables parallelization."""
 
-    fft_backend: str = 'auto'
-    """FFT backend for 3D convolutions during painting.  ``'auto'`` (default)
-    selects the fastest available backend: jax (GPU/TPU) > torch (GPU) > numpy
-    (CPU via scipy/pocketfft).  Override with ``'numpy'``, ``'jax'``, or
-    ``'torch'``.  GPU backends process mass bins sequentially on the device
-    (the GPU provides internal parallelism); numpy uses :attr:`cores` worker
-    processes."""
+    backend: BackendParameters = field(default_factory = BackendParameters)
+    """Array-library backend selection for painting, mass assignment, the
+    LPT solver, and the halo mass function — see :class:`BackendParameters`.
+    This is a performance knob for the production pipeline only — it does
+    not make :class:`~beorn.painting.coordinator.PaintingCoordinator` (or
+    :meth:`~beorn.lpt.LPTBase.get_density`/:meth:`~beorn.structs.HaloCatalog.to_mesh`)
+    differentiable in the sense of the ``beorn.*.differentiable`` module
+    family; jax/torch's scatter-add mass assignment is also not
+    bit-deterministic run-to-run on GPU. Pass ``backend='numpy'`` directly to
+    a specific call (e.g. ``get_density(..., backend='numpy')``) to pin just
+    that call when you need reproducibility, independent of this default."""
 
     spreading_pixel_threshold: int = -1
     """When spreading the excess ionization fraction, treat all the connected regions with less than "thresh_pixel" as a single connected region (to speed up). If set to a negative value, a default nonzero value will be used"""
@@ -274,12 +342,61 @@ class SimulationParameters:
     into one, e.g. degrade_resolution=4 turns a 256³ grid into 64³.
     Set Ncell to the native grid size divided by degrade_resolution."""
 
-    use_hunits: bool = True
-    """Whether lengths/masses that flow through :mod:`beorn.units` are expressed in
-    h-units (Mpc/h, Msun/h — the historical BEoRN convention) or physical units
-    (Mpc, Msun). Defaults to ``True`` so every existing script/notebook is
-    unaffected. See :mod:`beorn.units` for the conversion helpers gated by this
-    flag (issue #49)."""
+    oversample: int = 1
+    """Resolution-enhancement factor for any internal grid that gets reduced
+    back down to ``Ncell`` before being used further. Opposite direction of
+    :attr:`degrade_resolution`. A value of 1 (default) applies no refinement.
+    Two independent consumers:
+
+    - :meth:`beorn.lpt.LPTBase.get_density` (default, unless its own
+      ``oversample`` argument is given explicitly): paints the LPT-generated
+      field onto an internal ``oversample*Ncell`` mesh, then block-averages
+      back down to ``(Ncell, Ncell, Ncell)`` before returning. Reduces
+      mass-assignment discreteness/aliasing for real-space statistics where
+      :func:`beorn.particle_mapping.deconvolve_mas` doesn't apply (issue #48).
+    - :class:`~beorn.load_input_data.Py21cmFastLoader` (default, unless its
+      own ``oversample`` argument is given explicitly): sets py21cmfast's
+      internal grid ``DIM = Ncell * oversample`` while ``HII_DIM = Ncell``
+      stays the output resolution. A larger factor resolves lower halo
+      masses at the cost of more memory/compute; the minimum resolvable halo
+      mass scales roughly as ``(Lbox / DIM)^3``.
+
+    In both cases ``Ncell`` is always the resulting (coarse) grid size; the
+    finer internal grid is never itself persisted."""
+
+    use_hunits: bool = False
+    """Whether ``Lbox`` is given in h-units (Mpc/h — the historical BEoRN
+    convention) or physical Mpc (the default, ``False``). Internal code
+    resolves ``Lbox`` via :attr:`Parameters.Lbox_hunits`, which always returns
+    Mpc/h regardless of this flag — see that property's docstring for the
+    full design (issue #49). Note this default means an unmodified ``Lbox``
+    value now means physical Mpc, not Mpc/h as in pre-#49 scripts — a
+    deliberate, non-backward-compatible choice; existing scripts/notebooks
+    that set ``Lbox`` without setting ``use_hunits`` need updating. Halo-mass-
+    valued quantities are not yet affected by this flag (deferred, tracked
+    separately)."""
+
+    mass_assignment: Literal['NGP', 'CIC', 'TSC', 'PCS'] = 'CIC'
+    """Mass-assignment scheme used to paint particles/haloes onto the grid.
+    Read as the default by :meth:`beorn.lpt.LPTBase.get_density` (the matter
+    density field) and by :meth:`beorn.structs.HaloCatalog.to_mesh` (halo
+    positions, as profile centers for the ionization/heating/Lyman-alpha
+    painting stage) whenever their own ``mass_assignment``/``deconvolve``
+    argument isn't given explicitly. Does not affect
+    ``cosmo_sim.halo_catalogs_thesan_mass_assignment``, which is a separate
+    knob for the Thesan N-body loader's own particle painting (issue #48)."""
+
+    deconvolve_mas: bool = True
+    """Whether :func:`beorn.particle_mapping.map_particles_to_mesh` /
+    :func:`beorn.particle_mapping.paint_displacement_field` correct the
+    ``mass_assignment`` window (:func:`beorn.particle_mapping.deconvolve_mas`)
+    immediately after painting. Defaults to ``True`` so every grid built via
+    these functions — including :meth:`beorn.lpt.LPTBase.get_density`'s
+    ``delta_b`` and :meth:`beorn.structs.HaloCatalog.to_mesh`'s halo-count
+    mesh — is free of the sinc^p suppression near k_Nyquist without any
+    extra step. The window's k=0 value is 1, so this never changes a mesh's
+    total (or total weight) — only its structure near k_Nyquist. Set to
+    ``False`` to get the raw painted mesh instead (issue #48)."""
 
     @staticmethod
     def _kbins_from(lbox: float, ncell: int) -> np.ndarray:
@@ -301,6 +418,11 @@ class SimulationParameters:
     def __post_init__(self):
         # ensure the items of the store_grids are strings. When loading from hdf5 they might be bytes
         self.store_grids = [s.decode() if isinstance(s, bytes) else s for s in self.store_grids]
+        # Parameters.from_dict only re-instantiates its own direct dataclass
+        # fields (SimulationParameters(**value)); a nested dataclass field
+        # like `backend` arrives as a plain dict when loaded from YAML/HDF5.
+        if isinstance(self.backend, dict):
+            self.backend = BackendParameters(**self.backend)
 
 
 
@@ -333,11 +455,6 @@ class CosmologyParameters:
 class CosmoSimParameters:
     """Parameters specific to N-body/cosmo-sim inputs (py21cmfast, Thesan, PKDGrav, etc.)."""
 
-    py21cmfast_high_res_factor: int = 3
-    """Resolution enhancement factor for py21cmfast internal grid (DIM = Ncell * py21cmfast_high_res_factor).
-    A larger factor resolves lower halo masses at the cost of more memory and compute time.
-    The minimum resolvable halo mass scales roughly as (Lbox / DIM)^3."""
-
     random_seed: int = 12345
     """Random seed for the random number generator. This is used to generate the random numbers for the halo catalogs and the density fields when using 21cmfast."""
 
@@ -351,12 +468,6 @@ class CosmoSimParameters:
     Inferred from filenames on disk; not written to igm_data/igm_params.yaml."""
 
     file_root: Path = None
-
-    particle_mapping_backend: str = 'auto'
-    """Backend used by :func:`beorn.particle_mapping.map_particles_to_mesh` when
-    painting particle snapshots onto a grid.  ``'auto'`` (default) selects the
-    fastest available backend: jax (GPU) > torch (GPU) > numba (CPU JIT) > numpy.
-    Override with ``'numpy'``, ``'numba'``, ``'pylians'``, ``'torch'``, or ``'jax'``."""
 
     def __post_init__(self):
         if isinstance(self.snapshot_redshifts, list):
@@ -383,28 +494,20 @@ class Parameters:
 
 
     @property
-    def Lbox_physical(self) -> float:
-        """``simulation.Lbox`` converted per ``simulation.use_hunits``.
+    def Lbox_hunits(self) -> float:
+        """``simulation.Lbox`` resolved to the internal Mpc/h representation.
 
-        Returns the raw value unchanged (Mpc/h) when ``use_hunits`` is True
-        (the default, matching every existing script); converted to physical
-        Mpc when False. All internal code (LPT, mass function, painting)
-        keeps reading ``simulation.Lbox`` directly and is unaffected — this
-        is a boundary/output accessor only, per issue #49.
+        ``simulation.Lbox`` is user input whose *meaning* depends on
+        ``simulation.use_hunits``: Mpc/h when True, physical Mpc when False
+        (the default). Every internal consumer of the box size (LPT, mass
+        function, CHMF, painting, particle mapping, tools21cm calls, ...)
+        must read this property instead of ``simulation.Lbox`` directly, so
+        the toggle is resolved in exactly one place rather than at each call
+        site. See issue #49.
         """
-        return self.simulation.Lbox * length_factor(self)
-
-    @property
-    def kbins_physical(self) -> np.ndarray:
-        """``simulation.kbins`` recomputed from :attr:`Lbox_physical` instead of the raw
-        (h-unit) ``simulation.Lbox``.
-
-        Returns the same array as ``simulation.kbins`` when ``use_hunits`` is
-        True (the default, h/Mpc); in 1/Mpc when False. Boundary/output
-        accessor only — internal power-spectrum code keeps using
-        ``simulation.kbins`` directly. See issue #49.
-        """
-        return SimulationParameters._kbins_from(self.Lbox_physical, self.simulation.Ncell)
+        if self.simulation.use_hunits:
+            return self.simulation.Lbox
+        return self.simulation.Lbox * self.cosmology.h0
 
     def unique_hash(self) -> str:
         """
@@ -422,7 +525,7 @@ class Parameters:
 
         Covers source parameters, cosmology, solver redshifts, and the halo
         mass / accretion-rate bins.  Intentionally excludes random seed, grid
-        dimensions (Ncell, Lbox, py21cmfast_high_res_factor), and other
+        dimensions (Ncell, Lbox, oversample), and other
         simulation parameters that do not influence the 1D profile shapes.
         This allows profiles to be reused when re-running BEoRN with a
         different py21cmfast seed or a different grid resolution.
@@ -494,7 +597,8 @@ class Parameters:
             "BEoRN model summary",
             "=" * 60,
             f"  Cosmology   : Om={cos.Om}, Ob={cos.Ob}, h0={cos.h0}, sigma_8={cos.sigma_8}",
-            f"  Grid        : Ncell={sim.Ncell}, Lbox={sim.Lbox} Mpc/h",
+            f"  Grid        : Ncell={sim.Ncell}, Lbox={sim.Lbox} {'Mpc/h' if sim.use_hunits else 'Mpc'} "
+            f"(={self.Lbox_hunits:.3f} Mpc/h internally)",
             f"  Profile z   : z={slv.redshifts[0]:.1f} -> {slv.redshifts[-1]:.1f} ({slv.redshifts.size} steps)",
             *(
                 [f"  Snapshot z  : z={cosmo_sim.snapshot_redshifts[0]:.1f} -> {cosmo_sim.snapshot_redshifts[-1]:.1f} ({cosmo_sim.snapshot_redshifts.size} snapshots)"]
@@ -563,33 +667,35 @@ class Parameters:
         Create a Parameters object from an hdf5 group.
         This is useful for loading parameters from an hdf5 file.
         """
-        params_dict = {}
-        for param_field in fields(cls):
-            field_name = param_field.name
-            # check if the nested field would be a dataclass as well
-            if is_dataclass(param_field.type):
-                # iterate over the fields of the dataclass
-                sub_group = group[field_name]
-                sub_params_dict = {}
-                for sub_field in fields(param_field.type):
-                    sub_field_name = sub_field.name
-                    if sub_field_name in sub_group.attrs:
-                        sub_params_dict[sub_field_name] = sub_group.attrs[sub_field_name]
-                    elif sub_field_name in sub_group:
-                        # this is a dataset
-                        sub_params_dict[sub_field_name] = sub_group[sub_field_name][...]
-                    else:
-                        # some configurations result in empty fields (e.g. the file_root might not be set when using a mock simulation)
-                        logger.debug(f"Did not find field {sub_field_name} in group {field_name}.")
+        return cls.from_dict(_dataclass_dict_from_group(cls, group))
 
-                params_dict[field_name] = sub_params_dict
 
+def _dataclass_dict_from_group(dc_type: type, group: h5py.Group) -> dict:
+    """Reconstruct a dataclass-shaped dict from an HDF5 group written by
+    :func:`to_dict`/:meth:`BaseStruct._to_h5_field`.
+
+    Recurses into any field whose declared type is itself a dataclass
+    (e.g. ``SimulationParameters.backend: BackendParameters``) — a plain
+    one-level loop over ``fields(dc_type)`` would try to read a nested
+    dataclass's HDF5 *group* as if it were a dataset (``group[name][...]``),
+    which raises ``TypeError`` (h5py groups don't support that indexing).
+    """
+    out = {}
+    for f in fields(dc_type):
+        name = f.name
+        if name in group.attrs:
+            out[name] = group.attrs[name]
+        elif name in group:
+            member = group[name]
+            if isinstance(member, h5py.Group) and is_dataclass(f.type):
+                out[name] = _dataclass_dict_from_group(f.type, member)
             else:
-                logger.warning(f"Not a dataclass: {field_name}. Is this expected?")
-                params_dict[field_name] = group[field_name][:]
-
-        return cls.from_dict(params_dict)
-
+                out[name] = member[...] if hasattr(member, 'shape') else member[:]
+        else:
+            # some configurations result in empty fields (e.g. file_root
+            # might not be set when using a mock simulation)
+            logger.debug(f"Did not find field {name} in group {dc_type.__name__}.")
+    return out
 
 
 def to_dict(obj: dataclass) -> dict:

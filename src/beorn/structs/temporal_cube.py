@@ -231,8 +231,7 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
                     "solver.redshifts",
                     "cosmo_sim.snapshot_redshifts",
                     # Simulator-specific fields that don't belong in a generic IGM output:
-                    # py21cmfast internals (seed and high-res factor are in the dir name)
-                    "cosmo_sim.py21cmfast_high_res_factor",
+                    # py21cmfast internals (seed is in the dir name)
                     "cosmo_sim.random_seed",
                     # Particle mass-assignment scheme (affects density/RSD fields, not the IGM output)
                     "cosmo_sim.particle_mass_assignment",
@@ -465,7 +464,7 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
         from ..power_spectrum import power_spectrum_1d
 
         bin_number = parameters.simulation.kbins.size
-        box_dims = parameters.simulation.Lbox
+        box_dims = parameters.Lbox_hunits
         power_spectrum = np.zeros((self.z_snapshots.size, bin_number))
 
         delta_quantity = quantity[:] / np.mean(quantity, axis=(1, 2, 3))[:, np.newaxis, np.newaxis, np.newaxis] - 1

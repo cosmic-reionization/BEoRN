@@ -22,7 +22,7 @@ python lpt_native_21cm.py --param-file my.yaml   # or point at your own paramete
 `artificial_halo_gpu.py` auto-detects a GPU backend (jax or torch): if one is
 available it prints a short `paint_single` timing/parity benchmark against
 numpy, then runs the full production pipeline with that backend
-(`parameters.simulation.fft_backend`). With no GPU it just runs on numpy.
+(`parameters.simulation.backend.default`). With no GPU it just runs on numpy.
 
 `lpt_native_21cm.py` generates its own cosmological density field and halo
 catalogues internally (Lagrangian Perturbation Theory + conditional halo mass

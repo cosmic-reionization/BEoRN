@@ -37,7 +37,7 @@ def test_ngp_conserves_particle_count():
 def test_ngp_single_particle_lands_in_one_cell():
     mesh = _mesh(8)
     pos = np.array([[0.5, 0.5, 0.5]], dtype=np.float32)
-    map_particles_to_mesh(mesh, 1.0, pos, mass_assignment='NGP')
+    map_particles_to_mesh(mesh, 1.0, pos, mass_assignment='NGP', deconvolve=False)
     assert (mesh > 0).sum() == 1
     assert mesh.sum() == pytest.approx(1.0)
 
@@ -106,7 +106,7 @@ def test_ngp_particle_near_box_edge_wraps():
     mesh = _mesh(N)
     # 0.999 * N = 7.992, rounds to 8 -> wraps to cell 0
     pos = np.array([[0.999, 0.5, 0.5]], dtype=np.float32)
-    map_particles_to_mesh(mesh, 1.0, pos, mass_assignment='NGP')
+    map_particles_to_mesh(mesh, 1.0, pos, mass_assignment='NGP', deconvolve=False)
     assert mesh.sum() == pytest.approx(1.0)
     assert (mesh > 0).sum() == 1
 
@@ -216,6 +216,56 @@ def test_fused_invalid_mass_assignment_raises():
     with pytest.raises(ValueError, match="unknown mass_assignment"):
         paint_displacement_field(mesh, 1.0, psi_x, psi_y, psi_z,
                                   mass_assignment='bogus', backend='numpy')
+
+
+# ── deconvolve integration (issue #48 follow-up) ───────────────────────────────
+# Painting functions correct the mass-assignment window in place by default —
+# any mesh built here should already match a manual paint(deconvolve=False) +
+# deconvolve_mas() call, and its total (weighted) sum should be unaffected
+# since the window is 1 at k=0.
+
+from beorn.particle_mapping.window import deconvolve_mas
+
+
+@pytest.mark.parametrize('scheme', ['NGP', 'CIC', 'TSC', 'PCS'])
+def test_map_particles_to_mesh_deconvolve_matches_manual_call(scheme):
+    N, n, L = 16, 300, 1.0
+    pos = _positions(n, box_size=L, seed=8)
+
+    raw = _mesh(N)
+    map_particles_to_mesh(raw, L, pos, mass_assignment=scheme, deconvolve=False)
+    expected = deconvolve_mas(raw, L, scheme)
+
+    auto = _mesh(N)
+    map_particles_to_mesh(auto, L, pos, mass_assignment=scheme)  # deconvolve=True default
+    np.testing.assert_allclose(auto, expected, rtol=1e-5, atol=1e-6)
+
+
+def test_map_particles_to_mesh_deconvolve_preserves_total():
+    N, n, L = 16, 300, 1.0
+    pos = _positions(n, box_size=L, seed=9)
+
+    raw = _mesh(N)
+    map_particles_to_mesh(raw, L, pos, mass_assignment='CIC', deconvolve=False)
+
+    deconvolved = _mesh(N)
+    map_particles_to_mesh(deconvolved, L, pos, mass_assignment='CIC')
+    assert deconvolved.sum() == pytest.approx(raw.sum(), rel=1e-4)
+
+
+def test_paint_displacement_field_deconvolve_matches_manual_call():
+    N, L, scheme = 16, 1.0, 'CIC'
+    psi_x, psi_y, psi_z = _displacement(N, seed=10)
+
+    raw = _mesh(N)
+    paint_displacement_field(raw, L, psi_x, psi_y, psi_z,
+                              mass_assignment=scheme, backend='numpy', deconvolve=False)
+    expected = deconvolve_mas(raw, L, scheme)
+
+    auto = _mesh(N)
+    paint_displacement_field(auto, L, psi_x, psi_y, psi_z,
+                              mass_assignment=scheme, backend='numpy')  # deconvolve=True default
+    np.testing.assert_allclose(auto, expected, rtol=1e-5, atol=1e-6)
 
 
 # ── coarsen_field (issue #48) ──────────────────────────────────────────────────

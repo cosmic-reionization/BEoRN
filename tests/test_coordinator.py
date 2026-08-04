@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 from beorn.painting.coordinator import PaintingCoordinator
 from beorn.structs.coeval_cube import CoevalCube
-from beorn.structs.parameters import Parameters
+from beorn.structs.parameters import Parameters, BackendParameters
 from beorn.structs.radiation_profiles import RadiationProfilesFStarGrid
 from beorn.structs.temporal_cube import TemporalCube
 
@@ -80,7 +80,7 @@ def make_parameters(seed=12345):
             Ncell=4,
             Lbox=10.0,
             cores=1,
-            fft_backend='numpy',
+            backend=BackendParameters(default='numpy'),
             store_grids=["Grid_xHII", "Grid_Temp", "Grid_xal"],
             minimum_grid_size_heat=1,
             minimum_grid_size_lyal=1,

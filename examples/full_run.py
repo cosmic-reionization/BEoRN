@@ -13,12 +13,12 @@ FILE_ROOT = Path("/xdisk/timeifler/yhhuang/Thesan/")
 CACHE_ROOT = SCRATCH_ROOT / "thesan_run" / "cache"
 OUTPUT_ROOT = SCRATCH_ROOT / "thesan_run" / "output"
 
-PARAMETER_FILE = Path(".") / "parameters_thesan.yaml"
+PARAMETER_FILE = Path(".") / "parameters.yaml"
 
 
 ### Parameter setup
 parameters = beorn.structs.Parameters.from_yaml(PARAMETER_FILE)
-parameters.simulation.file_root = FILE_ROOT
+parameters.cosmo_sim.file_root = FILE_ROOT
 parameters.solver.redshifts = np.sort(parameters.solver.redshifts)
 
 ### IO setup
