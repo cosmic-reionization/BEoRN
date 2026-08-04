@@ -20,5 +20,5 @@ A full run from a non-interactive script (command-line usage):
 .. toctree::
    :maxdepth: 1
 
-   examples/full_run_file
+   examples/python_scripts/lpt_native_21cm_file
    examples/simulation_comparison

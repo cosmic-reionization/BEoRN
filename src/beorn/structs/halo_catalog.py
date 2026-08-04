@@ -110,21 +110,23 @@ class HaloCatalog:
         return indices_match
 
 
-    def to_mesh(self, deconvolve: bool | None = None) -> np.ndarray:
+    def to_mesh(self, deconvolve: bool = False) -> np.ndarray:
         """Rasterize halo positions into a 3D number-count mesh.
 
         The mesh uses the nearest-neighbor mass-assignment scheme. The returned array represents halo counts
         (number density), not mass.
 
         Args:
-            deconvolve: If given, overrides
-                ``parameters.simulation.deconvolve_mas`` (default ``True``) —
-                whether to correct the NGP mass-assignment window
+            deconvolve: Whether to correct the NGP mass-assignment window
                 (:func:`beorn.particle_mapping.deconvolve_mas`) in place right
                 after painting, before this halo-count mesh is convolved with
                 the physical ionization/heating/Lyman-alpha profile kernel
                 downstream. Only the NGP painting window is removed here —
-                the profile kernel applied afterwards is untouched.
+                the profile kernel applied afterwards is untouched. Defaults
+                to ``False``; pass ``True`` at your own risk — deconvolving
+                amplifies noise near k_Nyquist, which can push a discrete
+                count mesh negative, fine for a one-off P(k) estimate but not
+                for a mesh reused for further painting.
 
         Returns:
             numpy.ndarray: 3D float32 array with shape (Ncell, Ncell, Ncell).
@@ -133,13 +135,9 @@ class HaloCatalog:
         grid_size = self.parameters.simulation.Ncell
         mesh = np.zeros((grid_size, grid_size, grid_size), dtype=np.float32)
         backend = self.parameters.simulation.backend.resolve('mass_assignment')
-        resolved_deconvolve = (
-            deconvolve if deconvolve is not None
-            else self.parameters.simulation.deconvolve_mas
-        )
         map_particles_to_mesh(
             mesh, physical_size, self.positions.astype(np.float32),
-            mass_assignment="NGP", backend=backend, deconvolve=resolved_deconvolve,
+            mass_assignment="NGP", backend=backend, deconvolve=deconvolve,
         )
         return mesh
 

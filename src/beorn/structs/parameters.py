@@ -381,22 +381,30 @@ class SimulationParameters:
     Read as the default by :meth:`beorn.lpt.LPTBase.get_density` (the matter
     density field) and by :meth:`beorn.structs.HaloCatalog.to_mesh` (halo
     positions, as profile centers for the ionization/heating/Lyman-alpha
-    painting stage) whenever their own ``mass_assignment``/``deconvolve``
-    argument isn't given explicitly. Does not affect
+    painting stage) whenever their own ``mass_assignment`` argument isn't
+    given explicitly. Does not affect
     ``cosmo_sim.halo_catalogs_thesan_mass_assignment``, which is a separate
-    knob for the Thesan N-body loader's own particle painting (issue #48)."""
+    knob for the Thesan N-body loader's own particle painting (issue #48).
 
-    deconvolve_mas: bool = True
-    """Whether :func:`beorn.particle_mapping.map_particles_to_mesh` /
-    :func:`beorn.particle_mapping.paint_displacement_field` correct the
-    ``mass_assignment`` window (:func:`beorn.particle_mapping.deconvolve_mas`)
-    immediately after painting. Defaults to ``True`` so every grid built via
-    these functions — including :meth:`beorn.lpt.LPTBase.get_density`'s
-    ``delta_b`` and :meth:`beorn.structs.HaloCatalog.to_mesh`'s halo-count
-    mesh — is free of the sinc^p suppression near k_Nyquist without any
-    extra step. The window's k=0 value is 1, so this never changes a mesh's
-    total (or total weight) — only its structure near k_Nyquist. Set to
-    ``False`` to get the raw painted mesh instead (issue #48)."""
+    Real-space mass-assignment window deconvolution (correcting the
+    ``sinc^p`` suppression near k_Nyquist) is a per-call ``deconvolve``
+    argument on :meth:`~beorn.lpt.LPTBase.get_density`,
+    :meth:`~beorn.structs.HaloCatalog.to_mesh`,
+    :func:`beorn.particle_mapping.map_particles_to_mesh`, and
+    :meth:`~beorn.structs.TemporalCube.power_spectrum` — each defaulting to
+    ``False`` — rather than a simulation-wide default here. Deconvolving the
+    *real-space field itself* divides out the window in Fourier space, which
+    amplifies noise near k_Nyquist enough to push cells below the physical
+    ``δ = -1`` floor (worse at lower redshift, where small-scale power is
+    larger); that fed straight into ``T_adiab_fluctu``'s ``(1 + δ)**(2/3)``,
+    producing ``NaN`` cells that silently poisoned
+    ``TemporalCube.global_mean``'s per-redshift average (not NaN-aware) for
+    every snapshot at or below the first affected redshift. For P(k)
+    analysis, prefer passing ``deconvolve=True`` directly to
+    :meth:`beorn.structs.TemporalCube.power_spectrum` /
+    :func:`beorn.power_spectrum.power_spectrum_1d`, which deconvolve only for
+    that one measurement without ever writing the noisier field back
+    (issue #48)."""
 
     @staticmethod
     def _kbins_from(lbox: float, ncell: int) -> np.ndarray:

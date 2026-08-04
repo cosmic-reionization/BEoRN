@@ -79,6 +79,14 @@ def plot_lightcone(lightcone: Lightcone, ax: plt.Axes, description: str, slice_n
     ax.set_xlabel('a')
     ax.set_ylabel(f'L ({length_unit})')
 
+    # Plot the colorbar directly. This must happen *before* ax.twiny() below:
+    # colorbar(im, ax=ax) shrinks ax to make room for the colorbar strip, but
+    # a twin axis created beforehand keeps its stale, full-width position and
+    # ends up overlapping the colorbar. Creating the twin afterward makes it
+    # snapshot ax's already-shrunk footprint instead.
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(label)
+
     # Add a secondary x-axis to show the redshifts
     ax2 = ax.twiny()
     ax2.set_xlim(redshifts[0], redshifts[-1])
@@ -86,7 +94,3 @@ def plot_lightcone(lightcone: Lightcone, ax: plt.Axes, description: str, slice_n
     ax2.set_xticks(redshift_ticks, labels=np.round(redshift_ticks, 2))
     ax2.set_xlabel("z")
     # ax2.tick_params()
-
-    # Plot the colorbar directly
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label(label)

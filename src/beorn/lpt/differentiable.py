@@ -322,6 +322,8 @@ def lpt_density(delta_k, L, z, Om, backend='numpy', order=1,
     field back through the particle positions to the cosmology.
 
     Args: as :func:`lpt_displacement`, plus ``mass_assignment`` (default CIC).
+    Paints with ``deconvolve=False`` (unlike :func:`~beorn.particle_mapping.paint_mesh`'s
+    own default) to match :meth:`LPTBase.get_density`'s default of the same name.
 
     Returns:
         delta — backend array of shape (N, N, N), mean-zero overdensity.
@@ -351,5 +353,6 @@ def lpt_density(delta_k, L, z, Om, backend='numpy', order=1,
             [x.reshape(-1), y.reshape(-1), z_pos.reshape(-1)], axis=-1)
 
     mesh = paint_mesh(positions, None, N, L,
-                     mass_assignment=mass_assignment, backend=name)
+                     mass_assignment=mass_assignment, backend=name,
+                     deconvolve=False)
     return mesh / mesh.mean() - 1.0

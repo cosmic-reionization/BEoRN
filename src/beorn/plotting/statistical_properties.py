@@ -19,8 +19,15 @@ def _mean(grid_or_stats, field: str, parameters: Parameters | None = None):
     return grid.z[:], grid.global_mean(field)
 
 
-def _ps_dTb(grid_or_stats, parameters: Parameters | None, k_value=None, k_index=1):
-    """Return ``(z, k_bins, ps_matrix, mean_dTb)`` for the dTb power spectrum."""
+def _ps_dTb(grid_or_stats, parameters: Parameters | None, k_value=None, k_index=1,
+            mass_assignment: str | None = None, deconvolve: bool = False):
+    """Return ``(z, k_bins, ps_matrix, mean_dTb)`` for the dTb power spectrum.
+
+    ``mass_assignment``/``deconvolve`` are forwarded to
+    ``TemporalCube.power_spectrum`` — see its docstring. Ignored when
+    *grid_or_stats* is a :class:`StatisticsEstimator`, whose power spectrum
+    is precomputed/cached.
+    """
     if isinstance(grid_or_stats, StatisticsEstimator):
         r = grid_or_stats.results
         z = r['z']
@@ -32,7 +39,8 @@ def _ps_dTb(grid_or_stats, parameters: Parameters | None, k_value=None, k_index=
     grid = grid_or_stats
     z = grid.z[:]
     mean_dTb = grid.global_mean('Grid_dTb')
-    ps, k_bins = grid.power_spectrum(grid.Grid_dTb, parameters)
+    ps, k_bins = grid.power_spectrum(grid.Grid_dTb, parameters,
+                                     mass_assignment=mass_assignment, deconvolve=deconvolve)
     ps_c = ps * k_bins[np.newaxis, :] ** 3 * mean_dTb[:, np.newaxis] ** 2 / (2 * np.pi ** 2)
     return z, k_bins, ps_c, mean_dTb
 
@@ -109,7 +117,9 @@ def draw_xHII_signal(ax: plt.Axes, grid, label=None, color=None, **kwargs):
     ax.set_xlabel('z')
 
 
-def draw_dTb_power_spectrum_of_z(ax: plt.Axes, grid, parameters: Parameters = None, label=None, color=None, k_index=1, k_value=None, **kwargs):
+def draw_dTb_power_spectrum_of_z(ax: plt.Axes, grid, parameters: Parameters = None, label=None, color=None,
+                                 k_index=1, k_value=None, mass_assignment: str | None = None,
+                                 deconvolve: bool = False, **kwargs):
     """Plot the evolution of the dTb power spectrum at a fixed k.
 
     Computes the power spectrum for each snapshot and plots the
@@ -125,13 +135,25 @@ def draw_dTb_power_spectrum_of_z(ax: plt.Axes, grid, parameters: Parameters = No
         label (str, optional): Legend label.
         color (str|tuple, optional): Line color.
         k_index (int, optional): Index of the k-bin to plot (ignored when *k_value* is set).
-        k_value (float, optional): Target k value in Mpc^-1; nearest bin is used.
+        k_value (float, optional): Target k value, in h/Mpc; nearest bin is used.
+        mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'`` — the
+            scheme ``Grid_dTb`` was painted with. Required if ``deconvolve=True``.
+            Ignored when *grid* is a :class:`StatisticsEstimator`.
+        deconvolve: If ``True``, undo the mass-assignment window for this P(k)
+            estimate only (:meth:`~beorn.structs.TemporalCube.power_spectrum`) —
+            safe to pass here regardless of whether ``Grid_dTb`` was itself
+            painted with deconvolution, since this never writes a deconvolved
+            field back, only corrects the *measured* spectrum. Ignored when
+            *grid* is a :class:`StatisticsEstimator`.
         **kwargs: Additional keyword arguments forwarded to ``ax.semilogy``.
 
     Returns:
-        float: The k value actually plotted.
+        float: The k value actually plotted, printed and returned in h/Mpc
+            when ``use_hunits`` is True, physical Mpc^-1 otherwise — matching
+            :func:`draw_dTb_power_spectrum_of_k`'s display convention.
     """
-    z_range, k_bins, ps_c, mean_dTb = _ps_dTb(grid, parameters, k_value=k_value, k_index=k_index)
+    z_range, k_bins, ps_c, mean_dTb = _ps_dTb(grid, parameters, k_value=k_value, k_index=k_index,
+                                              mass_assignment=mass_assignment, deconvolve=deconvolve)
     k = k_bins[k_index] if k_value is None else k_bins[np.abs(k_bins - k_value).argmin()]
     ki = np.abs(k_bins - k).argmin()
     ax.semilogy(z_range, ps_c[:, ki], label=label, color=color, **kwargs)
@@ -139,7 +161,17 @@ def draw_dTb_power_spectrum_of_z(ax: plt.Axes, grid, parameters: Parameters = No
     ax.set_ylabel(r'$\Delta_\mathrm{21}^{{2}}$ [mK]$^2$')
     ax.set_xlabel('z')
     ax.set_xlim(z_range.min() - 0.2, z_range.max())
-    print(f'k={k:.2f} Mpc$^{{-1}}$')
+
+    # k_bins are always computed in h/Mpc internally (Lbox_hunits convention,
+    # see TemporalCube.power_spectrum); convert only for display, matching
+    # draw_dTb_power_spectrum_of_k's use_hunits handling.
+    params = parameters if parameters is not None else getattr(grid, 'parameters', None)
+    if params is not None and not params.simulation.use_hunits:
+        k = k * params.cosmology.h0
+        k_unit = 'Mpc$^{-1}$'
+    else:
+        k_unit = 'h/Mpc'
+    print(f'k={k:.2f} {k_unit}')
     return k
 
 

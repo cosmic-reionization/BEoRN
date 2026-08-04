@@ -11,6 +11,12 @@ the tutorials' plots without recomputing anything.
 | `artificial_halo_gpu.py` | `../artificial_halos.ipynb` / `../artificial_halo_gpu.ipynb` | hardcoded in `build_parameters()` |
 | `lpt_native_21cm.py` | `../lpt_native_21cm.ipynb` | loaded from `param.yaml` via `beorn.structs.Parameters.from_yaml` |
 
+`lpt_native_21cm.py` also serves as the docs' "full run from a non-interactive
+script" tutorial (see `lpt_native_21cm_file.rst`, included from
+`docs/tutorials.rst`) since it's fully self-contained - no external N-body
+input or HPC-specific paths required, unlike a run driven by external
+simulation data.
+
 ## Running
 
 ```bash

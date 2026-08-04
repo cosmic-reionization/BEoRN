@@ -1,4 +1,4 @@
-"""LPTBase.get_density's mass_assignment/deconvolve Parameters wiring (issue #48 follow-up)."""
+"""LPTBase.get_density's mass_assignment Parameters wiring and per-call deconvolve option (issue #48 follow-up)."""
 import numpy as np
 import pytest
 
@@ -25,11 +25,10 @@ def _solver(param):
 
 def test_get_density_defaults_match_parameters_simulation_fields(param):
     assert param.simulation.mass_assignment == 'CIC'
-    assert param.simulation.deconvolve_mas is True
 
     solver = _solver(param)
     default = solver.get_density(Z)
-    explicit = solver.get_density(Z, mass_assignment='CIC', deconvolve=True)
+    explicit = solver.get_density(Z, mass_assignment='CIC', deconvolve=False)
     np.testing.assert_allclose(default, explicit, rtol=1e-4, atol=1e-6)
 
 
@@ -54,18 +53,6 @@ def test_get_density_mass_assignment_parameters_override(param):
 
     np.testing.assert_allclose(default, explicit_tsc, rtol=1e-4, atol=1e-6)
     assert not np.allclose(default, explicit_cic)
-
-
-def test_get_density_deconvolve_parameters_override(param):
-    param.simulation.deconvolve_mas = False
-    solver = _solver(param)
-
-    default = solver.get_density(Z)  # follows parameters.simulation.deconvolve_mas=False
-    explicit_false = solver.get_density(Z, deconvolve=False)
-    explicit_true = solver.get_density(Z, deconvolve=True)
-
-    np.testing.assert_allclose(default, explicit_false, rtol=1e-4, atol=1e-6)
-    assert not np.allclose(default, explicit_true)
 
 
 def test_get_density_oversample_deconvolve_applies_before_coarsening(param):

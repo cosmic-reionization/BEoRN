@@ -1,4 +1,4 @@
-"""HaloCatalog.to_mesh() deconvolve integration (issue #48 follow-up)."""
+"""HaloCatalog.to_mesh()'s per-call deconvolve option (issue #48 follow-up)."""
 import numpy as np
 import pytest
 
@@ -24,15 +24,13 @@ def param():
     return p
 
 
-def test_to_mesh_deconvolve_defaults_true_from_parameters(param):
-    assert param.simulation.deconvolve_mas is True
+def test_to_mesh_deconvolve_defaults_false(param):
     catalog = _catalog(param)
 
-    auto = catalog.to_mesh()
+    default = catalog.to_mesh()
     raw = catalog.to_mesh(deconvolve=False)
-    expected = deconvolve_mas(raw, L, 'NGP')
 
-    np.testing.assert_allclose(auto, expected, rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(default, raw, rtol=1e-5, atol=1e-6)
 
 
 def test_to_mesh_deconvolve_preserves_total(param):
@@ -43,11 +41,10 @@ def test_to_mesh_deconvolve_preserves_total(param):
     assert deconvolved.sum() == pytest.approx(raw.sum(), rel=1e-4)
 
 
-def test_to_mesh_deconvolve_argument_overrides_parameters(param):
-    param.simulation.deconvolve_mas = False
+def test_to_mesh_deconvolve_true_matches_function(param):
     catalog = _catalog(param, n=100, seed=2)
 
-    raw = catalog.to_mesh()  # follows parameters.simulation.deconvolve_mas=False
+    raw = catalog.to_mesh(deconvolve=False)
     forced = catalog.to_mesh(deconvolve=True)
     expected = deconvolve_mas(raw, L, 'NGP')
 

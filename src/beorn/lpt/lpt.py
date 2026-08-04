@@ -515,7 +515,7 @@ class LPTBase(ABC):
     def get_density(
         self, z: float, mass_assignment: str | None = None, fused: bool = True,
         oversample: int | None = None, backend: str | None = None,
-        deconvolve: bool | None = None,
+        deconvolve: bool = False,
     ) -> np.ndarray:
         """Matter overdensity δ(x) at redshift z via particle painting.
 
@@ -586,18 +586,19 @@ class LPTBase(ABC):
                 scatter-add mass assignment is not bit-deterministic
                 run-to-run on GPU — pass ``backend='numpy'`` explicitly if
                 you need reproducible density fields.
-            deconvolve: If given, overrides
-                ``parameters.simulation.deconvolve_mas`` (default ``True``) —
-                whether to correct the ``mass_assignment`` window
+            deconvolve: Whether to correct the ``mass_assignment`` window
                 (:func:`~beorn.particle_mapping.deconvolve_mas`) right after
-                painting. When ``oversample > 1``, this applies to the fine
+                painting. Defaults to ``False``. When ``oversample > 1``, this applies to the fine
                 (``oversample*N``) mesh *before* block-averaging back down,
                 removing the window at the resolution actually painted at —
                 the coarsening's own top-hat window is unaffected either way.
-                Pass ``False`` to get the raw painted field (e.g. for
-                real-space statistics via oversampling, or if you plan to
-                call ``deconvolve_mas``/``power_spectrum_1d(...,
-                deconvolve=True)`` yourself downstream).
+                Pass ``True`` at your own risk: deconvolving the real-space
+                field amplifies noise near k_Nyquist, which can push cells
+                below the physical ``δ = -1`` floor (worse at lower z, where
+                small-scale power is larger) — safe for a one-off P(k)
+                estimate, not for a field used in further real-space physics.
+                Prefer ``power_spectrum_1d(..., deconvolve=True)`` for P(k)
+                analysis instead, which never writes the noisier field back.
 
         Returns:
             delta — shape (N, N, N), mean-zero overdensity.
@@ -616,10 +617,6 @@ class LPTBase(ABC):
         resolved_mass_assignment = (
             mass_assignment if mass_assignment is not None
             else self.parameters.simulation.mass_assignment
-        )
-        resolved_deconvolve = (
-            deconvolve if deconvolve is not None
-            else self.parameters.simulation.deconvolve_mas
         )
 
         if oversample > 1:
@@ -643,7 +640,7 @@ class LPTBase(ABC):
 
             mesh_fine = np.zeros((N_fine, N_fine, N_fine), dtype=np.float32)
             map_particles_to_mesh(mesh_fine, L, positions, mass_assignment=resolved_mass_assignment,
-                                   backend=resolved_backend, deconvolve=resolved_deconvolve)
+                                   backend=resolved_backend, deconvolve=deconvolve)
             mesh = coarsen_field(mesh_fine, oversample)
         else:
             mesh = np.zeros((N, N, N), dtype=np.float32)
@@ -652,12 +649,12 @@ class LPTBase(ABC):
                 psi_x, psi_y, psi_z = self.get_displacement(z)
                 paint_displacement_field(mesh, L, psi_x, psi_y, psi_z,
                                           mass_assignment=resolved_mass_assignment,
-                                          backend=resolved_backend, deconvolve=resolved_deconvolve)
+                                          backend=resolved_backend, deconvolve=deconvolve)
             else:
                 from ..particle_mapping import map_particles_to_mesh
                 positions = self.get_positions(z)
                 map_particles_to_mesh(mesh, L, positions, mass_assignment=resolved_mass_assignment,
-                                       backend=resolved_backend, deconvolve=resolved_deconvolve)
+                                       backend=resolved_backend, deconvolve=deconvolve)
         mean = mesh.mean()
         if mean > 0:
             mesh = mesh / mean - 1.0
