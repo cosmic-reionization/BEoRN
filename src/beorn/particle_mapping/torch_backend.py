@@ -28,7 +28,7 @@ def paint_mesh_torch(
     mesh as a **torch tensor** on the device of the input positions (or
     *device*), with no numpy round-trip — gradients flow from the mesh back
     to the positions and weights.  Output dtype follows the input positions
-    (numpy inputs default to float32, matching the in-place shim).
+    own dtype (numpy inputs are not forced to any particular precision).
 
     Args:
         particle_positions: (n_parts, 3) array or tensor in box units.
@@ -60,7 +60,7 @@ def paint_mesh_torch(
     if isinstance(particle_positions, torch.Tensor):
         pos = particle_positions
     else:
-        pos = torch.as_tensor(np.asarray(particle_positions, dtype=np.float32))
+        pos = torch.as_tensor(np.asarray(particle_positions))
     if device is not None:
         pos = pos.to(device)
     dtype = pos.dtype
@@ -146,17 +146,19 @@ def map_particles_to_mesh(
     device-resident, gradient-carrying mesh.
 
     Args:
-        mesh: float32 3-D NumPy array, shape ``(N, N, N)``.  Modified in place.
+        mesh: float32 or float64 3-D NumPy array, shape ``(N, N, N)``.
+            Modified in place.  Precision follows ``mesh.dtype`` (issue #52).
         box_size: Side length of the simulation box (same units as positions).
-        particle_positions: float32 array, shape ``(n_parts, 3)``.
+        particle_positions: Array of shape ``(n_parts, 3)``.
         mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
         weights: Per-particle weights, shape ``(n_parts,)``.  ``None`` → 1.
     """
     N = mesh.shape[0]
-    t = paint_mesh_torch(particle_positions, N, box_size,
+    pos_typed = np.asarray(particle_positions, dtype=mesh.dtype)
+    t = paint_mesh_torch(pos_typed, N, box_size,
                          mass_assignment=mass_assignment, weights=weights,
                          device='cpu')
-    mesh[:] += t.numpy()
+    mesh[:] += t.numpy().astype(mesh.dtype, copy=False)
 
 
 def _w_tsc_torch(d):

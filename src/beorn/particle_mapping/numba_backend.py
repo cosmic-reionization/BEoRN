@@ -163,9 +163,12 @@ def map_particles_to_mesh(
     """Paint particles onto *mesh* in place using Numba-JIT loops.
 
     Args:
-        mesh: float32 3-D array, shape ``(N, N, N)``.  Modified in place.
-        box_size: Side length of the simulation box (same units as positions).
-        particle_positions: float32 array, shape ``(n_parts, 3)``.
+        mesh: float32 or float64 3-D array, shape ``(N, N, N)``.  Modified in
+            place.  Precision follows ``mesh.dtype`` (issue #52) — Numba's
+            lazy JIT compiles a separate specialization per input dtype, so
+            float64 works transparently.
+        particle_positions: Array of shape ``(n_parts, 3)``, same dtype as
+            ``mesh``.
         mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
         weights: Per-particle weights, shape ``(n_parts,)``.  ``None`` → 1.
     """
@@ -178,19 +181,21 @@ def map_particles_to_mesh(
             f"Choose from {_SCHEMES}."
         )
 
-    assert mesh.dtype == np.float32,               "mesh must be float32"
-    assert particle_positions.dtype == np.float32, "particle_positions must be float32"
+    assert mesh.dtype in (np.float32, np.float64), \
+        f"mesh must be float32 or float64, got {mesh.dtype}"
+    assert particle_positions.dtype == mesh.dtype, \
+        f"particle_positions dtype ({particle_positions.dtype}) must match mesh dtype ({mesh.dtype})"
     assert mesh.ndim == 3 and mesh.shape[0] == mesh.shape[1] == mesh.shape[2], \
         "mesh must be a cubic 3-D array"
 
     N      = mesh.shape[0]
     n_part = particle_positions.shape[0]
-    scale  = np.float32(N / box_size)
+    scale  = mesh.dtype.type(N / box_size)
     loop   = _LOOP_FN[scheme]
 
     for start in range(0, n_part, _BATCH_SIZE):
         end = min(start + _BATCH_SIZE, n_part)
         pos = particle_positions[start:end] * scale
-        wt  = (np.ones(end - start, dtype=np.float32)
-               if weights is None else weights[start:end].astype(np.float32))
+        wt  = (np.ones(end - start, dtype=mesh.dtype)
+               if weights is None else weights[start:end].astype(mesh.dtype))
         loop(mesh, N, pos, wt)

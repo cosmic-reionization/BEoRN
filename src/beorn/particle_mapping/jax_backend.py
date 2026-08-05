@@ -124,17 +124,22 @@ def map_particles_to_mesh(
     matches the other backends.
 
     Args:
-        mesh: float32 3-D NumPy array, shape ``(N, N, N)``.  Modified in place.
+        mesh: float32 or float64 3-D NumPy array, shape ``(N, N, N)``.
+            Modified in place.  Precision follows ``mesh.dtype`` (issue #52) —
+            note float64 additionally requires jax's x64 mode to be enabled
+            (``jax.config.update('jax_enable_x64', True)``), otherwise jax
+            silently canonicalises back to float32 (see
+            :class:`beorn.lpt.backends.JaxBackend`).
         box_size: Side length of the simulation box (same units as positions).
-        particle_positions: float32 array, shape ``(n_parts, 3)``.
+        particle_positions: Array of shape ``(n_parts, 3)``.
         mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
         weights: Per-particle weights, shape ``(n_parts,)``.  ``None`` → 1.
     """
     N = mesh.shape[0]
-    pos32 = np.asarray(particle_positions, dtype=np.float32)
-    t = paint_mesh_jax(pos32, N, box_size,
+    pos_typed = np.asarray(particle_positions, dtype=mesh.dtype)
+    t = paint_mesh_jax(pos_typed, N, box_size,
                        mass_assignment=mass_assignment, weights=weights)
-    mesh[:] += np.array(t)
+    mesh[:] += np.asarray(t).astype(mesh.dtype, copy=False)
 
 
 def _w_tsc_jax(d, jnp):

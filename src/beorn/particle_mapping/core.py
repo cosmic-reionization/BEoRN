@@ -85,10 +85,16 @@ def map_particles_to_mesh(
     The mesh is modified **in place**.
 
     Args:
-        mesh (np.ndarray): Target 3-D float32 array, shape ``(N, N, N)``.
+        mesh (np.ndarray): Target 3-D array, shape ``(N, N, N)``, dtype
+            float32 or float64 (``particle_positions`` must match). Precision
+            follows ``mesh.dtype`` end to end (issue #52) — pass a float64
+            mesh to paint without truncating float64 positions/displacements
+            along the way. ``backend='pylians'`` is float32-only regardless
+            (a fixed constraint of the wrapped Fortran extension).
         box_size (float): Side length of the simulation box (same units as
             ``particle_positions``).
-        particle_positions (np.ndarray): float32 array of shape ``(n_parts, 3)``.
+        particle_positions (np.ndarray): Array of shape ``(n_parts, 3)``,
+            same dtype as ``mesh``.
         mass_assignment (str): Kernel scheme.  ``'NGP'``, ``'CIC'``,
             ``'TSC'``, ``'PCS'``.  Not all backends support all schemes — see
             notes below.
@@ -180,7 +186,9 @@ def paint_displacement_field(
     profiling judgement call).
 
     Args:
-        mesh (np.ndarray): Target 3-D float32 array, shape ``(N, N, N)``.
+        mesh (np.ndarray): Target 3-D array, shape ``(N, N, N)``, dtype
+            float32 or float64. Precision follows ``mesh.dtype`` end to end
+            (issue #52), including the non-``'numpy'`` fallback path below.
         box_size (float): Side length of the simulation box (same units as
             ``psi_x``/``psi_y``/``psi_z``).
         psi_x, psi_y, psi_z (np.ndarray): Displacement field components, each
@@ -215,7 +223,7 @@ def paint_displacement_field(
         x = q1d[:, None, None] + psi_x
         y = q1d[None, :, None] + psi_y
         z = q1d[None, None, :] + psi_z
-        positions = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=-1).astype(np.float32)
+        positions = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=-1).astype(mesh.dtype)
         w = None if weights is None else np.asarray(weights).ravel()
         map_particles_to_mesh(mesh, box_size, positions, mass_assignment=mass_assignment,
                                backend=backend, weights=w, deconvolve=False)
@@ -246,13 +254,14 @@ def paint_mesh(
     mass_assignment: str = 'CIC',
     backend: str = 'auto',
     deconvolve: bool = True,
+    dtype: str | None = None,
 ):
     """Functional particle-to-mesh painting: ``mesh = paint_mesh(pos, w, N, L)``.
 
     The functional paint contract (issue #42, G4): returns the painted mesh
     as an array of the same family as the input positions — a jax array or a
     torch tensor stays on its device with the autograd graph intact (no numpy
-    round-trip); numpy input returns a float32 numpy mesh.  The in-place
+    round-trip); numpy input returns a numpy mesh.  The in-place
     :func:`map_particles_to_mesh` API is unchanged.
 
     Args:
@@ -268,10 +277,18 @@ def paint_mesh(
             returning — see :func:`map_particles_to_mesh`. Applied via the
             same backend as the returned mesh, so differentiability/device
             residency is preserved.
+        dtype: Precision for the freshly-allocated mesh on the
+            ``'numpy'``/``'numba'``/``'pylians'`` branch — ``None`` (default,
+            unchanged behavior) means float32, or pass ``'float64'`` (issue
+            #52). Ignored for ``'jax'``/``'torch'`` input: those return a
+            device array/tensor whose dtype already follows
+            ``particle_positions`` itself — cast your input beforehand if you
+            need a specific precision there. Ignored (always float32) for
+            ``backend='pylians'`` (fixed Fortran-extension constraint).
 
     Returns:
         Mesh of shape (N, N, N): jax array / torch tensor (device-resident,
-        differentiable) or numpy float32 array.
+        differentiable) or numpy array (float32 unless ``dtype='float64'``).
     """
     if backend == 'auto':
         backend = _infer_functional_backend(particle_positions)
@@ -288,10 +305,13 @@ def paint_mesh(
                                 weights=weights)
 
     elif backend in ('numpy', 'numba', 'pylians'):
-        mesh = np.zeros((N, N, N), dtype=np.float32)
+        resolved_dtype = np.float32 if dtype is None else np.dtype(dtype)
+        if backend == 'pylians':
+            resolved_dtype = np.float32
+        mesh = np.zeros((N, N, N), dtype=resolved_dtype)
         map_particles_to_mesh(
             mesh, box_size,
-            np.asarray(particle_positions, dtype=np.float32),
+            np.asarray(particle_positions, dtype=resolved_dtype),
             mass_assignment=mass_assignment, backend=backend,
             weights=None if weights is None else np.asarray(weights),
             deconvolve=False,

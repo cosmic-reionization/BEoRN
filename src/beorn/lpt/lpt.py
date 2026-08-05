@@ -489,8 +489,17 @@ class LPTBase(ABC):
     # Convenience methods
     # ------------------------------------------------------------------
 
-    def get_positions(self, z: float) -> np.ndarray:
+    def get_positions(self, z: float, dtype: str | None = None) -> np.ndarray:
         """Displaced particle positions at redshift z.
+
+        Args:
+            z: Redshift.
+            dtype: Output precision. ``None`` (default) gives float32,
+                matching historical behavior. Pass ``dtype='float64'`` to
+                keep the full precision of the (float64-by-default)
+                displacement field through to the returned positions (issue
+                #52) — needed if you're about to paint them onto a float64
+                mesh yourself via :func:`~beorn.particle_mapping.map_particles_to_mesh`.
 
         Returns:
             Array of shape (N³, 3) with positions in Mpc/h, periodic in [0, L).
@@ -510,12 +519,13 @@ class LPTBase(ABC):
         z_pos = (q1d[None, None, :] + psi_z) % L
 
         positions = np.stack([x.ravel(), y.ravel(), z_pos.ravel()], axis=-1)
-        return positions.astype(np.float32)
+        resolved_dtype = np.float32 if dtype is None else np.dtype(dtype)
+        return positions.astype(resolved_dtype)
 
     def get_density(
         self, z: float, mass_assignment: str | None = None, fused: bool = True,
         oversample: int | None = None, backend: str | None = None,
-        deconvolve: bool = False,
+        deconvolve: bool = False, dtype: str | None = None,
     ) -> np.ndarray:
         """Matter overdensity δ(x) at redshift z via particle painting.
 
@@ -599,6 +609,16 @@ class LPTBase(ABC):
                 estimate, not for a field used in further real-space physics.
                 Prefer ``power_spectrum_1d(..., deconvolve=True)`` for P(k)
                 analysis instead, which never writes the noisier field back.
+            dtype: Precision of the painted mesh (and the particle positions
+                painted onto it). ``None`` (default) gives float32, matching
+                historical behavior. Pass ``dtype='float64'`` to paint at the
+                full precision of the underlying (float64-by-default)
+                displacement field instead of truncating it to float32 before
+                painting (issue #52) — the truncation can otherwise show up
+                as a real, several-% high-k P(k) deviation for a CIC/TSC/PCS
+                mesh, worse at lower z where displacements are larger.
+                ``backend='pylians'`` stays float32 regardless (a fixed
+                constraint of the wrapped Fortran extension).
 
         Returns:
             delta — shape (N, N, N), mean-zero overdensity.
@@ -618,6 +638,9 @@ class LPTBase(ABC):
             mass_assignment if mass_assignment is not None
             else self.parameters.simulation.mass_assignment
         )
+        resolved_dtype = np.float32 if dtype is None else np.dtype(dtype)
+        if resolved_backend == 'pylians':
+            resolved_dtype = np.float32
 
         if oversample > 1:
             from ..particle_mapping import (
@@ -636,14 +659,14 @@ class LPTBase(ABC):
             z_pos = (q1d_fine[None, None, :] + psi_z_f) % L
             positions = np.stack(
                 [x.ravel(), y.ravel(), z_pos.ravel()], axis=-1
-            ).astype(np.float32)
+            ).astype(resolved_dtype)
 
-            mesh_fine = np.zeros((N_fine, N_fine, N_fine), dtype=np.float32)
+            mesh_fine = np.zeros((N_fine, N_fine, N_fine), dtype=resolved_dtype)
             map_particles_to_mesh(mesh_fine, L, positions, mass_assignment=resolved_mass_assignment,
                                    backend=resolved_backend, deconvolve=deconvolve)
             mesh = coarsen_field(mesh_fine, oversample)
         else:
-            mesh = np.zeros((N, N, N), dtype=np.float32)
+            mesh = np.zeros((N, N, N), dtype=resolved_dtype)
             if fused:
                 from ..particle_mapping import paint_displacement_field
                 psi_x, psi_y, psi_z = self.get_displacement(z)
@@ -652,7 +675,7 @@ class LPTBase(ABC):
                                           backend=resolved_backend, deconvolve=deconvolve)
             else:
                 from ..particle_mapping import map_particles_to_mesh
-                positions = self.get_positions(z)
+                positions = self.get_positions(z, dtype=resolved_dtype)
                 map_particles_to_mesh(mesh, L, positions, mass_assignment=resolved_mass_assignment,
                                        backend=resolved_backend, deconvolve=deconvolve)
         mean = mesh.mean()

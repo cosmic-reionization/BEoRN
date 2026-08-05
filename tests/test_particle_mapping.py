@@ -373,3 +373,164 @@ def test_upsample_field_fourier_torch_matches_numpy():
     out = upsample_field_fourier(torch.as_tensor(field), 4)
     assert isinstance(out, torch.Tensor)
     np.testing.assert_allclose(out.numpy(), ref, atol=1e-4)
+
+
+# ── dtype precision (issue #52) ────────────────────────────────────────────────
+# get_density()/paint_displacement_field() used to hardcode float32 for the
+# mesh and particle positions regardless of backend, silently truncating the
+# (float64-by-default) LPT displacement field before painting. These tests
+# confirm float64 is now selectable end to end for the numpy/numba backends,
+# and that the historical float32 default is unchanged.
+
+def _mesh64(N=16):
+    return np.zeros((N, N, N), dtype=np.float64)
+
+
+def _positions64(n, box_size=1.0, seed=0):
+    rng = np.random.default_rng(seed)
+    return (rng.random((n, 3)) * box_size).astype(np.float64)
+
+
+@pytest.mark.parametrize('scheme', ['NGP', 'CIC', 'TSC', 'PCS'])
+def test_map_particles_to_mesh_float64_conserves_total_weight(scheme):
+    N, n = 16, 500
+    mesh = _mesh64(N)
+    pos = _positions64(n)
+    map_particles_to_mesh(mesh, 1.0, pos, mass_assignment=scheme, deconvolve=False)
+    assert mesh.dtype == np.float64
+    assert mesh.sum() == pytest.approx(n, rel=1e-3)
+
+
+def test_map_particles_to_mesh_mismatched_dtype_raises():
+    # backend='numpy' explicit: only that backend (and 'numba') enforce a
+    # strict dtype match -- 'torch'/'jax' happily upcast, so leaving backend
+    # at its 'auto' default would make this test environment-dependent.
+    mesh = _mesh64()
+    pos = _positions(10)  # float32
+    with pytest.raises(AssertionError, match="dtype"):
+        map_particles_to_mesh(mesh, 1.0, pos, mass_assignment='CIC', backend='numpy', deconvolve=False)
+
+
+def test_map_particles_to_mesh_unsupported_dtype_raises():
+    mesh = np.zeros((16, 16, 16), dtype=np.float16)
+    pos = (np.random.default_rng(0).random((10, 3))).astype(np.float16)
+    with pytest.raises(AssertionError, match="float32 or float64"):
+        map_particles_to_mesh(mesh, 1.0, pos, mass_assignment='CIC', backend='numpy', deconvolve=False)
+
+
+@pytest.mark.parametrize('scheme', ['NGP', 'CIC', 'TSC', 'PCS'])
+def test_float64_and_float32_painting_agree_closely(scheme):
+    """float64 painting should reproduce float32 painting to within float32
+    precision for positions that don't sit near a cell-boundary rounding
+    edge — a sanity check that the dtype threading didn't change the maths,
+    only the precision."""
+    N, n = 32, 2000
+    pos32 = _positions(n, seed=11)
+    pos64 = pos32.astype(np.float64)
+
+    mesh32 = _mesh(N)
+    map_particles_to_mesh(mesh32, 1.0, pos32, mass_assignment=scheme, deconvolve=False)
+
+    mesh64 = _mesh64(N)
+    map_particles_to_mesh(mesh64, 1.0, pos64, mass_assignment=scheme, deconvolve=False)
+
+    np.testing.assert_allclose(mesh64, mesh32, rtol=1e-3, atol=1e-4)
+
+
+def test_fused_paint_displacement_field_float64():
+    N = 16
+    psi_x, psi_y, psi_z = _displacement(N, seed=12)  # already float64
+    mesh = _mesh64(N)
+    paint_displacement_field(mesh, 1.0, psi_x, psi_y, psi_z,
+                              mass_assignment='CIC', backend='numpy', deconvolve=False)
+    assert mesh.dtype == np.float64
+    assert mesh.sum() == pytest.approx(N ** 3, rel=1e-4)
+
+
+def test_fused_paint_displacement_field_float64_matches_float32_closely():
+    N = 16
+    psi_x64 = np.random.default_rng(13).standard_normal((N, N, N)) * 0.01
+    psi_y64 = np.random.default_rng(14).standard_normal((N, N, N)) * 0.01
+    psi_z64 = np.random.default_rng(15).standard_normal((N, N, N)) * 0.01
+
+    mesh64 = _mesh64(N)
+    paint_displacement_field(mesh64, 1.0, psi_x64, psi_y64, psi_z64,
+                              mass_assignment='CIC', backend='numpy', deconvolve=False)
+
+    mesh32 = _mesh(N)
+    paint_displacement_field(mesh32, 1.0,
+                              psi_x64.astype(np.float32), psi_y64.astype(np.float32),
+                              psi_z64.astype(np.float32),
+                              mass_assignment='CIC', backend='numpy', deconvolve=False)
+
+    np.testing.assert_allclose(mesh64, mesh32, rtol=1e-3, atol=1e-4)
+
+
+def test_numba_backend_float64_matches_numpy_backend():
+    pytest.importorskip("numba")
+    from beorn.particle_mapping import numba_backend
+
+    N, n = 16, 300
+    pos = _positions64(n, seed=16)
+
+    mesh_numba = _mesh64(N)
+    numba_backend.map_particles_to_mesh(mesh_numba, 1.0, pos, mass_assignment='CIC')
+
+    mesh_numpy = _mesh64(N)
+    map_particles_to_mesh(mesh_numpy, 1.0, pos, mass_assignment='CIC',
+                           backend='numpy', deconvolve=False)
+    np.testing.assert_allclose(mesh_numba, mesh_numpy, rtol=1e-10)
+
+
+def test_paint_mesh_functional_dtype_float64():
+    from beorn.particle_mapping.core import paint_mesh
+    N, n = 16, 200
+    pos = _positions64(n, seed=17)
+    weights = None
+    mesh = paint_mesh(pos, weights, N, 1.0, mass_assignment='CIC',
+                       backend='numpy', deconvolve=False, dtype='float64')
+    assert mesh.dtype == np.float64
+    assert mesh.sum() == pytest.approx(n, rel=1e-3)
+
+
+def test_paint_mesh_functional_default_dtype_is_float32():
+    from beorn.particle_mapping.core import paint_mesh
+    N, n = 16, 50
+    pos = _positions(n, seed=18)
+    mesh = paint_mesh(pos, None, N, 1.0, mass_assignment='CIC', backend='numpy', deconvolve=False)
+    assert mesh.dtype == np.float32
+
+
+def test_map_particles_to_mesh_jax_float64_matches_numpy():
+    jax = pytest.importorskip("jax")
+    jax.config.update('jax_enable_x64', True)
+    from beorn.particle_mapping import jax_backend
+
+    N, n = 16, 300
+    pos = _positions64(n, seed=19)
+
+    mesh_jax = _mesh64(N)
+    jax_backend.map_particles_to_mesh(mesh_jax, 1.0, pos, mass_assignment='CIC')
+
+    mesh_numpy = _mesh64(N)
+    map_particles_to_mesh(mesh_numpy, 1.0, pos, mass_assignment='CIC',
+                           backend='numpy', deconvolve=False)
+    assert mesh_jax.dtype == np.float64
+    np.testing.assert_allclose(mesh_jax, mesh_numpy, rtol=1e-6)
+
+
+def test_map_particles_to_mesh_torch_float64_matches_numpy():
+    torch = pytest.importorskip("torch")
+    from beorn.particle_mapping import torch_backend
+
+    N, n = 16, 300
+    pos = _positions64(n, seed=20)
+
+    mesh_torch = _mesh64(N)
+    torch_backend.map_particles_to_mesh(mesh_torch, 1.0, pos, mass_assignment='CIC')
+
+    mesh_numpy = _mesh64(N)
+    map_particles_to_mesh(mesh_numpy, 1.0, pos, mass_assignment='CIC',
+                           backend='numpy', deconvolve=False)
+    assert mesh_torch.dtype == np.float64
+    np.testing.assert_allclose(mesh_torch, mesh_numpy, rtol=1e-6)

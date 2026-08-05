@@ -80,3 +80,10 @@ def test_get_density_oversample_parameters_default_and_override():
     explicit_4 = s.get_density(Z, mass_assignment='CIC', oversample=4)
     np.testing.assert_allclose(default_4, explicit_4, rtol=1e-4, atol=1e-6)
     assert not np.allclose(default_4, explicit_1)
+
+
+def test_get_density_oversample_dtype_float64(solver):
+    """dtype threading (issue #52) also applies to the oversample>1 path."""
+    delta = solver.get_density(Z, mass_assignment='CIC', oversample=4, dtype='float64')
+    assert delta.dtype == np.float64
+    assert delta.shape == (N, N, N)

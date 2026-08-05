@@ -67,9 +67,11 @@ def map_particles_to_mesh(
     back to pure NumPy.
 
     Args:
-        mesh: float32 3-D array, shape ``(N, N, N)``.  Modified in place.
+        mesh: float32 or float64 3-D array, shape ``(N, N, N)``.  Modified in
+            place.  Precision follows ``mesh.dtype`` end to end (issue #52).
         box_size: Side length of the simulation box (same units as positions).
-        particle_positions: float32 array, shape ``(n_parts, 3)``.
+        particle_positions: Array of shape ``(n_parts, 3)``, same dtype as
+            ``mesh``.
         mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
         weights: Per-particle weights, shape ``(n_parts,)``.  ``None`` → 1.
     """
@@ -80,8 +82,10 @@ def map_particles_to_mesh(
             f"Choose from {_SCHEMES}."
         )
 
-    assert mesh.dtype == np.float32,               "mesh must be float32"
-    assert particle_positions.dtype == np.float32, "particle_positions must be float32"
+    assert mesh.dtype in (np.float32, np.float64), \
+        f"mesh must be float32 or float64, got {mesh.dtype}"
+    assert particle_positions.dtype == mesh.dtype, \
+        f"particle_positions dtype ({particle_positions.dtype}) must match mesh dtype ({mesh.dtype})"
     assert mesh.ndim == 3 and mesh.shape[0] == mesh.shape[1] == mesh.shape[2], \
         "mesh must be a cubic 3-D array"
 
@@ -95,9 +99,9 @@ def map_particles_to_mesh(
         batchsize = _BATCH_SIZE
         for start in range(0, n_part, batchsize):
             end = min(start + batchsize, n_part)
-            pos = particle_positions[start:end] * np.float32(scale)
-            wt  = (np.ones(end - start, dtype=np.float32)
-                   if weights is None else weights[start:end].astype(np.float32))
+            pos = particle_positions[start:end] * mesh.dtype.type(scale)
+            wt  = (np.ones(end - start, dtype=mesh.dtype)
+                   if weights is None else weights[start:end].astype(mesh.dtype))
             loop(mesh, N, pos, wt)
     else:
         _fn       = _NUMPY_BATCH_FN[scheme]
@@ -114,13 +118,13 @@ def map_particles_to_mesh(
 def _w_tsc(d: np.ndarray) -> np.ndarray:
     ad = np.abs(d)
     return np.where(ad < 0.5, 0.75 - d * d,
-           np.where(ad < 1.5, 0.5 * (1.5 - ad) ** 2, 0.0)).astype(np.float32)
+           np.where(ad < 1.5, 0.5 * (1.5 - ad) ** 2, 0.0)).astype(d.dtype)
 
 
 def _w_pcs(d: np.ndarray) -> np.ndarray:
     ad = np.abs(d)
     return np.where(ad < 1.0, (4.0 - 6.0 * d * d + 3.0 * ad ** 3) / 6.0,
-           np.where(ad < 2.0, (2.0 - ad) ** 3 / 6.0, 0.0)).astype(np.float32)
+           np.where(ad < 2.0, (2.0 - ad) ** 3 / 6.0, 0.0)).astype(d.dtype)
 
 
 # ── Pure-NumPy per-scheme batch painters ─────────────────────────────────────
@@ -136,16 +140,16 @@ def _ngp_batch(mesh, N, px, py, pz, w):
     ix = np.round(px).astype(np.int32) % N
     iy = np.round(py).astype(np.int32) % N
     iz = np.round(pz).astype(np.int32) % N
-    wt = np.ones(len(px), dtype=np.float32) if w is None else w.astype(np.float32)
+    wt = np.ones(len(px), dtype=px.dtype) if w is None else w.astype(px.dtype)
     np.add.at(mesh, (ix, iy, iz), wt)
 
 
 def _cic_batch(mesh, N, px, py, pz, w):
-    wt = np.ones(len(px), dtype=np.float32) if w is None else w.astype(np.float32)
+    wt = np.ones(len(px), dtype=px.dtype) if w is None else w.astype(px.dtype)
     stencils = []
     for p in (px, py, pz):
         i0 = np.floor(p).astype(np.int32)
-        d1 = (p - i0).astype(np.float32)
+        d1 = (p - i0).astype(p.dtype)
         d0 = 1.0 - d1
         i0 %= N
         i1 = (i0 + 1) % N
@@ -160,7 +164,7 @@ def _tsc_batch(mesh, N, px, py, pz, w):
     # TSC needs the stencil centred on the *nearest* cell (round), not floor.
     # With floor the k=2 contribution is silently dropped for frac >= 0.5,
     # breaking mass conservation by up to ~6%.
-    wt = np.ones(len(px), dtype=np.float32) if w is None else w.astype(np.float32)
+    wt = np.ones(len(px), dtype=px.dtype) if w is None else w.astype(px.dtype)
     i_cen_x = np.round(px).astype(np.int32)
     i_cen_y = np.round(py).astype(np.int32)
     i_cen_z = np.round(pz).astype(np.int32)
@@ -177,7 +181,7 @@ def _tsc_batch(mesh, N, px, py, pz, w):
 
 
 def _pcs_batch(mesh, N, px, py, pz, w):
-    wt = np.ones(len(px), dtype=np.float32) if w is None else w.astype(np.float32)
+    wt = np.ones(len(px), dtype=px.dtype) if w is None else w.astype(px.dtype)
     i_cen_x = np.floor(px).astype(np.int32)
     i_cen_y = np.floor(py).astype(np.int32)
     i_cen_z = np.floor(pz).astype(np.int32)
@@ -225,7 +229,10 @@ def paint_displacement_field(
     weight stencil, already factored out into ``_w_tsc``/``_w_pcs``/etc.
 
     Args:
-        mesh: float32 3-D array, shape ``(N, N, N)``.  Modified in place.
+        mesh: float32 or float64 3-D array, shape ``(N, N, N)``.  Modified in
+            place.  Precision follows ``mesh.dtype`` end to end (issue #52) —
+            pass a float64 mesh to paint the (float64) displacement field
+            without truncating it along the way.
         box_size: Side length of the simulation box (same units as psi_*).
         psi_x, psi_y, psi_z: Displacement field components, each shape
             ``(N, N, N)``, same units as ``box_size``.
@@ -239,24 +246,27 @@ def paint_displacement_field(
             f"Choose from {_SCHEMES}."
         )
 
-    assert mesh.dtype == np.float32, "mesh must be float32"
+    assert mesh.dtype in (np.float32, np.float64), \
+        f"mesh must be float32 or float64, got {mesh.dtype}"
     assert mesh.ndim == 3 and mesh.shape[0] == mesh.shape[1] == mesh.shape[2], \
         "mesh must be a cubic 3-D array"
     N = mesh.shape[0]
     assert psi_x.shape == psi_y.shape == psi_z.shape == (N, N, N), \
         "psi_x/psi_y/psi_z must have shape (N,N,N) matching mesh"
 
-    scale = np.float32(N / box_size)
+    dtype = mesh.dtype
+    scale = dtype.type(N / box_size)
     # Cell-unit Lagrangian grid — (arange(N)+0.5) already *is* the cell-unit
     # position (the L/N cell size and the N/L scale cancel), so it never needs
     # to round-trip through physical units the way get_positions()'s q1d does.
-    q1d = (np.arange(N, dtype=np.float32) + 0.5)
+    q1d = (np.arange(N, dtype=dtype) + 0.5)
 
-    # Broadcast + cast to float32 directly, no float64 intermediates, no
-    # np.stack/reshape into a combined (N^3,3) array — just three flat views.
-    px = (q1d[:, None, None] + psi_x.astype(np.float32) * scale).ravel()
-    py = (q1d[None, :, None] + psi_y.astype(np.float32) * scale).ravel()
-    pz = (q1d[None, None, :] + psi_z.astype(np.float32) * scale).ravel()
+    # Broadcast + cast to mesh's dtype directly, no forced-float32
+    # intermediates, no np.stack/reshape into a combined (N^3,3) array — just
+    # three flat views.
+    px = (q1d[:, None, None] + psi_x.astype(dtype) * scale).ravel()
+    py = (q1d[None, :, None] + psi_y.astype(dtype) * scale).ravel()
+    pz = (q1d[None, None, :] + psi_z.astype(dtype) * scale).ravel()
 
     if weights is not None:
         assert weights.shape == (N, N, N), \
@@ -270,8 +280,8 @@ def paint_displacement_field(
         for start in range(0, n_part, batchsize):
             end = min(start + batchsize, n_part)
             pos = np.stack([px[start:end], py[start:end], pz[start:end]], axis=-1)
-            wt  = (np.ones(end - start, dtype=np.float32)
-                   if weights is None else weights[start:end].astype(np.float32))
+            wt  = (np.ones(end - start, dtype=dtype)
+                   if weights is None else weights[start:end].astype(dtype))
             loop(mesh, N, pos, wt)
     else:
         _fn       = _NUMPY_BATCH_FN[scheme]
