@@ -294,10 +294,21 @@ class ThesanLoader(MergerTreeLoader):
             f"(z={self._redshifts.max():.2f} → {self._redshifts.min():.2f})"
         )
 
-        # Read h from first snapshot header
-        first_snap = next(self._density_directories[0].glob("snap_*.hdf5"))
-        with h5py.File(first_snap, "r") as f:
-            self.thesan_h = f["Header"].attrs["HubbleParam"]
+        # Read h from first snapshot header, when a raw snapdir is actually on disk.
+        # Falls back to parameters.cosmology.h0 for snapdir-less runs (see the
+        # cache-only handling above) — verified to match the on-disk THESAN-1 header
+        # value (0.6774) via the surviving group-catalog files.
+        try:
+            first_snap = next(self._density_directories[0].glob("snap_*.hdf5"))
+        except StopIteration:
+            self.thesan_h = self.parameters.cosmology.h0
+            self.logger.info(
+                f"No snap_*.hdf5 found for snapshot {self._snap_indices[0]} to read "
+                f"HubbleParam from; falling back to parameters.cosmology.h0 = {self.thesan_h}"
+            )
+        else:
+            with h5py.File(first_snap, "r") as f:
+                self.thesan_h = f["Header"].attrs["HubbleParam"]
 
     # ── BaseLoader interface ───────────────────────────────────────────────
 
