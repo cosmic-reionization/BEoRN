@@ -4,7 +4,7 @@ Mass Accretion Model
 import numpy as np
 import logging
 
-from ..cosmo import Hubble
+from ..cosmo import hubble_per_yr
 from ..structs.parameters import Parameters
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def mass_accretion_derivative(parameters: Parameters, halo_mass: np.ndarray, z_b
 
     The derivative follows analytically from the exponential model
     used in :func:`mass_accretion` and includes the Hubble-factor
-    conversion via :func:`Hubble`.
+    conversion via :func:`hubble_per_yr`.
 
     Args:
         parameters (Parameters): Simulation cosmology parameters.
@@ -59,4 +59,4 @@ def mass_accretion_derivative(parameters: Parameters, halo_mass: np.ndarray, z_b
     # by construction halo_mass has an alpha dependence and an initial mass dependence
     # using the function from above we can formulate an analytical expression for the derivative:
     # dMh/dt = Mh * alpha * H(z) * (z+1)
-    return halo_mass * alpha_bins[None, :, None] * ((1 + z_bins) * Hubble(z_bins, parameters))[None, None, :]
+    return halo_mass * alpha_bins[None, :, None] * ((1 + z_bins) * hubble_per_yr(z_bins, parameters))[None, None, :]

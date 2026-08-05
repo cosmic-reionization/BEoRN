@@ -12,7 +12,7 @@ from scipy.integrate import trapezoid, solve_ivp
 from scipy.interpolate import interp1d
 import logging
 
-from ..cosmo import comoving_distance, hubble, Hubble
+from ..cosmo import comoving_distance, hubble, hubble_per_yr
 from ..cross_sections import alpha_HII
 from ..cross_sections import sigma_HI, sigma_HeI
 from ..io import Handler
@@ -239,7 +239,7 @@ class RadiationProfileSolver:
         # time equals t_source_age.
         z_grid = np.linspace(z, z_source_start, 5000)
         # H(z) in yr⁻¹ → dt in Myr per dz step
-        dt_dz  = 1e-6 / ((1 + z_grid) * Hubble(z_grid, self.parameters))  # Myr per unit z
+        dt_dz  = 1e-6 / ((1 + z_grid) * hubble_per_yr(z_grid, self.parameters))  # Myr per unit z
         dz     = np.diff(z_grid)
         cumulative_age = np.concatenate(([0.0], np.cumsum(0.5 * (dt_dz[:-1] + dt_dz[1:]) * dz)))
 

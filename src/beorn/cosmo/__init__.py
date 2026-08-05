@@ -9,7 +9,7 @@
 
 from .background import (
     hubble,
-    Hubble,
+    hubble_per_yr,
     comoving_distance,
     T_cmb,
     T_smooth_radio,
@@ -17,7 +17,11 @@ from .background import (
     T_adiab,
     T_adiab_fluctu,
     E,
+    dark_energy_density_factor,
     D_non_normalized,
+    D_cpt92_non_normalized,
+    D_linder2005_non_normalized,
+    D_linder_cahn2007_non_normalized,
     D,
     rhoc_of_z,
     siny_ov_y,
@@ -39,7 +43,7 @@ from .differentiable import (
 __all__ = [
     # background (numpy)
     "hubble",
-    "Hubble",
+    "hubble_per_yr",
     "comoving_distance",
     "T_cmb",
     "T_smooth_radio",
@@ -47,7 +51,11 @@ __all__ = [
     "T_adiab",
     "T_adiab_fluctu",
     "E",
+    "dark_energy_density_factor",
     "D_non_normalized",
+    "D_cpt92_non_normalized",
+    "D_linder2005_non_normalized",
+    "D_linder_cahn2007_non_normalized",
     "D",
     "rhoc_of_z",
     "siny_ov_y",

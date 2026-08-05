@@ -15,6 +15,21 @@ except ImportError:
 from ..constants import sec_per_year, km_per_Mpc, c_km_s, Tcmb0, sigma_T, cm_per_Mpc, rhoc0, m_p_in_Msun
 from ..structs import Parameters
 
+def dark_energy_density_factor(a, parameters: Parameters):
+    """rho_DE(a) / rho_DE(a=1) for the CPL (Chevallier-Polarski-Linder)
+    dark-energy parameterization w(a) = w0 + wa*(1-a):
+
+        rho_DE(a)/rho_DE(1) = a^(-3*(1+w0+wa)) * exp(-3*wa*(1-a))
+
+    Reduces to 1 (a cosmological constant) when w0=-1, wa=0 — the defaults —
+    so :func:`E`/:func:`hubble`/:func:`hubble_per_yr` are numerically
+    unchanged for any existing script that doesn't set w0/wa.
+    """
+    w0 = parameters.cosmology.w0
+    wa = parameters.cosmology.wa
+    return a**(-3.0*(1.0 + w0 + wa)) * np.exp(-3.0*wa*(1.0 - a))
+
+
 def hubble(z, parameters: Parameters):
     """
     Hubble parameter [km.s-1.Mpc-1]
@@ -22,15 +37,18 @@ def hubble(z, parameters: Parameters):
     Om = parameters.cosmology.Om
     Ol = 1.0-Om
     H0 = 100.0*parameters.cosmology.h0
-    return H0 * (Om*(1+z)**3 + (1.0 - Om - Ol)*(1+z)**2 + Ol)**0.5
+    a = 1.0 / (1.0 + z)
+    return H0 * np.sqrt(Om*(1+z)**3 + Ol*dark_energy_density_factor(a, parameters))
 
 
-def Hubble(z, parameters: Parameters):
+def hubble_per_yr(z, parameters: Parameters):
     """
     Hubble parameter [yr-1]
     """
-    Om, Ol = parameters.cosmology.Om, parameters.cosmology.Ol
-    return parameters.cosmology.h0 * 100.0 * sec_per_year / km_per_Mpc * np.sqrt(Om*(1+z)**3 + (1.0-Om-Ol)*(1+z)**2+Ol)
+    Om = parameters.cosmology.Om
+    Ol = 1.0 - Om
+    a = 1.0 / (1.0 + z)
+    return parameters.cosmology.h0 * 100.0 * sec_per_year / km_per_Mpc * np.sqrt(Om*(1+z)**3 + Ol*dark_energy_density_factor(a, parameters))
 
 
 def comoving_distance(z, parameters: Parameters):
@@ -85,8 +103,12 @@ def T_adiab_fluctu(z, parameters: Parameters, delta_b):
 
 
 #define Hubble factor H=H0*E
-def E(x, parameters: Parameters):
-    return np.sqrt(parameters.cosmology.Om*(x**(-3))+1-parameters.cosmology.Om)
+def E(a, parameters: Parameters):
+    """Dimensionless Hubble rate E(a) = H(a)/H0 for flat CPL dark energy
+    (w0=-1, wa=0 by default -> cosmological constant)."""
+    Om = parameters.cosmology.Om
+    Ol = 1.0 - Om
+    return np.sqrt(Om*(a**(-3)) + Ol*dark_energy_density_factor(a, parameters))
 
 def D_non_normalized(a, parameters: Parameters):
     """
@@ -100,12 +122,113 @@ def D_non_normalized(a, parameters: Parameters):
     w = _trapz(1 / (integrand * E(integrand,parameters)) ** 3, integrand, axis=0)
     return (5 * parameters.cosmology.Om * E(a,parameters) / 2) * w
 
+
+def _omega_m_of_a(a, parameters: Parameters):
+    """Matter density parameter Omega_m(a) = Om*a^-3 / E(a)^2."""
+    return parameters.cosmology.Om * a**(-3) / E(a, parameters)**2
+
+
+def _omega_de_of_a(a, parameters: Parameters):
+    """Dark-energy density parameter Omega_DE(a) = Ol*rho_DE(a)/rho_DE(1) / E(a)^2."""
+    Ol = 1.0 - parameters.cosmology.Om
+    return Ol * dark_energy_density_factor(a, parameters) / E(a, parameters)**2
+
+
+def D_cpt92_non_normalized(a, parameters: Parameters):
+    """Unnormalized linear growth factor via the Carroll, Press & Turner
+    (1992, ARA&A, 30, 499) analytic fitting formula — accurate to ~1% for
+    flat LCDM (w0=-1, wa=0). This is the same formula used by py21cmfast's
+    ``dicke()`` (UsefulFunctions.c), so selecting this method reproduces
+    py21cmfast's growth factor for direct 2LPT comparisons.
+
+    Its ~1% accuracy claim is validated only for a cosmological constant;
+    for w0/wa != (-1, 0) this still evaluates (Omega_m(a), Omega_DE(a) are
+    well-defined for any CPL cosmology), but the fit's accuracy has not been
+    validated away from w=-1 — prefer 'linder2005'/'linder_cahn2007' there.
+    """
+    Om_a = _omega_m_of_a(a, parameters)
+    Ol_a = _omega_de_of_a(a, parameters)
+    g = 2.5*Om_a / (Om_a**(4.0/7.0) - Ol_a + (1.0 + Om_a/2.0)*(1.0 + Ol_a/70.0))
+    return g * a
+
+
+def _growth_index_gamma(w):
+    """Linder (2005) growth-index gamma(w), continuous at w=-1."""
+    return 0.55 + 0.05*(1.0 + w) if w >= -1.0 else 0.55 + 0.02*(1.0 + w)
+
+
+def D_linder2005_non_normalized(a, parameters: Parameters):
+    """Unnormalized linear growth factor via the Linder (2005, PhRvD, 72,
+    043529) growth-index approximation: d ln D/d ln a = Omega_m(a)^gamma,
+    with a single gamma evaluated at w(z=1). Under BEoRN's default CPL
+    parameters (w0=-1, wa=0) this reduces to the classic fixed gamma=0.55
+    (Omega_m(z)^0.55) growth-rate approximation.
+    """
+    from scipy.integrate import quad
+    w0, wa = parameters.cosmology.w0, parameters.cosmology.wa
+    w1 = w0 + 0.5*wa  # w(a=0.5), i.e. w(z=1)
+    gamma = _growth_index_gamma(w1)
+
+    def integrand(ap):
+        return (_omega_m_of_a(ap, parameters)**gamma - 1.0) / ap
+
+    def _D(a_scalar):
+        ln_D, _ = quad(integrand, 1e-3, a_scalar, limit=200)
+        return a_scalar * np.exp(ln_D)
+
+    return np.vectorize(_D)(a)
+
+
+def D_linder_cahn2007_non_normalized(a, parameters: Parameters):
+    """Unnormalized linear growth factor via the Linder & Cahn (2007,
+    Astropart.Phys. 28, 481) scale-factor-dependent growth index: same
+    ODE as 'linder2005' but with gamma(a) tracking w(a) at every point
+    of the integral rather than a single gamma(w(z=1)). Only differs from
+    'linder2005' when wa != 0; under the default w0=-1, wa=0 both reduce
+    to the fixed gamma=0.55 approximation.
+    """
+    from scipy.integrate import quad
+    w0, wa = parameters.cosmology.w0, parameters.cosmology.wa
+
+    def integrand(ap):
+        w = w0 + wa*(1.0 - ap)
+        gamma = _growth_index_gamma(w)
+        return (_omega_m_of_a(ap, parameters)**gamma - 1.0) / ap
+
+    def _D(a_scalar):
+        ln_D, _ = quad(integrand, 1e-3, a_scalar, limit=200)
+        return a_scalar * np.exp(ln_D)
+
+    return np.vectorize(_D)(a)
+
+
+_GROWTH_FACTOR_METHODS = {
+    'integral': D_non_normalized,
+    'cpt92': D_cpt92_non_normalized,
+    'linder2005': D_linder2005_non_normalized,
+    'linder_cahn2007': D_linder_cahn2007_non_normalized,
+}
+
+
 #define D normalized
-def D(a,param):
+def D(a, param):
     """
     Growth factor. Normalized to 1 at z = 0.
+
+    The computation method is controlled by
+    ``param.cosmology.growth_factor_method`` — see
+    :class:`~beorn.structs.parameters.CosmologyParameters` for the available
+    options and their references.
     """
-    return D_non_normalized(a,param)/D_non_normalized(1, param)
+    method = param.cosmology.growth_factor_method
+    try:
+        D_unnormalized = _GROWTH_FACTOR_METHODS[method]
+    except KeyError:
+        raise ValueError(
+            f"Unknown growth_factor_method {method!r}; expected one of "
+            f"{sorted(_GROWTH_FACTOR_METHODS)}."
+        )
+    return D_unnormalized(a, param) / D_unnormalized(1.0, param)
 
 
 def rhoc_of_z(parameters: Parameters,z):

@@ -449,7 +449,6 @@ class CosmologyParameters:
         ns: Scalar spectral index.
     """
 
-    # TODO - remove and set an astropy cosmology object instead of individual parameters
     Om: float = 0.315
     Ob: float = 0.045
     Ol: float = 1 - 0.315
@@ -457,6 +456,35 @@ class CosmologyParameters:
     h0: float = 0.673
     sigma_8: float = 0.83
     ns: float = 0.96
+
+    w0: float = -1.0
+    """Dark-energy equation-of-state parameter at a=1, CPL parameterization
+    w(a) = w0 + wa*(1-a). Default -1.0 (cosmological constant). Read by
+    :func:`beorn.cosmo.background.E`/:func:`hubble`/:func:`hubble_per_yr`, so it
+    affects the whole background expansion history (and therefore every
+    quantity derived from it: growth factor, mass function, LPT, dTb)."""
+
+    wa: float = 0.0
+    """Dark-energy equation-of-state evolution parameter, CPL parameterization
+    w(a) = w0 + wa*(1-a). Default 0.0 (constant w=w0). See :attr:`w0`."""
+
+    growth_factor_method: Literal['integral', 'cpt92', 'linder2005', 'linder_cahn2007'] = 'integral'
+    """Method used by :func:`beorn.cosmo.background.D` to compute the linear
+    growth factor D(a), normalised to D(a=1)=1:
+
+    - ``'integral'`` (default): exact numerical integral of the growth ODE
+      (:func:`~beorn.cosmo.background.D_non_normalized`) for the CPL
+      background set by :attr:`w0`/:attr:`wa`.
+    - ``'cpt92'``: Carroll, Press & Turner (1992) analytic fitting formula —
+      a widely used fast approximation to the exact integral, but not
+      validated away from w=-1.
+    - ``'linder2005'``: Linder (2005, PhRvD, 72, 043529) growth-index
+      approximation (d ln D/d ln a = Omega_m(a)^gamma, single gamma
+      evaluated at w(z=1)). Reduces to the classic fixed gamma=0.55
+      (Omega_m(z)^0.55) approximation under the default w0=-1, wa=0.
+    - ``'linder_cahn2007'``: Linder & Cahn (2007, Astropart.Phys. 28, 481)
+      variant with gamma(a) tracking w(a) at every point of the integral —
+      only differs from ``'linder2005'`` when wa != 0."""
 
 
 @dataclass(slots = True)
