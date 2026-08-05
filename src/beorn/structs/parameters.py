@@ -122,7 +122,7 @@ class SourceParameters:
     """number of ionizing photons per baryon in stars"""
 
     f0_esc: float = 0.2
-    """photon escape fraction f_esc = f0_esc * (M/Mp)^pl_esc"""
+    """photon escape fraction f_esc = f0_esc * (Mp/M)^pl_esc"""
 
     Mp_esc: float = 1e10
     """pivot mass for the escape fraction"""
