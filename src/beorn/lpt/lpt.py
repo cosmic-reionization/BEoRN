@@ -92,6 +92,133 @@ def _kvectors(N: int, L: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.
     return kx, ky, kz, k2
 
 
+def _extract_lowk_rfftn(noise_k_fine: np.ndarray, N_fine: int, N_target: int) -> np.ndarray:
+    """Low-k subset of an rfftn array, resolved for a coarser grid of the
+    same box -- see :func:`synchronized_white_noise`/:func:`extract_synced_delta_k`.
+
+    ``np.fft.fftfreq``'s negative frequencies wrap to the *end* of the array
+    (index ``N-k`` holds frequency ``-k``), so the coarse grid's own Nyquist
+    plane (frequency ``-N_target/2``) sits at fine index ``N_fine -
+    N_target/2``, *not* at fine index ``N_target/2`` (an ordinary, unrelated
+    positive frequency of the fine grid) -- getting this wrong would subtly
+    corrupt an entire k-plane, not just one mode.
+
+    Args:
+        noise_k_fine: Array of shape ``(N_fine, N_fine, N_fine//2+1)``.
+        N_fine:       Grid size of ``noise_k_fine``.
+        N_target:     Requested (coarser or equal) grid size. Must be even.
+
+    Returns:
+        Array of shape ``(N_target, N_target, N_target//2+1)``, rescaled by
+        ``(N_target/N_fine)**1.5`` to match the DFT-normalisation convention
+        (``E[|noise_k|^2] = N**3`` for unit-variance real-space input) a
+        standalone draw at ``N_target`` would use.
+    """
+    if N_target == N_fine:
+        return noise_k_fine
+    if N_target > N_fine:
+        raise ValueError(f"N_target ({N_target}) must not exceed N_fine ({N_fine}).")
+    if N_target % 2 != 0 or N_fine % 2 != 0:
+        raise ValueError("N_target and N_fine must both be even.")
+    half = N_target // 2
+    idx_full = np.concatenate([np.arange(half), np.arange(N_fine - half, N_fine)])
+    idx_half = np.arange(half + 1)
+    sub = noise_k_fine[np.ix_(idx_full, idx_full, idx_half)]
+    return sub * (N_target / N_fine) ** 1.5
+
+
+def synchronized_white_noise(
+    N_fine: int, seed: int, fixed: bool = True, backend: "LPTBackend | None" = None,
+) -> np.ndarray:
+    """Draw unit-variance real-space white noise once, at the finest
+    resolution any consumer of this box will need, and return its rfftn.
+
+    Any coarser ``N <= N_fine`` consumer should derive its own δ(k) via
+    :func:`extract_synced_delta_k` (which truncates this same array via
+    :func:`_extract_lowk_rfftn`) rather than independently drawing its own
+    noise at its own resolution -- ``random_normal((N, N, N), seed=s)`` for
+    two different ``N`` gives *unrelated* arrays even with the same ``s``
+    (different number of draws consumed from the RNG stream), so two
+    consumers wanting different resolutions of nominally "the same" field
+    would otherwise get two decorrelated realisations (issue #56). Deriving
+    every resolution from one shared ``noise_k_fine`` instead makes them
+    mutually phase-consistent: the low-k content of a coarse extraction is
+    (up to the DFT-normalisation rescale) identical to the corresponding
+    modes of any other resolution derived from the same array.
+
+    Args:
+        N_fine:  Grid size to draw noise at.
+        seed:    RNG seed. Negative values negate the noise (paired-mode),
+            matching :meth:`LPTBase.generate_initial_conditions`.
+        fixed:   If ``True`` (default), fix every mode's magnitude to
+            ``sqrt(N_fine**3)`` (only the phase stays random) -- propagates
+            correctly to every coarser extraction, since
+            :func:`_extract_lowk_rfftn`'s rescaling is a pure magnitude
+            scaling that preserves "fixed-ness".
+        backend: Compute backend for the random draw. ``None`` (default)
+            uses plain numpy.
+
+    Returns:
+        noise_k_fine -- complex array of shape ``(N_fine, N_fine, N_fine//2+1)``.
+    """
+    be = backend if backend is not None else get_backend('numpy', verbose=False)
+    paired = seed < 0
+    actual_seed = abs(seed) if paired else seed
+    noise = be.random_normal((N_fine, N_fine, N_fine), seed=actual_seed)
+    noise_k = be.to_numpy(be.rfftn(noise))
+    if paired:
+        noise_k = -noise_k
+    if fixed:
+        abs_nk = np.abs(noise_k)
+        target = np.sqrt(float(N_fine ** 3))
+        noise_k = np.where(abs_nk > 0, noise_k / abs_nk * target, 0.0)
+    return noise_k
+
+
+def extract_synced_delta_k(
+    noise_k_fine: np.ndarray, N_fine: int, N_target: int, L: float,
+    power_spectrum: PowerSpectrum, n_k_nodes: int | None = 1000,
+) -> np.ndarray:
+    """Derive the z=0 δ(k) field at resolution ``N_target`` from a shared
+    fine-grid noise realisation (see :func:`synchronized_white_noise`).
+
+    Mirrors :meth:`LPTBase.generate_initial_conditions`'s own P(k)-table
+    amplitude normalisation exactly, so that calling this with
+    ``N_target == N_fine`` reproduces bit-identically what a standalone
+    :class:`LPTBase` instance would compute for the same seed at that grid
+    size (no oversampling requested anywhere reduces to today's behaviour).
+
+    Args:
+        noise_k_fine:   Shared noise realisation from :func:`synchronized_white_noise`.
+        N_fine:         Grid size ``noise_k_fine`` was drawn at.
+        N_target:       Requested resolution, ``<= N_fine``.
+        L:              Box size in Mpc/h.
+        power_spectrum: :class:`~beorn.lpt.linear_power.PowerSpectrum` instance.
+        n_k_nodes:      As in :meth:`LPTBase.generate_initial_conditions`.
+
+    Returns:
+        delta_k -- complex array of shape
+        ``(N_target, N_target, N_target//2+1)``, the z=0 (D1=1) field;
+        consumers scale by D1(z) as usual (e.g. via
+        :meth:`LPTBase.generate_initial_conditions`'s ``grf`` injection, or
+        directly for a standalone linear-density evaluation).
+    """
+    noise_k = _extract_lowk_rfftn(noise_k_fine, N_fine, N_target)
+    kx, ky, kz, k2 = _kvectors(N_target, L)
+    k_safe = np.where(k2 == 0, 1.0, np.sqrt(k2))
+    if n_k_nodes is None:
+        Pk = power_spectrum.P(k_safe, z=0.0)
+    else:
+        k_lo, k_hi = float(k_safe[k2 > 0].min()), float(k_safe.max())
+        k_1d = np.logspace(np.log10(k_lo), np.log10(k_hi), n_k_nodes)
+        Pk_1d = np.asarray(power_spectrum.P(k_1d, z=0.0), dtype=float)
+        log_Pk = np.interp(np.log(k_safe), np.log(k_1d), np.log(Pk_1d))
+        Pk = np.exp(log_Pk)
+    Pk[k2 == 0] = 0.0
+    amplitude = np.sqrt(Pk * N_target ** 3 / L ** 3)
+    return noise_k * amplitude
+
+
 # ============================================================
 # Abstract base
 # ============================================================
@@ -524,7 +651,7 @@ class LPTBase(ABC):
 
     def get_density(
         self, z: float, mass_assignment: str | None = None, fused: bool = True,
-        oversample: int | None = None, backend: str | None = None,
+        upsample_density_fourier: int | None = None, backend: str | None = None,
         deconvolve: bool = False, dtype: str | None = None,
     ) -> np.ndarray:
         """Matter overdensity δ(x) at redshift z via particle painting.
@@ -550,21 +677,23 @@ class LPTBase(ABC):
                 no regression — those backends don't have a real fused
                 kernel yet, tracked as follow-up). Pass ``fused=False`` to
                 force the original position-array path. Ignored when
-                ``oversample > 1`` (see below).
-            oversample: ``None`` (default) reads ``parameters.cosmo_sim.oversample``
-                (itself ``1`` — no oversampling — by default). If ``> 1``,
+                ``upsample_density_fourier > 1`` (see below).
+            upsample_density_fourier: ``None`` (default) reads
+                ``parameters.cosmo_sim.upsample_density_fourier`` (itself
+                ``1`` — no oversampling — by default). If ``> 1``,
                 Fourier-upsample the displacement field onto an
-                ``oversample*N`` Lagrangian grid
+                ``upsample_density_fourier*N`` Lagrangian grid
                 (:func:`~beorn.particle_mapping.upsample_field_fourier`),
                 paint *those* (more numerous) particles onto an
-                ``oversample*N``-cell mesh, then block-average back down to
-                ``(N, N, N)`` via
+                ``upsample_density_fourier*N``-cell mesh, then block-average
+                back down to ``(N, N, N)`` via
                 :func:`~beorn.particle_mapping.coarsen_field` before computing
                 the overdensity (issue #48's fine-paint-then-downsample: gets
                 P(k) close to linear theory within k_Nyquist of the analysis
                 grid with no deconvolution needed — validated at
-                ``oversample=8``, close at ``oversample=4``). Needed for
-                real-space statistics where
+                ``upsample_density_fourier=8``, close at
+                ``upsample_density_fourier=4``). Needed for real-space
+                statistics where
                 :func:`~beorn.particle_mapping.deconvolve_mas` doesn't apply
                 (persistence homology, Minkowski functionals, void-finding,
                 ...).
@@ -579,7 +708,10 @@ class LPTBase(ABC):
                 band-limited displacement field at a finer resolution — no
                 new small-scale power is added (the upsampled field is exactly
                 the same one, just evaluated at more points), only the
-                mass-assignment discreteness/aliasing is reduced.
+                mass-assignment discreteness/aliasing is reduced. See
+                :attr:`~beorn.structs.CosmoSimParameters.field_oversample`
+                for the alternative that *does* add real new modes (issue
+                #56).
 
                 Always uses the non-fused position-array path internally —
                 the fused kernel doesn't yet support painting onto a mesh
@@ -598,10 +730,12 @@ class LPTBase(ABC):
                 you need reproducible density fields.
             deconvolve: Whether to correct the ``mass_assignment`` window
                 (:func:`~beorn.particle_mapping.deconvolve_mas`) right after
-                painting. Defaults to ``False``. When ``oversample > 1``, this applies to the fine
-                (``oversample*N``) mesh *before* block-averaging back down,
-                removing the window at the resolution actually painted at —
-                the coarsening's own top-hat window is unaffected either way.
+                painting. Defaults to ``False``. When
+                ``upsample_density_fourier > 1``, this applies to the fine
+                (``upsample_density_fourier*N``) mesh *before* block-averaging
+                back down, removing the window at the resolution actually
+                painted at — the coarsening's own top-hat window is
+                unaffected either way.
                 Pass ``True`` at your own risk: deconvolving the real-space
                 field amplifies noise near k_Nyquist, which can push cells
                 below the physical ``δ = -1`` floor (worse at lower z, where
@@ -624,12 +758,15 @@ class LPTBase(ABC):
             delta — shape (N, N, N), mean-zero overdensity.
         """
         N, L = self.N, self.L
-        oversample = (
-            oversample if oversample is not None
-            else self.parameters.cosmo_sim.oversample
+        upsample_density_fourier = (
+            upsample_density_fourier if upsample_density_fourier is not None
+            else self.parameters.cosmo_sim.upsample_density_fourier
         )
-        if oversample < 1 or not isinstance(oversample, int):
-            raise ValueError(f"oversample must be a positive int; got {oversample!r}.")
+        if upsample_density_fourier < 1 or not isinstance(upsample_density_fourier, int):
+            raise ValueError(
+                f"upsample_density_fourier must be a positive int; "
+                f"got {upsample_density_fourier!r}."
+            )
         resolved_backend = (
             backend if backend is not None
             else self.parameters.simulation.backend.resolve('mass_assignment')
@@ -642,15 +779,15 @@ class LPTBase(ABC):
         if resolved_backend == 'pylians':
             resolved_dtype = np.float32
 
-        if oversample > 1:
+        if upsample_density_fourier > 1:
             from ..particle_mapping import (
                 map_particles_to_mesh, coarsen_field, upsample_field_fourier,
             )
-            N_fine = oversample * N
+            N_fine = upsample_density_fourier * N
             psi_x, psi_y, psi_z = self.get_displacement(z)
-            psi_x_f = upsample_field_fourier(psi_x, oversample)
-            psi_y_f = upsample_field_fourier(psi_y, oversample)
-            psi_z_f = upsample_field_fourier(psi_z, oversample)
+            psi_x_f = upsample_field_fourier(psi_x, upsample_density_fourier)
+            psi_y_f = upsample_field_fourier(psi_y, upsample_density_fourier)
+            psi_z_f = upsample_field_fourier(psi_z, upsample_density_fourier)
 
             cell_fine = L / N_fine
             q1d_fine = (np.arange(N_fine) + 0.5) * cell_fine
@@ -664,7 +801,7 @@ class LPTBase(ABC):
             mesh_fine = np.zeros((N_fine, N_fine, N_fine), dtype=resolved_dtype)
             map_particles_to_mesh(mesh_fine, L, positions, mass_assignment=resolved_mass_assignment,
                                    backend=resolved_backend, deconvolve=deconvolve)
-            mesh = coarsen_field(mesh_fine, oversample)
+            mesh = coarsen_field(mesh_fine, upsample_density_fourier)
         else:
             mesh = np.zeros((N, N, N), dtype=resolved_dtype)
             if fused:

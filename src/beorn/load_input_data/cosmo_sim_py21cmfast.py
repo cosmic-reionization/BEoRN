@@ -25,17 +25,20 @@ class Py21cmFastLoader(BaseLoader):
         file_root (Path, optional): Directory containing pre-generated
             ``haloes_z*.h5`` and ``densities_z*.h5`` files. If ``None``,
             call :meth:`generate` before loading data.
-        oversample (int, optional): Resolution enhancement factor for
-            py21cmfast's internal grid (DIM = Ncell * oversample; HII_DIM
-            stays Ncell). A larger factor resolves lower halo masses at the
-            cost of more memory and compute time. ``None`` (default) reads
-            ``parameters.cosmo_sim.oversample``.
+        field_oversample (int, optional): Resolution enhancement factor for
+            py21cmfast's internal grid (DIM = Ncell * field_oversample;
+            HII_DIM stays Ncell). A larger factor resolves lower halo masses
+            at the cost of more memory and compute time. ``None`` (default)
+            reads ``parameters.cosmo_sim.field_oversample``.
     """
 
-    def __init__(self, parameters: Parameters, file_root: "Path | str" = None, oversample: int | None = None):
+    def __init__(self, parameters: Parameters, file_root: "Path | str" = None, field_oversample: int | None = None):
         super().__init__(parameters)
         self.file_root = Path(file_root) if file_root is not None else None
-        self.oversample = oversample if oversample is not None else parameters.cosmo_sim.oversample
+        self.field_oversample = (
+            field_oversample if field_oversample is not None
+            else parameters.cosmo_sim.field_oversample
+        )
         if self.file_root is not None and self.file_root.is_dir():
             self._ensure_parameters_yaml(self.file_root)
 
@@ -62,7 +65,7 @@ class Py21cmFastLoader(BaseLoader):
         """
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
-        dim = sim.Ncell * self.oversample
+        dim = sim.Ncell * self.field_oversample
         cosmo_hash = hashlib.md5(str(to_dict(self.parameters.cosmology)).encode()).hexdigest()[:8]
         return f"py21cmfast_N{sim.Ncell}_D{dim}_L{self.parameters.Lbox_hunits:.0f}_seed{cosmo_sim.IC_seed}_{cosmo_hash}"
 
@@ -71,11 +74,11 @@ class Py21cmFastLoader(BaseLoader):
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
         cosmo = self.parameters.cosmology
-        dim = sim.Ncell * self.oversample
+        dim = sim.Ncell * self.field_oversample
         return (
             f'py21cmfast setup:\n'
             f'  Output directory : {file_root}\n'
-            f'  Grid             : HII_DIM={sim.Ncell}, DIM={dim} (factor {self.oversample}x)\n'
+            f'  Grid             : HII_DIM={sim.Ncell}, DIM={dim} (factor {self.field_oversample}x)\n'
             f'  Box size         : {self.parameters.Lbox_hunits:.1f} Mpc/h ({self.parameters.Lbox_hunits / cosmo.h0:.1f} Mpc)\n'
             f'  Threads          : {sim.cores}\n'
             f'  Random seed      : {cosmo_sim.IC_seed}\n'
@@ -114,7 +117,7 @@ class Py21cmFastLoader(BaseLoader):
                 "cores": sim.cores,
             },
             "cosmo_sim": {
-                "oversample": self.oversample,
+                "field_oversample": self.field_oversample,
                 "IC_seed": cosmo_sim.IC_seed,
             },
         }
@@ -159,7 +162,7 @@ class Py21cmFastLoader(BaseLoader):
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
         cosmo = self.parameters.cosmology
-        dim = sim.Ncell * self.oversample
+        dim = sim.Ncell * self.field_oversample
         file_root = handler.file_root / self.input_tag
 
         all_redshifts = list(self.redshifts)

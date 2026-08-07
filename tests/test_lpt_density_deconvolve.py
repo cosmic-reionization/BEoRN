@@ -57,7 +57,7 @@ def test_get_density_mass_assignment_parameters_override(param):
 
 def test_get_density_oversample_deconvolve_applies_before_coarsening(param):
     solver = _solver(param)
-    raw = solver.get_density(Z, oversample=4, deconvolve=False)
-    deconvolved = solver.get_density(Z, oversample=4, deconvolve=True)
+    raw = solver.get_density(Z, upsample_density_fourier=4, deconvolve=False)
+    deconvolved = solver.get_density(Z, upsample_density_fourier=4, deconvolve=True)
     assert not np.allclose(raw, deconvolved)
     assert deconvolved.shape == (N, N, N)

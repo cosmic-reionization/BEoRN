@@ -10,6 +10,8 @@ from ..structs import Parameters, HaloCatalog
 from ..lpt import SecondOrderLPT, LPTBase
 from ..lpt.chmf import CHMF, CHMFSampler
 from ..lpt.linear_power import get_power_spectrum
+from ..lpt.lpt import synchronized_white_noise, extract_synced_delta_k
+from ..cosmo import D
 
 
 class LPTHaloLoader(BaseLoader):
@@ -74,6 +76,16 @@ class LPTHaloLoader(BaseLoader):
                       ST-calibrated on its own. ``None`` (default) reads
                       ``parameters.halo_sim.chmf_recipe``. See
                       :class:`~beorn.lpt.chmf.CHMFSampler` for details.
+        field_oversample: Resolution factor for the CHMF's own conditioning
+                      field (see :attr:`~beorn.structs.HaloSimParameters.field_oversample`
+                      for the full rationale). ``None`` (default) reads
+                      ``parameters.halo_sim.field_oversample`` (itself
+                      ``None`` -- inherits ``parameters.cosmo_sim.field_oversample``,
+                      itself ``1`` -- no refinement -- by default). Ignored
+                      (with a warning) when an explicit ``lpt_solver`` is
+                      passed in, since the synchronized finer-resolution
+                      noise realisation can only be generated for a
+                      loader-built solver.
         **ps_kwargs:  Extra keyword arguments forwarded to the power spectrum
                       constructor (e.g. ``wiggle=True``).
     """
@@ -90,6 +102,7 @@ class LPTHaloLoader(BaseLoader):
         delta_c: float | None = None,
         hmf_model: str | None = None,
         chmf_recipe: str | None = None,
+        field_oversample: int | None = None,
         **ps_kwargs,
     ):
         super().__init__(parameters)
@@ -97,21 +110,70 @@ class LPTHaloLoader(BaseLoader):
         self.n_mass_bins = n_mass_bins if n_mass_bins is not None else parameters.halo_sim.n_mass_bins
         self._base_seed = halo_seed if halo_seed is not None else parameters.halo_sim.halo_sampler_seed
 
+        field_oversample = (
+            field_oversample if field_oversample is not None
+            else parameters.halo_sim.field_oversample
+            if parameters.halo_sim.field_oversample is not None
+            else parameters.cosmo_sim.field_oversample
+        )
+
         # issue #42, O10: build ONE PowerSpectrum instance and share it with
         # the CHMF below, instead of each independently constructing its own
         # (and each paying its own A_s normalisation). If a pre-built
         # lpt_solver is supplied, its own power_spectrum is reused instead —
         # otherwise the solver and the CHMF could silently run on different
         # cosmologies.
+        self._fine_delta_k = None
+        self._N_fine = None
         if lpt_solver is None:
             resolved_seed = seed if seed is not None else parameters.halo_sim.IC_seed
-            shared_ps = get_power_spectrum(ps_method, parameters, **ps_kwargs)
-            self.lpt_solver = SecondOrderLPT(
-                parameters, power_spectrum=shared_ps, seed=resolved_seed, verbose=False,
+            # Same fallback LPTBase.__init__ itself applies to a bare seed=None --
+            # replicated here since synchronized_white_noise (unlike SecondOrderLPT)
+            # doesn't do this resolution internally.
+            resolved_seed = (
+                resolved_seed if resolved_seed is not None else parameters.cosmo_sim.IC_seed
             )
+            shared_ps = get_power_spectrum(ps_method, parameters, **ps_kwargs)
+
+            if field_oversample > 1:
+                # issue #56: generate the CHMF's own conditioning field at a
+                # finer, phase-synchronized resolution before top-hat
+                # smoothing it down to Ncell (see load_halo_catalog) --
+                # reduces the R_env top-hat window's residual bias from
+                # Ncell's own, too-coarse Nyquist frequency. The coarse
+                # Ncell field driving self.lpt_solver (and hence
+                # load_density_field/2LPT displacements) is derived from the
+                # SAME noise realisation via a low-k truncation, not drawn
+                # independently -- otherwise the halos sampled below would
+                # decorrelate from that coarse density field.
+                N = parameters.simulation.Ncell
+                L = parameters.Lbox_hunits
+                N_fine = N * field_oversample
+                noise_k_fine = synchronized_white_noise(N_fine, resolved_seed, fixed=True)
+                delta_k_coarse = extract_synced_delta_k(noise_k_fine, N_fine, N, L, shared_ps)
+                self._fine_delta_k = extract_synced_delta_k(
+                    noise_k_fine, N_fine, N_fine, L, shared_ps,
+                )
+                self._N_fine = N_fine
+                self.lpt_solver = SecondOrderLPT(
+                    parameters, power_spectrum=shared_ps, seed=resolved_seed, verbose=False,
+                )
+                self.lpt_solver.generate_initial_conditions(grf=delta_k_coarse)
+            else:
+                self.lpt_solver = SecondOrderLPT(
+                    parameters, power_spectrum=shared_ps, seed=resolved_seed, verbose=False,
+                )
         else:
             self.lpt_solver = lpt_solver
             shared_ps = lpt_solver.power_spectrum
+            if field_oversample > 1:
+                warnings.warn(
+                    "field_oversample > 1 is ignored when an explicit lpt_solver is "
+                    "passed to LPTHaloLoader -- the synchronized finer-resolution "
+                    "conditioning field can only be generated for a loader-built "
+                    "solver.",
+                    stacklevel=2,
+                )
 
         # issue #56: this loader builds its own, independently-seeded density
         # field for the CHMF to condition on. If that seed doesn't match
@@ -164,6 +226,17 @@ class LPTHaloLoader(BaseLoader):
         deterministic seed ``base_seed ^ redshift_index`` so repeated calls
         return identical catalogs.
 
+        When ``field_oversample > 1`` was resolved at construction, the
+        conditioning field is instead built at the finer, phase-synchronized
+        resolution, top-hat-smoothed there via
+        :meth:`~beorn.lpt.chmf.CHMFSampler._environment`, then decimated
+        (point-sampled at the coincident coarse grid points, *not*
+        block-averaged -- see the inline comment in this method for why)
+        back down to ``Ncell`` and passed to :meth:`CHMFSampler.sample` as
+        ``precomputed_delta_env`` (issue #56) -- reduces the R_env top-hat
+        window's residual bias from ``Ncell``'s own, too-coarse Nyquist
+        frequency.
+
         Args:
             redshift_index: Index into :attr:`redshifts`.
 
@@ -172,14 +245,41 @@ class LPTHaloLoader(BaseLoader):
             masses in M_sun.
         """
         z = float(self.redshifts[redshift_index])
+        # XOR with index for a unique but reproducible per-snapshot seed
+        sample_seed = self._base_seed ^ redshift_index
+
+        if self._fine_delta_k is not None:
+            D1 = D(1.0 / (1.0 + z), self.parameters) / D(1.0, self.parameters)
+            delta_fine = np.fft.irfftn(
+                D1 * self._fine_delta_k, s=(self._N_fine,) * 3,
+            ).astype(np.float32)
+            delta_env_fine, M_env = self.sampler._environment(delta_fine, self.R_env)
+            # Decimate (point-sample), don't block-average: delta_env_fine is
+            # already band-limited well below Ncell's Nyquist by the R_env
+            # top-hat window, so its value at each coarse cell's own grid
+            # point (which a fine-grid index of field_oversample*j coincides
+            # with exactly, both grids sharing x=0 and box size L) already
+            # IS the coarse-cell value. Block-averaging instead would apply a
+            # *second*, unwanted top-hat convolution on top of R_env's own,
+            # oversmoothing the field and making the variance bias *worse*
+            # than not oversampling at all (verified numerically).
+            field_oversample = self._N_fine // self.parameters.simulation.Ncell
+            delta_env = delta_env_fine[::field_oversample, ::field_oversample, ::field_oversample]
+            return self.sampler.sample(
+                delta_field=None,
+                z=z,
+                R_env=self.R_env,
+                n_mass_bins=self.n_mass_bins,
+                seed=sample_seed,
+                precomputed_delta_env=(delta_env, M_env),
+            )
+
         # Use the linear density field (IRFFT of D1*delta_k) rather than CIC
         # particle painting to avoid shot noise, which would produce extreme
         # overdensities in individual cells and contaminate the CHMF near M_env.
         # Raw field -- CHMFSampler.sample smooths it to the conditioning
         # scale internally (issue #54).
         delta = self.lpt_solver.get_linear_density(z)
-        # XOR with index for a unique but reproducible per-snapshot seed
-        sample_seed = self._base_seed ^ redshift_index
         return self.sampler.sample(
             delta_field=delta,
             z=z,

@@ -436,6 +436,25 @@ class CHMFSampler:
         return np.fft.irfftn(np.fft.rfftn(delta) * W, axes=(0, 1, 2),
                              s=(N, N, N)).astype(delta.dtype)
 
+    def _resolve_environment(
+        self, delta_field: np.ndarray | None, R_env: float | None,
+        precomputed_delta_env: tuple[np.ndarray, float] | None,
+    ):
+        """Return ``(delta_env, M_env)``, either passed through as-is from
+        ``precomputed_delta_env`` or computed by top-hat-smoothing
+        ``delta_field`` internally via :meth:`_environment`.
+
+        See :meth:`sample`'s ``precomputed_delta_env`` argument for why a
+        caller would supply this directly (issue #56's
+        ``HaloSimParameters.field_oversample``: presmoothing at a finer,
+        phase-synchronized resolution before block-averaging down to
+        ``Ncell`` gives a less biased ``sigma2(M_env, z)`` match than
+        smoothing at ``Ncell``'s own, coarser Nyquist limit).
+        """
+        if precomputed_delta_env is not None:
+            return precomputed_delta_env
+        return self._environment(delta_field, R_env)
+
     def _environment(self, delta_field: np.ndarray, R_env: float | None):
         """Resolve the conditioning field and environment mass.
 
@@ -530,11 +549,12 @@ class CHMFSampler:
 
     def expected_counts(
         self,
-        delta_field: np.ndarray,
+        delta_field: np.ndarray | None,
         z: float,
         R_env: float | None = None,
         n_mass_bins: int | None = None,
         n_delta_nodes: int | None = 512,
+        precomputed_delta_env: tuple[np.ndarray, float] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Expected halo counts per cell and mass bin — the Poisson intensity.
 
@@ -564,6 +584,15 @@ class CHMFSampler:
                 cells for every mass bin. ``None`` disables the table and
                 falls back to the exact per-cell evaluation (validation
                 reference / opt-out).
+            precomputed_delta_env: ``(delta_env, M_env)`` pair to use
+                directly instead of top-hat-smoothing ``delta_field``
+                internally — for callers that already resolved the
+                conditioning field at a finer, phase-synchronized
+                resolution and block-averaged it back down to ``Ncell``
+                (issue #56's ``HaloSimParameters.field_oversample``, see
+                :class:`~beorn.load_input_data.LPTHaloLoader`). When given,
+                ``delta_field``/``R_env`` are ignored entirely and
+                ``delta_field`` may be ``None``.
 
         Returns:
             (M_centers, lam) — bin-centre masses (n_mass_bins,) in M_sun and
@@ -579,7 +608,7 @@ class CHMFSampler:
         n_mass_bins = n_mass_bins if n_mass_bins is not None else params.halo_sim.n_mass_bins
         V_cell = (params.Lbox_hunits / params.simulation.Ncell) ** 3
 
-        delta_env, M_env = self._environment(delta_field, R_env)
+        delta_env, M_env = self._resolve_environment(delta_field, R_env, precomputed_delta_env)
         sigma2_env = float(self.chmf.sigma2(M_env, z))
         M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
         ratios = self._calibration_ratios(M_centers, z)
@@ -598,12 +627,13 @@ class CHMFSampler:
 
     def sample(
         self,
-        delta_field: np.ndarray,
+        delta_field: np.ndarray | None,
         z: float,
         R_env: float | None = None,
         n_mass_bins: int | None = None,
         seed: int | None = None,
         n_delta_nodes: int | None = 512,
+        precomputed_delta_env: tuple[np.ndarray, float] | None = None,
     ) -> HaloCatalog:
         """Sample a halo catalog from the conditional HMF.
 
@@ -638,6 +668,11 @@ class CHMFSampler:
             n_delta_nodes: Resolution of the per-bin Λ(M_b, δ) lookup table
                 (issue #42, O6) — see :meth:`expected_counts`. ``None`` falls
                 back to the exact per-cell evaluation.
+            precomputed_delta_env: ``(delta_env, M_env)`` pair to use
+                directly instead of top-hat-smoothing ``delta_field``
+                internally — see :meth:`expected_counts`'s identical
+                argument. When given, ``delta_field``/``R_env`` are ignored
+                entirely and ``delta_field`` may be ``None``.
 
         Returns:
             :class:`~beorn.structs.HaloCatalog` with positions in Mpc/h and
@@ -656,7 +691,7 @@ class CHMFSampler:
         V_cell = cell_size ** 3
 
         # ── Environment, sigma and mass bins ───────────────────────────
-        delta_env, M_env = self._environment(delta_field, R_env)
+        delta_env, M_env = self._resolve_environment(delta_field, R_env, precomputed_delta_env)
         sigma2_env = float(self.chmf.sigma2(M_env, z))
         M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
         ratios = self._calibration_ratios(M_centers, z)

@@ -24,12 +24,12 @@ def solver():
 
 
 def test_get_density_oversample_validates_input(solver):
-    with pytest.raises(ValueError, match="oversample must be a positive int"):
-        solver.get_density(Z, oversample=0)
+    with pytest.raises(ValueError, match="upsample_density_fourier must be a positive int"):
+        solver.get_density(Z, upsample_density_fourier=0)
 
 
 def test_get_density_oversample_returns_coarse_grid_shape(solver):
-    delta = solver.get_density(Z, mass_assignment='CIC', oversample=4)
+    delta = solver.get_density(Z, mass_assignment='CIC', upsample_density_fourier=4)
     assert delta.shape == (N, N, N)
 
 
@@ -38,8 +38,8 @@ def test_oversample_reduces_mas_suppression_near_k_nyquist(solver):
     # deconvolve-at-paint-time follow-up, get_density deconvolves by default,
     # which would otherwise already remove most of the window suppression
     # this test is specifically measuring.
-    delta_coarse = solver.get_density(Z, mass_assignment='CIC', oversample=1, deconvolve=False)
-    delta_fine = solver.get_density(Z, mass_assignment='CIC', oversample=4, deconvolve=False)
+    delta_coarse = solver.get_density(Z, mass_assignment='CIC', upsample_density_fourier=1, deconvolve=False)
+    delta_fine = solver.get_density(Z, mass_assignment='CIC', upsample_density_fourier=4, deconvolve=False)
 
     Pk_coarse, bins_coarse, kny = power_spectrum_1d(delta_coarse, L, kbins=16)
     Pk_fine, bins_fine, _ = power_spectrum_1d(delta_fine, L, kbins=16)
@@ -62,28 +62,28 @@ def test_oversample_reduces_mas_suppression_near_k_nyquist(solver):
 
 def test_get_density_oversample_parameters_default_and_override():
     # Own Parameters instance (not the module-scoped `solver` fixture) since
-    # this test mutates parameters.cosmo_sim.oversample.
+    # this test mutates parameters.cosmo_sim.upsample_density_fourier.
     p = Parameters()
     p.simulation.Ncell = N
     p.simulation.Lbox = L
-    assert p.cosmo_sim.oversample == 1
+    assert p.cosmo_sim.upsample_density_fourier == 1
 
     s = ZeldovichApproximation(p, verbose=False, seed=SEED)
     s.generate_initial_conditions()
 
     default = s.get_density(Z, mass_assignment='CIC')
-    explicit_1 = s.get_density(Z, mass_assignment='CIC', oversample=1)
+    explicit_1 = s.get_density(Z, mass_assignment='CIC', upsample_density_fourier=1)
     np.testing.assert_allclose(default, explicit_1, rtol=1e-4, atol=1e-6)
 
-    p.cosmo_sim.oversample = 4
+    p.cosmo_sim.upsample_density_fourier = 4
     default_4 = s.get_density(Z, mass_assignment='CIC')
-    explicit_4 = s.get_density(Z, mass_assignment='CIC', oversample=4)
+    explicit_4 = s.get_density(Z, mass_assignment='CIC', upsample_density_fourier=4)
     np.testing.assert_allclose(default_4, explicit_4, rtol=1e-4, atol=1e-6)
     assert not np.allclose(default_4, explicit_1)
 
 
 def test_get_density_oversample_dtype_float64(solver):
-    """dtype threading (issue #52) also applies to the oversample>1 path."""
-    delta = solver.get_density(Z, mass_assignment='CIC', oversample=4, dtype='float64')
+    """dtype threading (issue #52) also applies to the upsample_density_fourier>1 path."""
+    delta = solver.get_density(Z, mass_assignment='CIC', upsample_density_fourier=4, dtype='float64')
     assert delta.dtype == np.float64
     assert delta.shape == (N, N, N)

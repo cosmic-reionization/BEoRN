@@ -482,27 +482,43 @@ class CosmoSimParameters:
     that one measurement without ever writing the noisier field back
     (issue #48)."""
 
-    oversample: int = 1
-    """Resolution-enhancement factor for any internal grid that gets reduced
-    back down to ``simulation.Ncell`` before being used further. Opposite
-    direction of :attr:`SimulationParameters.degrade_resolution`. A value of
-    1 (default) applies no refinement. Two independent consumers:
+    upsample_density_fourier: int = 1
+    """Cheap, band-limited resolution-enhancement factor for
+    :meth:`beorn.lpt.LPTBase.get_density` (default, unless its own
+    ``upsample_density_fourier`` argument is given explicitly): paints the
+    already-solved LPT displacement field onto an internal
+    ``upsample_density_fourier*Ncell`` mesh via
+    :func:`~beorn.particle_mapping.upsample_field_fourier`, then
+    block-averages back down to ``(Ncell, Ncell, Ncell)`` before returning.
+    Reduces mass-assignment discreteness/aliasing for real-space statistics
+    where :func:`beorn.particle_mapping.deconvolve_mas` doesn't apply (issue
+    #48) -- but adds **no new small-scale power**: the source field is
+    already band-limited at ``Ncell``'s own Nyquist, so this only resamples
+    it more finely, it does not extrapolate new k-modes. A value of 1
+    (default) applies no refinement. ``Ncell`` is always the resulting
+    (coarse) grid size; the finer internal painting mesh is never itself
+    persisted. See :attr:`field_oversample` for the alternative that *does*
+    add real new modes (issue #56)."""
 
-    - :meth:`beorn.lpt.LPTBase.get_density` (default, unless its own
-      ``oversample`` argument is given explicitly): paints the LPT-generated
-      field onto an internal ``oversample*Ncell`` mesh, then block-averages
-      back down to ``(Ncell, Ncell, Ncell)`` before returning. Reduces
-      mass-assignment discreteness/aliasing for real-space statistics where
-      :func:`beorn.particle_mapping.deconvolve_mas` doesn't apply (issue #48).
-    - :class:`~beorn.load_input_data.Py21cmFastLoader` (default, unless its
-      own ``oversample`` argument is given explicitly): sets py21cmfast's
-      internal grid ``DIM = Ncell * oversample`` while ``HII_DIM = Ncell``
-      stays the output resolution. A larger factor resolves lower halo
-      masses at the cost of more memory/compute; the minimum resolvable halo
-      mass scales roughly as ``(Lbox / DIM)^3``.
+    field_oversample: int = 1
+    """Genuine resolution-enhancement factor: solves for **real new k-modes**
+    beyond ``Ncell``'s own Nyquist frequency, unlike
+    :attr:`upsample_density_fourier`'s cheap resample-only refinement.
+    Consumed by :class:`~beorn.load_input_data.Py21cmFastLoader` (default,
+    unless its own ``field_oversample`` argument is given explicitly): sets
+    py21cmfast's internal grid ``DIM = Ncell * field_oversample`` while
+    ``HII_DIM = Ncell`` stays the output resolution. A larger factor resolves
+    lower halo masses at the cost of more memory/compute; the minimum
+    resolvable halo mass scales roughly as ``(Lbox / DIM)^3``. A value of 1
+    (default) applies no refinement. ``Ncell`` is always the resulting
+    (coarse) grid size; the finer internal grid is never itself persisted.
 
-    In both cases ``Ncell`` is always the resulting (coarse) grid size; the
-    finer internal grid is never itself persisted."""
+    Also read by :attr:`~beorn.structs.HaloSimParameters.field_oversample`
+    (``None`` there inherits this value) to generate the CHMF's own
+    conditioning field at a finer, phase-synchronized resolution before
+    top-hat-smoothing it down to ``Ncell`` -- see that field's docstring for
+    why the two must share the same underlying Fourier phases rather than
+    each independently resolving at their own requested factor."""
 
     IC_seed: int = 12345
     """Seed for the density field's initial conditions: py21cmfast's own
@@ -623,6 +639,40 @@ class HaloSimParameters:
     halos will not be spatially correlated with a density field built
     elsewhere from :attr:`CosmoSimParameters.IC_seed`."""
 
+    field_oversample: int | None = None
+    """Resolution factor for the CHMF's own conditioning field, generated at
+    ``Ncell * field_oversample`` and top-hat-smoothed to :attr:`R_env` at
+    that finer resolution *before* being decimated (point-sampled at the
+    coincident coarse grid points -- **not** block-averaged, which would
+    apply an unwanted second smoothing on top of :attr:`R_env`'s own and
+    make the bias worse, not better) back down to ``Ncell`` -- reduces the
+    per-cell conditioning field's residual variance
+    bias (raw linear-field variance measured ~21% off the analytic
+    ``sigma^2(M_env, z)``, ~6% even after issue #54's presmoothing fix,
+    because ``Ncell``'s own Nyquist frequency isn't high enough to resolve
+    the :attr:`R_env` top-hat window well). ``None`` (default) inherits
+    :attr:`CosmoSimParameters.field_oversample` (itself ``1`` -- no
+    refinement -- by default).
+
+    Read by :class:`~beorn.load_input_data.LPTHaloLoader` whenever it builds
+    its own internal density field (i.e. no explicit ``lpt_solver`` is
+    passed in). The finer field is **not** independently resolved at its own
+    seed -- doing so would decorrelate the sampled halos from the coarse,
+    ``Ncell``-resolution density field used elsewhere in the pipeline (e.g.
+    by :meth:`~beorn.load_input_data.LPTHaloLoader.load_density_field`),
+    reintroducing the same kind of seed-mismatch bug already fixed for
+    :attr:`IC_seed`. Instead, both resolutions are derived from a single
+    Fourier-space noise realisation drawn once at the finer grid: the coarse
+    field is the exact low-k truncation of that realisation (not an
+    independent draw and not a real-space block-average of it), so every
+    resolution any consumer requests is a phase-consistent view of the same
+    underlying box -- see :func:`beorn.lpt.lpt.synchronized_white_noise`/
+    :func:`beorn.lpt.lpt.extract_synced_delta_k`. Setting this to a value
+    different from :attr:`CosmoSimParameters.field_oversample` is fine (only
+    the CHMF's own conditioning field is affected) and does not trigger any
+    warning, unlike the seed-mismatch case above -- there is no
+    decorrelation risk here since both are views of the same realisation."""
+
     mass_assignment: Literal['NGP', 'CIC', 'TSC', 'PCS'] = 'NGP'
     """Mass-assignment scheme for painting halo *positions* onto the grid
     (:meth:`beorn.structs.HaloCatalog.to_mesh`) as profile centers for the
@@ -648,7 +698,8 @@ class Parameters:
     """simulation parameters"""
     cosmo_sim: CosmoSimParameters = field(default_factory = CosmoSimParameters)
     """cosmo-sim input parameters (density-field source: native LPT order or
-    external N-body loader, plus mass assignment/oversample/seed for it)"""
+    external N-body loader, plus mass assignment/field_oversample/
+    upsample_density_fourier/seed for it)"""
     halo_sim: HaloSimParameters = field(default_factory = HaloSimParameters)
     """halo-catalog generation parameters (CHMF vs external, HMF calibration,
     mass range, seed, mass assignment for painting halo positions)"""
@@ -686,7 +737,7 @@ class Parameters:
 
         Covers source parameters, cosmology, solver redshifts, and the halo
         mass / accretion-rate bins.  Intentionally excludes random seed, grid
-        dimensions (Ncell, Lbox, oversample), and other
+        dimensions (Ncell, Lbox, field_oversample/upsample_density_fourier), and other
         simulation parameters that do not influence the 1D profile shapes.
         This allows profiles to be reused when re-running BEoRN with a
         different py21cmfast seed or a different grid resolution.
@@ -784,16 +835,18 @@ class Parameters:
 
         ``cosmo_sim`` is also excluded: it controls *which* input data is used
         but does not affect the underlying physics model — it is already encoded
-        in the input_tag. Exception: ``cosmo_sim.mass_assignment``/``oversample``
-        *do* affect the painted density field, so they're added back explicitly
-        below even though the rest of ``cosmo_sim`` stays excluded.
+        in the input_tag. Exception: ``cosmo_sim.mass_assignment``/
+        ``field_oversample``/``upsample_density_fourier`` *do* affect the
+        painted density field, so they're added back explicitly below even
+        though the rest of ``cosmo_sim`` stays excluded.
         """
         d = {
             'source': to_dict(self.source),
             'solver': to_dict(self.solver),
             'simulation': to_dict(self.simulation),
             'cosmo_sim_mass_assignment': self.cosmo_sim.mass_assignment,
-            'cosmo_sim_oversample': self.cosmo_sim.oversample,
+            'cosmo_sim_field_oversample': self.cosmo_sim.field_oversample,
+            'cosmo_sim_upsample_density_fourier': self.cosmo_sim.upsample_density_fourier,
         }
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 

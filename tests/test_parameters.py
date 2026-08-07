@@ -1,6 +1,6 @@
 """Unit tests for the Parameters schema reorganization: CosmoSimParameters
-(density_source, mass_assignment, oversample) and the new HaloSimParameters
-group."""
+(density_source, mass_assignment, field_oversample, upsample_density_fourier)
+and the new HaloSimParameters group."""
 import numpy as np
 import pytest
 
@@ -22,17 +22,27 @@ def test_cosmo_sim_mass_assignment_defaults_to_cic(params):
     assert params.cosmo_sim.mass_assignment == 'CIC'
 
 
-def test_cosmo_sim_oversample_defaults_to_one(params):
-    assert params.cosmo_sim.oversample == 1
+def test_cosmo_sim_field_oversample_defaults_to_one(params):
+    assert params.cosmo_sim.field_oversample == 1
+
+
+def test_cosmo_sim_upsample_density_fourier_defaults_to_one(params):
+    assert params.cosmo_sim.upsample_density_fourier == 1
 
 
 def test_cosmo_sim_no_longer_has_halo_catalogs_thesan_mass_assignment():
     assert not hasattr(CosmoSimParameters(), 'halo_catalogs_thesan_mass_assignment')
 
 
+def test_cosmo_sim_no_longer_has_single_oversample_field():
+    assert not hasattr(CosmoSimParameters(), 'oversample')
+
+
 def test_simulation_no_longer_has_mass_assignment_or_oversample(params):
     assert not hasattr(params.simulation, 'mass_assignment')
     assert not hasattr(params.simulation, 'oversample')
+    assert not hasattr(params.simulation, 'field_oversample')
+    assert not hasattr(params.simulation, 'upsample_density_fourier')
 
 
 # ── HaloSimParameters ─────────────────────────────────────────────────────────
@@ -54,6 +64,11 @@ def test_halo_sim_defaults_match_prior_hardcoded_constructor_defaults(params):
 def test_halo_sim_ic_seed_defaults_to_none(params):
     """None means inherit cosmo_sim.IC_seed -- see LPTHaloLoader."""
     assert params.halo_sim.IC_seed is None
+
+
+def test_halo_sim_field_oversample_defaults_to_none(params):
+    """None means inherit cosmo_sim.field_oversample -- see LPTHaloLoader."""
+    assert params.halo_sim.field_oversample is None
 
 
 def test_halo_sim_hmf_model_default_is_deliberately_st(params):
@@ -109,9 +124,16 @@ def test_beorn_hash_changes_with_cosmo_sim_mass_assignment(params):
     assert h0 != h1
 
 
-def test_beorn_hash_changes_with_cosmo_sim_oversample(params):
+def test_beorn_hash_changes_with_cosmo_sim_field_oversample(params):
     h0 = params.beorn_hash()
-    params.cosmo_sim.oversample = 4
+    params.cosmo_sim.field_oversample = 4
+    h1 = params.beorn_hash()
+    assert h0 != h1
+
+
+def test_beorn_hash_changes_with_cosmo_sim_upsample_density_fourier(params):
+    h0 = params.beorn_hash()
+    params.cosmo_sim.upsample_density_fourier = 4
     h1 = params.beorn_hash()
     assert h0 != h1
 
