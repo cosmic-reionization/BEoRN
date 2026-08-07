@@ -19,6 +19,18 @@ PCS  (stencil 4):  W(d) = (4 - 6d² + 3|d|³) / 6               for |d| < 1
                    W(d) = (2 - |d|)³ / 6                        for 1 ≤ |d| < 2
 
 The 3-D kernel is the outer product W(dx)·W(dy)·W(dz).
+
+Cell-centered indexing (issue #55)
+-----------------------------------
+Mesh index ``i`` is the *center* of cell ``i`` — matching the Lagrangian
+tracer grid used everywhere upstream (``(arange(N)+0.5)*cell``) and
+py21cmfast's ``PerturbField.c`` convention. An undisplaced particle
+(sitting exactly at its cell's center) is deposited entirely into that one
+cell. All position/weight math in this module works in a *vertex*-centered
+convention (``floor``/``round`` with no offset means "nearest/enclosing
+mesh vertex"), so every entry point below shifts incoming positions by
+``-0.5`` cell before doing anything else, once, rather than patching each
+scheme's stencil separately.
 """
 import numpy as np
 import logging
@@ -71,7 +83,9 @@ def map_particles_to_mesh(
             place.  Precision follows ``mesh.dtype`` end to end (issue #52).
         box_size: Side length of the simulation box (same units as positions).
         particle_positions: Array of shape ``(n_parts, 3)``, same dtype as
-            ``mesh``.
+            ``mesh``. Cell-centered: mesh index ``i`` is the *center* of
+            cell ``i`` (see this module's docstring, "Cell-centered
+            indexing", issue #55).
         mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
         weights: Per-particle weights, shape ``(n_parts,)``.  ``None`` → 1.
     """
@@ -99,7 +113,7 @@ def map_particles_to_mesh(
         batchsize = _BATCH_SIZE
         for start in range(0, n_part, batchsize):
             end = min(start + batchsize, n_part)
-            pos = particle_positions[start:end] * mesh.dtype.type(scale)
+            pos = particle_positions[start:end] * mesh.dtype.type(scale) - mesh.dtype.type(0.5)
             wt  = (np.ones(end - start, dtype=mesh.dtype)
                    if weights is None else weights[start:end].astype(mesh.dtype))
             loop(mesh, N, pos, wt)
@@ -108,7 +122,7 @@ def map_particles_to_mesh(
         batchsize = _BATCH_SIZE_PCS if scheme == 'PCS' else _BATCH_SIZE
         for start in range(0, n_part, batchsize):
             end = min(start + batchsize, n_part)
-            pos = particle_positions[start:end] * scale
+            pos = particle_positions[start:end] * scale - 0.5
             w   = None if weights is None else weights[start:end]
             _fn(mesh, N, pos[:, 0], pos[:, 1], pos[:, 2], w)
 
@@ -263,10 +277,13 @@ def paint_displacement_field(
 
     # Broadcast + cast to mesh's dtype directly, no forced-float32
     # intermediates, no np.stack/reshape into a combined (N^3,3) array — just
-    # three flat views.
-    px = (q1d[:, None, None] + psi_x.astype(dtype) * scale).ravel()
-    py = (q1d[None, :, None] + psi_y.astype(dtype) * scale).ravel()
-    pz = (q1d[None, None, :] + psi_z.astype(dtype) * scale).ravel()
+    # three flat views. The -0.5 matches the shift in map_particles_to_mesh
+    # above: q1d is cell-centered, the stencils below are vertex-centered
+    # (issue #55).
+    half = dtype.type(0.5)
+    px = (q1d[:, None, None] + psi_x.astype(dtype) * scale - half).ravel()
+    py = (q1d[None, :, None] + psi_y.astype(dtype) * scale - half).ravel()
+    pz = (q1d[None, None, :] + psi_z.astype(dtype) * scale - half).ravel()
 
     if weights is not None:
         assert weights.shape == (N, N, N), \

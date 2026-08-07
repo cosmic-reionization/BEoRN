@@ -94,7 +94,9 @@ def map_particles_to_mesh(
         box_size (float): Side length of the simulation box (same units as
             ``particle_positions``).
         particle_positions (np.ndarray): Array of shape ``(n_parts, 3)``,
-            same dtype as ``mesh``.
+            same dtype as ``mesh``. Cell-centered: mesh index ``i`` is the
+            *center* of cell ``i``, matching the Lagrangian tracer grid used
+            everywhere upstream and py21cmfast's convention (issue #55).
         mass_assignment (str): Kernel scheme.  ``'NGP'``, ``'CIC'``,
             ``'TSC'``, ``'PCS'``.  Not all backends support all schemes — see
             notes below.

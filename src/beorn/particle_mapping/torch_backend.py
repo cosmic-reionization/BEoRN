@@ -32,6 +32,9 @@ def paint_mesh_torch(
 
     Args:
         particle_positions: (n_parts, 3) array or tensor in box units.
+            Cell-centered: mesh index ``i`` is the *center* of cell ``i``
+            (see :mod:`.numpy_backend`'s module docstring, "Cell-centered
+            indexing", issue #55).
         N:         Mesh cells per side.
         box_size:  Box side length (same units as positions).
         mass_assignment: 'NGP', 'CIC', 'TSC', or 'PCS'.
@@ -67,7 +70,9 @@ def paint_mesh_torch(
     dev = pos.device
 
     scale = N / box_size
-    pos = pos * scale                                    # (n, 3)
+    # -0.5: incoming positions are cell-centered, the stencils below index
+    # the mesh in a vertex-centered convention (issue #55).
+    pos = pos * scale - 0.5                              # (n, 3)
     if weights is None:
         wt = torch.ones(pos.shape[0], dtype=dtype, device=dev)
     elif isinstance(weights, torch.Tensor):

@@ -27,6 +27,9 @@ def paint_mesh_jax(
 
     Args:
         particle_positions: (n_parts, 3) array (numpy or jax) in box units.
+            Cell-centered: mesh index ``i`` is the *center* of cell ``i``
+            (see :mod:`.numpy_backend`'s module docstring, "Cell-centered
+            indexing", issue #55).
         N:         Mesh cells per side.
         box_size:  Box side length (same units as positions).
         mass_assignment: 'NGP', 'CIC', 'TSC', or 'PCS'.
@@ -51,7 +54,9 @@ def paint_mesh_jax(
         )
 
     scale = N / box_size
-    pos = jnp.asarray(particle_positions) * scale   # (n, 3)
+    # -0.5: incoming positions are cell-centered, the stencils below index
+    # the mesh in a vertex-centered convention (issue #55).
+    pos = jnp.asarray(particle_positions) * scale - 0.5   # (n, 3)
     dtype = pos.dtype
     wt = jnp.ones(pos.shape[0], dtype=dtype) if weights is None \
         else jnp.asarray(weights, dtype=dtype)

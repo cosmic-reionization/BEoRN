@@ -104,11 +104,62 @@ def test_weighted_cic_sum_equals_total_weight():
 def test_ngp_particle_near_box_edge_wraps():
     N = 8
     mesh = _mesh(N)
-    # 0.999 * N = 7.992, rounds to 8 -> wraps to cell 0
+    # 0.999*N - 0.5 = 7.492, rounds to cell 7 -- no wrap needed for this
+    # particular value under the cell-centered convention (issue #55), but
+    # it still must land in exactly one cell with mass conserved.
     pos = np.array([[0.999, 0.5, 0.5]], dtype=np.float32)
     map_particles_to_mesh(mesh, 1.0, pos, mass_assignment='NGP', deconvolve=False)
     assert mesh.sum() == pytest.approx(1.0)
     assert (mesh > 0).sum() == 1
+
+
+def test_cic_particle_near_left_edge_wraps():
+    N = 8
+    mesh = _mesh(N)
+    # 0.01*N - 0.5 = -0.42 -> floor = -1 -> wraps to cell N-1, split with cell 0.
+    pos = np.array([[0.01, 0.5, 0.5]], dtype=np.float32)
+    map_particles_to_mesh(mesh, 1.0, pos, mass_assignment='CIC', deconvolve=False)
+    assert mesh.sum() == pytest.approx(1.0, rel=1e-5)
+    ix = np.nonzero(mesh.sum(axis=(1, 2)))[0]
+    assert set(ix.tolist()) == {0, N - 1}
+
+
+# ── Cell-centered indexing (issue #55) ─────────────────────────────────────────
+# Mesh index i is the *center* of cell i, matching the Lagrangian tracer grid
+# used everywhere upstream ((arange(N)+0.5)*cell) and py21cmfast's own
+# PerturbField.c convention. Before this fix, every scheme anchored its
+# stencil to floor(p)/round(p) with no offset -- an undisplaced particle
+# (sitting exactly at its own cell's center) split its weight across
+# neighboring cells instead of landing entirely in its own cell.
+
+@pytest.mark.parametrize('scheme', ['NGP', 'CIC'])
+def test_particle_at_cell_center_lands_entirely_in_that_cell(scheme):
+    N, L, i = 16, 1.0, 5
+    cell = L / N
+    pos = np.array([[(i + 0.5) * cell] * 3], dtype=np.float32)
+    mesh = _mesh(N)
+    map_particles_to_mesh(mesh, L, pos, mass_assignment=scheme, deconvolve=False)
+    assert mesh[i, i, i] == pytest.approx(1.0, rel=1e-5)
+    assert mesh.sum() == pytest.approx(1.0, rel=1e-5)
+
+
+@pytest.mark.parametrize('scheme,expected_center_weight', [
+    ('TSC', 0.75 ** 3), ('PCS', (2.0 / 3.0) ** 3),
+])
+def test_particle_at_cell_center_peaks_at_that_cell(scheme, expected_center_weight):
+    """TSC/PCS always spread mass over neighboring cells even at zero
+    sub-cell offset (by kernel design), but the stencil must be centered
+    exactly on the particle's own cell -- not shifted by one, as it was
+    before this fix (where the ambiguous d=0.5 tie broke either way
+    depending on cell-index parity)."""
+    N, L, i = 16, 1.0, 5
+    cell = L / N
+    pos = np.array([[(i + 0.5) * cell] * 3], dtype=np.float32)
+    mesh = _mesh(N)
+    map_particles_to_mesh(mesh, L, pos, mass_assignment=scheme, deconvolve=False)
+    assert mesh[i, i, i] == pytest.approx(expected_center_weight, rel=1e-4)
+    assert mesh[i, i, i] == mesh.max()
+    assert mesh.sum() == pytest.approx(1.0, rel=1e-4)
 
 
 # ── In-place modification ─────────────────────────────────────────────────────

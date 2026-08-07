@@ -168,7 +168,9 @@ def map_particles_to_mesh(
             lazy JIT compiles a separate specialization per input dtype, so
             float64 works transparently.
         particle_positions: Array of shape ``(n_parts, 3)``, same dtype as
-            ``mesh``.
+            ``mesh``. Cell-centered: mesh index ``i`` is the *center* of
+            cell ``i`` (see :mod:`.numpy_backend`'s module docstring,
+            "Cell-centered indexing", issue #55).
         mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'``.
         weights: Per-particle weights, shape ``(n_parts,)``.  ``None`` → 1.
     """
@@ -195,7 +197,9 @@ def map_particles_to_mesh(
 
     for start in range(0, n_part, _BATCH_SIZE):
         end = min(start + _BATCH_SIZE, n_part)
-        pos = particle_positions[start:end] * scale
+        # -0.5: incoming positions are cell-centered, these loops index the
+        # mesh in a vertex-centered convention (issue #55).
+        pos = particle_positions[start:end] * scale - mesh.dtype.type(0.5)
         wt  = (np.ones(end - start, dtype=mesh.dtype)
                if weights is None else weights[start:end].astype(mesh.dtype))
         loop(mesh, N, pos, wt)
