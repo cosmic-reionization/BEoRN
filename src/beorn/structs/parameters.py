@@ -504,12 +504,16 @@ class CosmoSimParameters:
     In both cases ``Ncell`` is always the resulting (coarse) grid size; the
     finer internal grid is never itself persisted."""
 
-    random_seed: int = 12345
-    """Random seed for density-field generation: py21cmfast's own IC/perturb-field
-    seed, or (by convention) the seed passed to a native LPT solver's
-    ``seed=`` constructor argument. Independent of
-    :attr:`HaloSimParameters.random_seed` (the halo-catalog-generation seed),
-    so the two never conflict."""
+    IC_seed: int = 12345
+    """Seed for the density field's initial conditions: py21cmfast's own
+    IC/perturb-field seed, or the seed :class:`~beorn.lpt.LPTBase` reads by
+    default (its own ``seed`` constructor argument, when not given
+    explicitly). Independent of :attr:`HaloSimParameters.halo_sampler_seed`
+    (the halo-catalog Poisson/position-sampling seed) and
+    :attr:`HaloSimParameters.IC_seed` (the density-field seed used
+    specifically by :class:`~beorn.load_input_data.LPTHaloLoader`'s own
+    internal LPT solver — see that field's docstring for how the two
+    interact)."""
 
     snapshot_redshifts: np.ndarray = None
     """Redshifts of the cosmo-sim snapshots that will be painted (e.g. py21cmfast outputs).
@@ -579,12 +583,26 @@ class HaloSimParameters:
     below whichever of those applies; it can never raise the effective bound
     above them. Default 1e16 is effectively a no-op cap for realistic grids."""
 
-    random_seed: int = 42
+    halo_sampler_seed: int = 42
     """RNG seed for halo-catalog generation (Poisson draws + intra-cell
-    position sampling) — independent of :attr:`CosmoSimParameters.random_seed`
-    (the density-field generation seed), so the two never conflict. Matches
+    position sampling) — independent of :attr:`CosmoSimParameters.IC_seed`
+    (the density-field generation seed) and :attr:`IC_seed` (below), so none
+    of the three ever conflict. Matches
     :class:`~beorn.load_input_data.LPTHaloLoader`'s existing hardcoded
     default of 42 (no default-value change)."""
+
+    IC_seed: int | None = None
+    """Seed for :class:`~beorn.load_input_data.LPTHaloLoader`'s own internal
+    LPT solver, which generates the density field that
+    :class:`~beorn.lpt.chmf.CHMFSampler` conditions halo sampling on. ``None``
+    (default) inherits :attr:`CosmoSimParameters.IC_seed`, so the halo
+    catalog's underlying density realization matches whichever density field
+    is used elsewhere in the pipeline by default. Setting this to a value
+    different from :attr:`CosmoSimParameters.IC_seed` deliberately
+    decorrelates the two — :class:`~beorn.load_input_data.LPTHaloLoader`
+    warns (``UserWarning``) when it detects this, since it means the sampled
+    halos will not be spatially correlated with a density field built
+    elsewhere from :attr:`CosmoSimParameters.IC_seed`."""
 
     mass_assignment: Literal['NGP', 'CIC', 'TSC', 'PCS'] = 'NGP'
     """Mass-assignment scheme for painting halo *positions* onto the grid

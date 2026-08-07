@@ -64,7 +64,7 @@ class Py21cmFastLoader(BaseLoader):
         cosmo_sim = self.parameters.cosmo_sim
         dim = sim.Ncell * self.oversample
         cosmo_hash = hashlib.md5(str(to_dict(self.parameters.cosmology)).encode()).hexdigest()[:8]
-        return f"py21cmfast_N{sim.Ncell}_D{dim}_L{self.parameters.Lbox_hunits:.0f}_seed{cosmo_sim.random_seed}_{cosmo_hash}"
+        return f"py21cmfast_N{sim.Ncell}_D{dim}_L{self.parameters.Lbox_hunits:.0f}_seed{cosmo_sim.IC_seed}_{cosmo_hash}"
 
     def _simulation_info(self, file_root: Path) -> str:
         """Return a formatted multi-line summary of the py21cmfast setup (no redshift list)."""
@@ -78,7 +78,7 @@ class Py21cmFastLoader(BaseLoader):
             f'  Grid             : HII_DIM={sim.Ncell}, DIM={dim} (factor {self.oversample}x)\n'
             f'  Box size         : {self.parameters.Lbox_hunits:.1f} Mpc/h ({self.parameters.Lbox_hunits / cosmo.h0:.1f} Mpc)\n'
             f'  Threads          : {sim.cores}\n'
-            f'  Random seed      : {cosmo_sim.random_seed}\n'
+            f'  Random seed      : {cosmo_sim.IC_seed}\n'
             f'  Cosmology        : Om={cosmo.Om}, Ob={cosmo.Ob}, h={cosmo.h0}, '
             f'sigma_8={cosmo.sigma_8}, ns={cosmo.ns}'
         )
@@ -115,7 +115,7 @@ class Py21cmFastLoader(BaseLoader):
             },
             "cosmo_sim": {
                 "oversample": self.oversample,
-                "random_seed": cosmo_sim.random_seed,
+                "IC_seed": cosmo_sim.IC_seed,
             },
         }
 
@@ -242,7 +242,7 @@ class Py21cmFastLoader(BaseLoader):
         IC = p21c.initial_conditions(
             user_params=user_params,
             cosmo_params=cosmo_params,
-            random_seed=cosmo_sim.random_seed,
+            random_seed=cosmo_sim.IC_seed,
             direc=str(file_root),
         )
         logger.info(f'Initial conditions done in {time.process_time() - ic_start:.1f}s.')

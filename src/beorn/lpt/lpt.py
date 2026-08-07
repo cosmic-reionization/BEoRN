@@ -116,7 +116,7 @@ class LPTBase(ABC):
                      one.
         seed:        RNG seed.  Positive → normal realisation; negative →
                      paired realisation using ``abs(seed)`` with negated noise.
-                     Default ``42``.
+                     ``None`` (default) reads ``parameters.cosmo_sim.IC_seed``.
         fixed:       If ``True`` (default), use fixed-amplitude ICs: each
                      k-mode amplitude is set to exactly sqrt(P(k)) and only
                      the phases are randomised.  Reduces cosmic variance.
@@ -153,7 +153,7 @@ class LPTBase(ABC):
         parameters,
         ps_method: str = 'eisenstein_hu',
         backend: str | LPTBackend | None = None,
-        seed: int = 42,
+        seed: int | None = None,
         fixed: bool = True,
         verbose: bool = True,
         f1_method: str = 'fd',
@@ -161,7 +161,7 @@ class LPTBase(ABC):
         **ps_kwargs,
     ):
         self.parameters = parameters
-        self.seed = seed
+        self.seed = seed if seed is not None else parameters.cosmo_sim.IC_seed
         self.fixed = fixed
         self.verbose = verbose
         self.f1_method = f1_method

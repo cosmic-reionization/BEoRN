@@ -45,12 +45,12 @@ def input_tag_for(parameters: beorn.structs.Parameters, seed: int) -> str:
 
 def main(param_file: Path = DEFAULT_PARAM_FILE) -> None:
     parameters = build_parameters(param_file)
-    seed = parameters.cosmo_sim.random_seed
+    seed = parameters.cosmo_sim.IC_seed
     input_tag = input_tag_for(parameters, seed)
 
     cache_handler = beorn.io.Handler(CACHE_ROOT)
     loader = beorn.load_input_data.LPTHaloLoader(
-        parameters, seed=seed, halo_seed=parameters.halo_sim.random_seed,
+        parameters, seed=seed, halo_seed=parameters.halo_sim.halo_sampler_seed,
         n_mass_bins=parameters.solver.halo_mass_nbin,
     )
 

@@ -1,6 +1,8 @@
 """LPT-based halo catalog loader using the Conditional Halo Mass Function."""
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 from .base import BaseLoader
@@ -34,12 +36,21 @@ class LPTHaloLoader(BaseLoader):
                       (default ``'eisenstein_hu'``). Ignored if ``lpt_solver``
                       is given — the CHMF then reuses ``lpt_solver.power_spectrum``
                       instead, so both stay on the same cosmology.
-        seed:         RNG seed for the LPT initial conditions
-                      (default ``42``).
+        seed:         RNG seed for the LPT initial conditions used to build
+                      this loader's own density field. ``None`` (default)
+                      reads ``parameters.halo_sim.IC_seed`` (itself ``None``
+                      by default, inheriting ``parameters.cosmo_sim.IC_seed``
+                      — see :attr:`~beorn.structs.HaloSimParameters.IC_seed`).
+                      A ``UserWarning`` is issued if the resulting solver's
+                      actual seed (whether resolved this way or via a
+                      directly-supplied ``lpt_solver``) differs from
+                      ``parameters.cosmo_sim.IC_seed``, since that means the
+                      sampled halos will not be spatially correlated with a
+                      density field built elsewhere from that seed.
         halo_seed:    RNG seed for halo-catalog generation (Poisson draws +
                       intra-cell position sampling) — independent of ``seed``
                       (the LPT IC seed) so the two never conflict. ``None``
-                      (default) reads ``parameters.halo_sim.random_seed``.
+                      (default) reads ``parameters.halo_sim.halo_sampler_seed``.
         R_env:        Environmental smoothing scale in Mpc/h passed to
                       :meth:`~beorn.lpt.chmf.CHMFSampler.sample`.  ``None``
                       (default) reads ``parameters.halo_sim.R_env`` (itself
@@ -63,7 +74,7 @@ class LPTHaloLoader(BaseLoader):
         parameters: Parameters,
         lpt_solver: LPTBase | None = None,
         ps_method: str = 'eisenstein_hu',
-        seed: int = 42,
+        seed: int | None = None,
         halo_seed: int | None = None,
         R_env: float | None = None,
         n_mass_bins: int | None = None,
@@ -74,7 +85,7 @@ class LPTHaloLoader(BaseLoader):
         super().__init__(parameters)
         self.R_env = R_env if R_env is not None else parameters.halo_sim.R_env
         self.n_mass_bins = n_mass_bins if n_mass_bins is not None else parameters.halo_sim.n_mass_bins
-        self._base_seed = halo_seed if halo_seed is not None else parameters.halo_sim.random_seed
+        self._base_seed = halo_seed if halo_seed is not None else parameters.halo_sim.halo_sampler_seed
 
         # issue #42, O10: build ONE PowerSpectrum instance and share it with
         # the CHMF below, instead of each independently constructing its own
@@ -83,13 +94,30 @@ class LPTHaloLoader(BaseLoader):
         # otherwise the solver and the CHMF could silently run on different
         # cosmologies.
         if lpt_solver is None:
+            resolved_seed = seed if seed is not None else parameters.halo_sim.IC_seed
             shared_ps = get_power_spectrum(ps_method, parameters, **ps_kwargs)
             self.lpt_solver = SecondOrderLPT(
-                parameters, power_spectrum=shared_ps, seed=seed, verbose=False,
+                parameters, power_spectrum=shared_ps, seed=resolved_seed, verbose=False,
             )
         else:
             self.lpt_solver = lpt_solver
             shared_ps = lpt_solver.power_spectrum
+
+        # issue #56: this loader builds its own, independently-seeded density
+        # field for the CHMF to condition on. If that seed doesn't match
+        # cosmo_sim.IC_seed, the sampled halos won't be spatially correlated
+        # with a density field built elsewhere from cosmo_sim.IC_seed.
+        if self.lpt_solver.seed != parameters.cosmo_sim.IC_seed:
+            warnings.warn(
+                f"LPTHaloLoader's density-field seed ({self.lpt_solver.seed}) "
+                f"differs from parameters.cosmo_sim.IC_seed "
+                f"({parameters.cosmo_sim.IC_seed}); the sampled halo catalog "
+                "will not be spatially correlated with a density field built "
+                "from cosmo_sim.IC_seed elsewhere. Set halo_sim.IC_seed to "
+                "match (or leave it None to inherit it) for spatial "
+                "correlation between halos and density.",
+                stacklevel=2,
+            )
 
         chmf = CHMF(parameters, power_spectrum=shared_ps, delta_c=delta_c)
         self.sampler = CHMFSampler(parameters, chmf=chmf, hmf_model=hmf_model)

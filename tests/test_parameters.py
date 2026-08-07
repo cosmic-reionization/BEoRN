@@ -46,9 +46,14 @@ def test_halo_sim_defaults_match_prior_hardcoded_constructor_defaults(params):
     assert hs.delta_c == pytest.approx(1.686)
     assert hs.R_env is None
     assert hs.n_mass_bins == 40
-    assert hs.random_seed == 42
+    assert hs.halo_sampler_seed == 42
     assert hs.mass_assignment == 'NGP'
     assert hs.halo_source == 'CHMF'
+
+
+def test_halo_sim_ic_seed_defaults_to_none(params):
+    """None means inherit cosmo_sim.IC_seed -- see LPTHaloLoader."""
+    assert params.halo_sim.IC_seed is None
 
 
 def test_halo_sim_hmf_model_default_is_deliberately_st(params):
@@ -111,12 +116,12 @@ def test_beorn_hash_changes_with_cosmo_sim_oversample(params):
     assert h0 != h1
 
 
-def test_beorn_hash_unaffected_by_cosmo_sim_random_seed(params):
-    """Rest of cosmo_sim (random_seed, density_source, snapshot_redshifts,
+def test_beorn_hash_unaffected_by_cosmo_sim_ic_seed(params):
+    """Rest of cosmo_sim (IC_seed, density_source, snapshot_redshifts,
     file_root) stays excluded from beorn_hash, as before -- it's "which data
     source", not the physics model."""
     h0 = params.beorn_hash()
-    params.cosmo_sim.random_seed = 999
+    params.cosmo_sim.IC_seed = 999
     h1 = params.beorn_hash()
     assert h0 == h1
 
@@ -126,6 +131,17 @@ def test_beorn_hash_unaffected_by_halo_sim(params):
     separate concern from the astrophysical/grid model this hash covers)."""
     h0 = params.beorn_hash()
     params.halo_sim.hmf_model = 'PS'
-    params.halo_sim.random_seed = 999
+    params.halo_sim.halo_sampler_seed = 999
     h1 = params.beorn_hash()
     assert h0 == h1
+
+
+def test_lptbase_seed_defaults_from_cosmo_sim_ic_seed(params):
+    """Bug-closure test (issue #56): LPTBase.__init__'s own seed default used
+    to be a plain hardcoded literal (42), completely ignoring
+    cosmo_sim.IC_seed. It must now read it whenever seed= is not given
+    explicitly."""
+    from beorn.lpt import SecondOrderLPT
+    params.cosmo_sim.IC_seed = 777
+    solver = SecondOrderLPT(params, verbose=False)
+    assert solver.seed == 777

@@ -497,7 +497,7 @@ class CHMFSampler:
                          (default) reads ``parameters.halo_sim.n_mass_bins``.
             seed:        Random seed for reproducible Poisson draws and
                          intra-cell position sampling. ``None`` (default)
-                         reads ``parameters.halo_sim.random_seed``.
+                         reads ``parameters.halo_sim.halo_sampler_seed``.
             n_delta_nodes: Resolution of the per-bin Λ(M_b, δ) lookup table
                 (issue #42, O6) — see :meth:`expected_counts`. ``None`` falls
                 back to the exact per-cell evaluation.
@@ -512,7 +512,7 @@ class CHMFSampler:
         params = self.parameters
         R_env = R_env if R_env is not None else params.halo_sim.R_env
         n_mass_bins = n_mass_bins if n_mass_bins is not None else params.halo_sim.n_mass_bins
-        seed = seed if seed is not None else params.halo_sim.random_seed
+        seed = seed if seed is not None else params.halo_sim.halo_sampler_seed
         N = params.simulation.Ncell
         L = params.Lbox_hunits
         cell_size = L / N

@@ -99,7 +99,7 @@ cosmo_sim:
                                   # (metadata only -- this script builds a SecondOrderLPT solver directly, matching this value)
   mass_assignment: 'CIC'          # scheme for painting the LPT-generated density field: NGP, CIC, TSC, or PCS
   oversample: 1                   # internal resolution factor, downsampled back to Ncell (LPTBase.get_density's painting mesh)
-  random_seed: 12345             # random seed for density-field generation (read directly as the LPT IC seed by this script)
+  IC_seed: 12345                 # seed for the density field's initial conditions (read directly as the LPT IC seed by this script)
   snapshot_redshifts: [20.0, 19.5, 19.0, 18.5, 18.0, 17.5, 17.0, 16.5, 16.0,
                        15.5, 15.0, 14.5, 14.0, 13.5, 13.0, 12.5, 12.0, 11.5,
                        11.0, 10.5, 10.0, 9.5, 9.0, 8.5, 8.0, 7.5, 7.0, 6.5,
@@ -115,6 +115,7 @@ halo_sim:
   n_mass_bins: 40                 # number of log-spaced mass bins for CHMF sampling
   halo_mass_min: 1.0e+8           # lower bound of the CHMF sampling mass range, in Msun (independent of source.halo_mass_min)
   halo_mass_max: 1.0e+16          # soft upper bound of the CHMF sampling mass range, in Msun (the real ceiling is set by M_env/box size)
-  random_seed: 12345              # RNG seed for halo-catalog generation (Poisson draws + intra-cell positions), independent of cosmo_sim.random_seed
+  halo_sampler_seed: 12345         # RNG seed for halo-catalog generation (Poisson draws + intra-cell positions), independent of cosmo_sim.IC_seed
                                   # (read directly as this script's LPTHaloLoader halo_seed)
+  IC_seed: null                   # seed for LPTHaloLoader's own internal LPT solver; null (default) inherits cosmo_sim.IC_seed
   mass_assignment: 'NGP'          # scheme for painting halo positions (HaloCatalog.to_mesh) -- leave at NGP, see HaloSimParameters docstring

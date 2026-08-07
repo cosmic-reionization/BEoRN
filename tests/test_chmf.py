@@ -73,7 +73,7 @@ def test_expected_counts_n_mass_bins_defaults_from_halo_sim(params, delta_field)
 
 
 def test_sample_seed_defaults_from_halo_sim_and_is_reproducible(params, delta_field):
-    params.halo_sim.random_seed = 123
+    params.halo_sim.halo_sampler_seed = 123
     sampler = CHMFSampler(params, chmf=CHMF(params))
     cat1 = sampler.sample(delta_field, Z, n_mass_bins=10)
     cat2 = sampler.sample(delta_field, Z, n_mass_bins=10)

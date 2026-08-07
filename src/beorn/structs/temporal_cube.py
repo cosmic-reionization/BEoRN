@@ -232,7 +232,7 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
                     "cosmo_sim.snapshot_redshifts",
                     # Simulator-specific fields that don't belong in a generic IGM output:
                     # py21cmfast internals (seed is in the dir name)
-                    "cosmo_sim.random_seed",
+                    "cosmo_sim.IC_seed",
                 },
             )
         ret = cls(z_snapshots=None, parameters=parameters, delta_b=None, Grid_Temp=None, Grid_xHII=None, Grid_xal=None)
