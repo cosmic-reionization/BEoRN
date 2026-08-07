@@ -113,15 +113,17 @@ class HaloCatalog:
     def to_mesh(self, deconvolve: bool = False) -> np.ndarray:
         """Rasterize halo positions into a 3D number-count mesh.
 
-        The mesh uses the nearest-neighbor mass-assignment scheme. The returned array represents halo counts
-        (number density), not mass.
+        The mass-assignment scheme is read from ``parameters.halo_sim.mass_assignment``
+        (default ``'NGP'`` — see that field's docstring for why you almost
+        certainly don't want to change it). The returned array represents
+        halo counts (number density), not mass.
 
         Args:
-            deconvolve: Whether to correct the NGP mass-assignment window
+            deconvolve: Whether to correct the mass-assignment window
                 (:func:`beorn.particle_mapping.deconvolve_mas`) in place right
                 after painting, before this halo-count mesh is convolved with
                 the physical ionization/heating/Lyman-alpha profile kernel
-                downstream. Only the NGP painting window is removed here —
+                downstream. Only the painting window is removed here —
                 the profile kernel applied afterwards is untouched. Defaults
                 to ``False``; pass ``True`` at your own risk — deconvolving
                 amplifies noise near k_Nyquist, which can push a discrete
@@ -137,7 +139,8 @@ class HaloCatalog:
         backend = self.parameters.simulation.backend.resolve('mass_assignment')
         map_particles_to_mesh(
             mesh, physical_size, self.positions.astype(np.float32),
-            mass_assignment="NGP", backend=backend, deconvolve=deconvolve,
+            mass_assignment=self.parameters.halo_sim.mass_assignment,
+            backend=backend, deconvolve=deconvolve,
         )
         return mesh
 

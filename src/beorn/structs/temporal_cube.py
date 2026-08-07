@@ -233,9 +233,6 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
                     # Simulator-specific fields that don't belong in a generic IGM output:
                     # py21cmfast internals (seed is in the dir name)
                     "cosmo_sim.random_seed",
-                    # Particle mass-assignment scheme (affects density/RSD fields, not the IGM output)
-                    "cosmo_sim.particle_mass_assignment",
-                    "cosmo_sim.halo_catalogs_thesan_mass_assignment",
                 },
             )
         ret = cls(z_snapshots=None, parameters=parameters, delta_b=None, Grid_Temp=None, Grid_xHII=None, Grid_xal=None)

@@ -50,7 +50,8 @@ def main(param_file: Path = DEFAULT_PARAM_FILE) -> None:
 
     cache_handler = beorn.io.Handler(CACHE_ROOT)
     loader = beorn.load_input_data.LPTHaloLoader(
-        parameters, seed=seed, n_mass_bins=parameters.solver.halo_mass_nbin,
+        parameters, seed=seed, halo_seed=parameters.halo_sim.random_seed,
+        n_mass_bins=parameters.solver.halo_mass_nbin,
     )
 
     solver = beorn.precomputation.RadiationProfileSolver(

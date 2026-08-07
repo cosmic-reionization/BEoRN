@@ -534,7 +534,7 @@ class LPTBase(ABC):
             mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'`` —
                 forwarded to
                 :func:`~beorn.particle_mapping.map_particles_to_mesh`.
-                ``None`` (default) reads ``parameters.simulation.mass_assignment``
+                ``None`` (default) reads ``parameters.cosmo_sim.mass_assignment``
                 (itself ``'CIC'`` by default).
             fused: If ``True`` (default), paint directly from the displacement
                 field via
@@ -551,7 +551,7 @@ class LPTBase(ABC):
                 kernel yet, tracked as follow-up). Pass ``fused=False`` to
                 force the original position-array path. Ignored when
                 ``oversample > 1`` (see below).
-            oversample: ``None`` (default) reads ``parameters.simulation.oversample``
+            oversample: ``None`` (default) reads ``parameters.cosmo_sim.oversample``
                 (itself ``1`` — no oversampling — by default). If ``> 1``,
                 Fourier-upsample the displacement field onto an
                 ``oversample*N`` Lagrangian grid
@@ -626,7 +626,7 @@ class LPTBase(ABC):
         N, L = self.N, self.L
         oversample = (
             oversample if oversample is not None
-            else self.parameters.simulation.oversample
+            else self.parameters.cosmo_sim.oversample
         )
         if oversample < 1 or not isinstance(oversample, int):
             raise ValueError(f"oversample must be a positive int; got {oversample!r}.")
@@ -636,7 +636,7 @@ class LPTBase(ABC):
         )
         resolved_mass_assignment = (
             mass_assignment if mass_assignment is not None
-            else self.parameters.simulation.mass_assignment
+            else self.parameters.cosmo_sim.mass_assignment
         )
         resolved_dtype = np.float32 if dtype is None else np.dtype(dtype)
         if resolved_backend == 'pylians':

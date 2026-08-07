@@ -29,13 +29,13 @@ class Py21cmFastLoader(BaseLoader):
             py21cmfast's internal grid (DIM = Ncell * oversample; HII_DIM
             stays Ncell). A larger factor resolves lower halo masses at the
             cost of more memory and compute time. ``None`` (default) reads
-            ``parameters.simulation.oversample``.
+            ``parameters.cosmo_sim.oversample``.
     """
 
     def __init__(self, parameters: Parameters, file_root: "Path | str" = None, oversample: int | None = None):
         super().__init__(parameters)
         self.file_root = Path(file_root) if file_root is not None else None
-        self.oversample = oversample if oversample is not None else parameters.simulation.oversample
+        self.oversample = oversample if oversample is not None else parameters.cosmo_sim.oversample
         if self.file_root is not None and self.file_root.is_dir():
             self._ensure_parameters_yaml(self.file_root)
 

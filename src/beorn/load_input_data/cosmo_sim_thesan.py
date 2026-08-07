@@ -127,19 +127,14 @@ class ThesanLoader(MergerTreeLoader):
     def _particle_mapping_config(self) -> tuple[str, str]:
         """Return the particle-to-mesh mapping scheme and backend.
 
-        ``main`` stores the THESAN-specific assignment kernel under
-        ``cosmo_sim.halo_catalogs_thesan_mass_assignment``. Older branches used
-        ``cosmo_sim.particle_mass_assignment`` instead, so we keep a fallback
-        here while preferring the current schema.
+        Uses ``cosmo_sim.mass_assignment`` directly -- the previous
+        THESAN-specific ``halo_catalogs_thesan_mass_assignment`` field (really
+        a particle, not halo, mass-assignment scheme despite its name) has
+        been removed in favor of the same field native LPT's
+        ``get_density()`` reads.
         """
-        cosmo_sim = self.parameters.cosmo_sim
-        mass_assignment = getattr(
-            cosmo_sim,
-            "halo_catalogs_thesan_mass_assignment",
-            getattr(cosmo_sim, "particle_mass_assignment", "CIC"),
-        )
         backend = self.parameters.simulation.backend.resolve('mass_assignment')
-        return mass_assignment, backend
+        return self.parameters.cosmo_sim.mass_assignment, backend
 
     # ── MergerTreeLoader interface ─────────────────────────────────────────
 

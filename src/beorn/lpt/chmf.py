@@ -37,7 +37,9 @@ class CHMF:
         parameters:  BEoRN Parameters object.
         ps_method:   Power spectrum method passed to :func:`get_power_spectrum`.
                      Default ``'eisenstein_hu'``.
-        delta_c:     Linear collapse threshold (default 1.686).
+        delta_c:     Linear collapse threshold. ``None`` (default) reads
+                     ``parameters.halo_sim.delta_c`` (itself ``1.686`` by
+                     default).
         power_spectrum: Pre-built :class:`~beorn.lpt.linear_power.PowerSpectrum`
                      instance to use directly instead of constructing one from
                      ``ps_method``/``ps_kwargs`` (issue #42, O10) — pass this
@@ -52,7 +54,7 @@ class CHMF:
         self,
         parameters: Parameters,
         ps_method: str = 'eisenstein_hu',
-        delta_c: float = 1.686,
+        delta_c: float | None = None,
         power_spectrum: PowerSpectrum | None = None,
         **ps_kwargs,
     ):
@@ -61,7 +63,7 @@ class CHMF:
         from ..mass_function.base import MassFunction
 
         self.parameters = parameters
-        self.delta_c = delta_c
+        self.delta_c = delta_c if delta_c is not None else parameters.halo_sim.delta_c
         # sigma^2(M) machinery is delegated to the shared MassFunction base
         # (same 1000 ln-k nodes, 200-point log-M table, top-hat window that
         # used to be duplicated here) — one sigma^2 implementation for both
@@ -220,12 +222,15 @@ class CHMFSampler:
                      constructed with the supplied ``ps_method`` and
                      ``ps_kwargs``.
         ps_method:   Power spectrum method forwarded to :class:`CHMF`.
-        delta_c:     Linear collapse threshold (default 1.686).
-        hmf_model:   ``'PS'`` (default) — pure EPS conditional sampling whose
-                     volume average is Press-Schechter.  ``'ST'`` — rescale
-                     each mass bin by the unconditional ST/PS ratio (Barkana &
+        delta_c:     Linear collapse threshold. ``None`` (default) reads
+                     ``parameters.halo_sim.delta_c``.
+        hmf_model:   ``'PS'`` — pure EPS conditional sampling whose volume
+                     average is Press-Schechter.  ``'ST'`` — rescale each
+                     mass bin by the unconditional ST/PS ratio (Barkana &
                      Loeb 2004 hybrid) so the volume average matches
                      Sheth-Tormen instead, as done by 21cmFAST-family codes.
+                     ``None`` (default) reads ``parameters.halo_sim.hmf_model``
+                     (itself ``'ST'`` by default).
         **ps_kwargs: Forwarded to the power spectrum constructor.
     """
 
@@ -234,15 +239,15 @@ class CHMFSampler:
         parameters: Parameters,
         chmf: CHMF | None = None,
         ps_method: str = 'eisenstein_hu',
-        delta_c: float = 1.686,
-        hmf_model: str = 'PS',
+        delta_c: float | None = None,
+        hmf_model: str | None = None,
         **ps_kwargs,
     ):
         self.parameters = parameters
         self.chmf = chmf if chmf is not None else CHMF(
             parameters, ps_method, delta_c, **ps_kwargs
         )
-        hmf_model = hmf_model.upper()
+        hmf_model = (hmf_model if hmf_model is not None else parameters.halo_sim.hmf_model).upper()
         if hmf_model not in ('PS', 'ST'):
             raise ValueError(
                 f"Unknown hmf_model {hmf_model!r}. Choose 'PS' or 'ST'."
@@ -262,16 +267,27 @@ class CHMFSampler:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _smooth_field(self, delta: np.ndarray, R_smooth: float) -> np.ndarray:
-        """Gaussian-smooth a density field in Fourier space.
+    def _tophat_smooth(self, delta: np.ndarray, R: float) -> np.ndarray:
+        """Real-space top-hat smoothing via FFT.
+
+        Matches the window :attr:`chmf`'s own ``sigma2(M,z)`` assumes
+        (``CHMF`` always builds its ``MassFunction`` with ``window='tophat'``)
+        and the smoothing :meth:`beorn.lpt.LPTBase.get_linear_density`
+        applies via its own ``R_tophat`` argument -- so the field this
+        returns has variance ``sigma2(M_of_R(R), z)`` up to finite-box/grid
+        discreteness (issue #54).
 
         Args:
-            delta:    Real-space overdensity, shape (N, N, N).
-            R_smooth: Smoothing scale in Mpc/h.
+            delta: Real-space overdensity, shape (N, N, N).
+            R:     Top-hat smoothing radius in Mpc/h.
 
         Returns:
-            Smoothed field, same shape.
+            Smoothed field, same shape and dtype as ``delta``.
         """
+        # Runtime import: beorn.mass_function.base imports beorn.lpt at
+        # module load, so a top-level import here would be circular.
+        from ..mass_function.window import TopHatWindow
+
         N = delta.shape[0]
         L = self.parameters.Lbox_hunits
         dk = 2.0 * np.pi / L
@@ -279,24 +295,36 @@ class CHMFSampler:
         kz_vals = np.fft.rfftfreq(N, d=1.0 / N) * dk
         kx, ky, kz = np.meshgrid(kvals, kvals, kz_vals, indexing='ij')
         k2 = kx ** 2 + ky ** 2 + kz ** 2
-        W_k = np.exp(-0.5 * k2 * R_smooth ** 2)
-        return np.fft.irfftn(np.fft.rfftn(delta) * W_k, s=(N, N, N))
+        k = np.sqrt(np.where(k2 == 0, 1.0, k2))  # dummy value avoids 0/0 in W
+        W = TopHatWindow().W(k * R)
+        W = np.where(k2 == 0, 1.0, W)            # preserve the DC (mean) mode
+        return np.fft.irfftn(np.fft.rfftn(delta) * W, axes=(0, 1, 2),
+                             s=(N, N, N)).astype(delta.dtype)
 
     def _environment(self, delta_field: np.ndarray, R_env: float | None):
         """Resolve the conditioning field and environment mass.
 
+        Always top-hat-smooths ``delta_field`` to the conditioning radius
+        (the cell-equivalent radius when ``R_env`` is ``None``, or ``R_env``
+        itself when set and above the cell size) -- EPS self-consistency
+        requires ``Var(delta_env) = sigma2(M_env, z)``, and the caller is not
+        expected to have done this smoothing themselves (issue #54).
+
         Returns:
-            (delta_env, M_env) — the (possibly smoothed) conditioning field
-            and the environmental mass scale in M_sun.
+            (delta_env, M_env) — the smoothed conditioning field and the
+            environmental mass scale in M_sun.
         """
         params = self.parameters
         cell_size = params.Lbox_hunits / params.simulation.Ncell
         if R_env is None:
-            return delta_field, self.chmf.rho_m * cell_size ** 3
+            M_env = self.chmf.rho_m * cell_size ** 3
+            R_eq = (3.0 / (4.0 * np.pi)) ** (1.0 / 3.0) * cell_size
+            return self._tophat_smooth(delta_field, R_eq), M_env
         M_env = self.chmf.M_of_R(R_env)
-        if R_env > cell_size:
-            return self._smooth_field(delta_field, R_env), M_env
-        return delta_field, M_env
+        if R_env <= cell_size:
+            # Smoothing below the grid's own resolution isn't meaningful.
+            return delta_field, M_env
+        return self._tophat_smooth(delta_field, R_env), M_env
 
     def _delta_grid(self, delta_env: np.ndarray, n_nodes: int) -> np.ndarray:
         """Static 1-D delta grid spanning the field's actual range.
@@ -334,10 +362,11 @@ class CHMFSampler:
         return np.interp(delta_env.ravel(), d_grid, lam_grid).reshape(delta_env.shape)
 
     def _mass_bins(self, M_env: float, n_mass_bins: int):
-        """Log-spaced mass bins between halo_mass_min and min(M_max, M_env)."""
+        """Log-spaced mass bins between halo_sim.halo_mass_min and
+        min(halo_sim.halo_mass_max, M_env)."""
         params = self.parameters
-        M_min = params.source.halo_mass_min
-        M_max_req = params.source.halo_mass_max
+        M_min = params.halo_sim.halo_mass_min
+        M_max_req = params.halo_sim.halo_mass_max
 
         if M_env <= M_min:
             raise ValueError(
@@ -367,7 +396,7 @@ class CHMFSampler:
         delta_field: np.ndarray,
         z: float,
         R_env: float | None = None,
-        n_mass_bins: int = 40,
+        n_mass_bins: int | None = None,
         n_delta_nodes: int | None = 512,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Expected halo counts per cell and mass bin — the Poisson intensity.
@@ -381,12 +410,15 @@ class CHMFSampler:
         alternative to :meth:`sample`.
 
         Args:
-            delta_field: Linear conditioning overdensity, shape (N, N, N)
-                (see :meth:`sample` for why it must be the linear field).
+            delta_field: **Raw** linear overdensity, shape (N, N, N) — see
+                :meth:`sample` for the exact contract (no pre-smoothing
+                needed; this method smooths it internally).
             z:           Redshift.
             R_env:       Environmental smoothing scale in Mpc/h (as in
-                :meth:`sample`).
-            n_mass_bins: Number of log-spaced mass bins.
+                :meth:`sample`). ``None`` (default) reads
+                ``parameters.halo_sim.R_env``.
+            n_mass_bins: Number of log-spaced mass bins. ``None`` (default)
+                reads ``parameters.halo_sim.n_mass_bins``.
             n_delta_nodes: Resolution of the per-bin Λ(M_b, δ) lookup table
                 (issue #42, O6) — δ -> dn/dlnM is evaluated at this many
                 points spanning the field's actual delta range and linearly
@@ -406,6 +438,8 @@ class CHMFSampler:
             :meth:`CHMF.hmf_chmf_field` per bin for large grids.
         """
         params = self.parameters
+        R_env = R_env if R_env is not None else params.halo_sim.R_env
+        n_mass_bins = n_mass_bins if n_mass_bins is not None else params.halo_sim.n_mass_bins
         V_cell = (params.Lbox_hunits / params.simulation.Ncell) ** 3
 
         delta_env, M_env = self._environment(delta_field, R_env)
@@ -430,7 +464,7 @@ class CHMFSampler:
         delta_field: np.ndarray,
         z: float,
         R_env: float | None = None,
-        n_mass_bins: int = 40,
+        n_mass_bins: int | None = None,
         seed: int | None = None,
         n_delta_nodes: int | None = 512,
     ) -> HaloCatalog:
@@ -442,20 +476,28 @@ class CHMFSampler:
         within their host cells.
 
         Args:
-            delta_field: **Linear** matter overdensity at cell resolution,
-                shape ``(N, N, N)`` — use :meth:`LPTBase.get_linear_density`
-                (with the cell-equivalent top-hat radius), *not* the CIC
-                :meth:`LPTBase.get_density`: EPS self-consistency requires a
-                Gaussian conditioning field with Var = sigma^2(M_env), and the
-                CIC field's shot-noise tails blow up the CHMF near M_env.
+            delta_field: **Raw, linear** matter overdensity at cell
+                resolution, shape ``(N, N, N)`` — use
+                :meth:`LPTBase.get_linear_density` (no ``R_tophat`` needed;
+                this method top-hat-smooths it internally to the conditioning
+                scale, issue #54), *not* the CIC :meth:`LPTBase.get_density`:
+                EPS self-consistency requires a Gaussian conditioning field,
+                and the CIC field's shot-noise tails blow up the CHMF near
+                M_env.
             z:           Redshift at which to sample.
-            R_env:       Environmental smoothing scale in Mpc/h.  If ``None``
-                         (default) the cell size is used as the conditioning scale
-                         and no additional smoothing is applied.
+            R_env:       Environmental smoothing scale in Mpc/h. ``None``
+                         (default) reads ``parameters.halo_sim.R_env`` (itself
+                         ``None`` by default — the cell-equivalent top-hat
+                         radius is used as the conditioning scale). Either
+                         way, ``delta_field`` is smoothed to this scale
+                         internally.
             n_mass_bins: Number of log-spaced mass bins between
-                         ``source.halo_mass_min`` and the environmental mass.
+                         ``halo_sim.halo_mass_min`` and
+                         ``min(halo_sim.halo_mass_max, M_env)``. ``None``
+                         (default) reads ``parameters.halo_sim.n_mass_bins``.
             seed:        Random seed for reproducible Poisson draws and
-                         intra-cell position sampling.
+                         intra-cell position sampling. ``None`` (default)
+                         reads ``parameters.halo_sim.random_seed``.
             n_delta_nodes: Resolution of the per-bin Λ(M_b, δ) lookup table
                 (issue #42, O6) — see :meth:`expected_counts`. ``None`` falls
                 back to the exact per-cell evaluation.
@@ -468,6 +510,9 @@ class CHMFSampler:
             ValueError: If ``R_env`` is set but ``M_env < halo_mass_min``.
         """
         params = self.parameters
+        R_env = R_env if R_env is not None else params.halo_sim.R_env
+        n_mass_bins = n_mass_bins if n_mass_bins is not None else params.halo_sim.n_mass_bins
+        seed = seed if seed is not None else params.halo_sim.random_seed
         N = params.simulation.Ncell
         L = params.Lbox_hunits
         cell_size = L / N

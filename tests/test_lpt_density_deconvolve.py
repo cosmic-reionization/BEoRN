@@ -24,7 +24,7 @@ def _solver(param):
 
 
 def test_get_density_defaults_match_parameters_simulation_fields(param):
-    assert param.simulation.mass_assignment == 'CIC'
+    assert param.cosmo_sim.mass_assignment == 'CIC'
 
     solver = _solver(param)
     default = solver.get_density(Z)
@@ -44,7 +44,7 @@ def test_get_density_deconvolve_changes_output(param):
 
 
 def test_get_density_mass_assignment_parameters_override(param):
-    param.simulation.mass_assignment = 'TSC'
+    param.cosmo_sim.mass_assignment = 'TSC'
     solver = _solver(param)
 
     default = solver.get_density(Z)

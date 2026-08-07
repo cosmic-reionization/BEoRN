@@ -52,6 +52,7 @@ def param():
     p.simulation.Lbox = L
     p.simulation.use_hunits = True  # L is a plain Mpc/h constant shared with the "pure" reference functions below (issue #49)
     p.source.halo_mass_min = 1e9
+    p.halo_sim.halo_mass_min = 1e9  # match halo_field_diff's explicit M_min=1e9 below
     return p
 
 
@@ -158,16 +159,26 @@ def chmf_setup(param):
     cell = L / N
     R = (3.0 / (4.0 * np.pi)) ** (1.0 / 3.0) * cell
     za = ZeldovichApproximation(param, verbose=False, seed=7)
+    # halo_field_diff (below) is a standalone function with no internal
+    # smoothing of its own -- it still expects an already-presmoothed field.
+    # CHMFSampler now smooths internally (issue #54), so it needs the RAW
+    # field instead. Both variants come from the same seeded IC realization,
+    # and R here is exactly the cell-equivalent radius CHMFSampler smooths
+    # delta_raw to by default, so the two stay consistent.
     delta = za.get_linear_density(Z, R_tophat=R).astype(np.float64)
-    sampler = CHMFSampler(param, chmf=CHMF(param))
-    return delta, sampler, sampler.chmf.M_of_R(R), cell ** 3
+    delta_raw = za.get_linear_density(Z).astype(np.float64)
+    # hmf_model='PS' pinned explicitly: halo_field_diff (below) is a standalone
+    # function outside the Parameters system with its own hardcoded hmf_model='PS'
+    # default, so this sampler must match it regardless of halo_sim.hmf_model's default.
+    sampler = CHMFSampler(param, chmf=CHMF(param), hmf_model='PS')
+    return delta, delta_raw, sampler, sampler.chmf.M_of_R(R), cell ** 3
 
 
 def test_halo_field_diff_expectation(param, theta, chmf_setup):
-    delta, sampler, M_env, V_cell = chmf_setup
+    delta, delta_raw, sampler, M_env, V_cell = chmf_setup
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        Mc_ref, lam = sampler.expected_counts(delta, Z, n_mass_bins=20)
+        Mc_ref, lam = sampler.expected_counts(delta_raw, Z, n_mass_bins=20)
 
     field, Mc = halo_field_diff(delta, M_env, Z, **theta,
                                 cell_volume=V_cell, M_min=1e9,
@@ -185,7 +196,7 @@ def test_halo_field_diff_expectation(param, theta, chmf_setup):
 
 
 def test_halo_field_diff_stochastic_gradient(param, theta, chmf_setup):
-    delta, _, M_env, V_cell = chmf_setup
+    delta, _, _, M_env, V_cell = chmf_setup
     eps = np.random.default_rng(3).standard_normal((20,) + delta.shape)
 
     def total_mass(s8):

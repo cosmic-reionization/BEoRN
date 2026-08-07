@@ -342,28 +342,6 @@ class SimulationParameters:
     into one, e.g. degrade_resolution=4 turns a 256³ grid into 64³.
     Set Ncell to the native grid size divided by degrade_resolution."""
 
-    oversample: int = 1
-    """Resolution-enhancement factor for any internal grid that gets reduced
-    back down to ``Ncell`` before being used further. Opposite direction of
-    :attr:`degrade_resolution`. A value of 1 (default) applies no refinement.
-    Two independent consumers:
-
-    - :meth:`beorn.lpt.LPTBase.get_density` (default, unless its own
-      ``oversample`` argument is given explicitly): paints the LPT-generated
-      field onto an internal ``oversample*Ncell`` mesh, then block-averages
-      back down to ``(Ncell, Ncell, Ncell)`` before returning. Reduces
-      mass-assignment discreteness/aliasing for real-space statistics where
-      :func:`beorn.particle_mapping.deconvolve_mas` doesn't apply (issue #48).
-    - :class:`~beorn.load_input_data.Py21cmFastLoader` (default, unless its
-      own ``oversample`` argument is given explicitly): sets py21cmfast's
-      internal grid ``DIM = Ncell * oversample`` while ``HII_DIM = Ncell``
-      stays the output resolution. A larger factor resolves lower halo
-      masses at the cost of more memory/compute; the minimum resolvable halo
-      mass scales roughly as ``(Lbox / DIM)^3``.
-
-    In both cases ``Ncell`` is always the resulting (coarse) grid size; the
-    finer internal grid is never itself persisted."""
-
     use_hunits: bool = False
     """Whether ``Lbox`` is given in h-units (Mpc/h — the historical BEoRN
     convention) or physical Mpc (the default, ``False``). Internal code
@@ -375,36 +353,6 @@ class SimulationParameters:
     that set ``Lbox`` without setting ``use_hunits`` need updating. Halo-mass-
     valued quantities are not yet affected by this flag (deferred, tracked
     separately)."""
-
-    mass_assignment: Literal['NGP', 'CIC', 'TSC', 'PCS'] = 'CIC'
-    """Mass-assignment scheme used to paint particles/haloes onto the grid.
-    Read as the default by :meth:`beorn.lpt.LPTBase.get_density` (the matter
-    density field) and by :meth:`beorn.structs.HaloCatalog.to_mesh` (halo
-    positions, as profile centers for the ionization/heating/Lyman-alpha
-    painting stage) whenever their own ``mass_assignment`` argument isn't
-    given explicitly. Does not affect
-    ``cosmo_sim.halo_catalogs_thesan_mass_assignment``, which is a separate
-    knob for the Thesan N-body loader's own particle painting (issue #48).
-
-    Real-space mass-assignment window deconvolution (correcting the
-    ``sinc^p`` suppression near k_Nyquist) is a per-call ``deconvolve``
-    argument on :meth:`~beorn.lpt.LPTBase.get_density`,
-    :meth:`~beorn.structs.HaloCatalog.to_mesh`,
-    :func:`beorn.particle_mapping.map_particles_to_mesh`, and
-    :meth:`~beorn.structs.TemporalCube.power_spectrum` — each defaulting to
-    ``False`` — rather than a simulation-wide default here. Deconvolving the
-    *real-space field itself* divides out the window in Fourier space, which
-    amplifies noise near k_Nyquist enough to push cells below the physical
-    ``δ = -1`` floor (worse at lower redshift, where small-scale power is
-    larger); that fed straight into ``T_adiab_fluctu``'s ``(1 + δ)**(2/3)``,
-    producing ``NaN`` cells that silently poisoned
-    ``TemporalCube.global_mean``'s per-redshift average (not NaN-aware) for
-    every snapshot at or below the first affected redshift. For P(k)
-    analysis, prefer passing ``deconvolve=True`` directly to
-    :meth:`beorn.structs.TemporalCube.power_spectrum` /
-    :func:`beorn.power_spectrum.power_spectrum_1d`, which deconvolve only for
-    that one measurement without ever writing the noisier field back
-    (issue #48)."""
 
     @staticmethod
     def _kbins_from(lbox: float, ncell: int) -> np.ndarray:
@@ -447,6 +395,9 @@ class CosmologyParameters:
         h0: Dimensionless Hubble parameter.
         sigma_8: Amplitude of the matter power spectrum on 8 Mpc/h scales.
         ns: Scalar spectral index.
+        w0: Dark-energy equation-of-state parameter at a=1 (CPL).
+        wa: Dark-energy equation-of-state evolution parameter (CPL).
+        growth_factor_method: Method used to compute the linear growth factor D(a).
     """
 
     Om: float = 0.315
@@ -489,13 +440,76 @@ class CosmologyParameters:
 
 @dataclass(slots = True)
 class CosmoSimParameters:
-    """Parameters specific to N-body/cosmo-sim inputs (py21cmfast, Thesan, PKDGrav, etc.)."""
+    """Parameters for however the cosmological density field is produced —
+    native LPT (1LPT/2LPT/3LPT) counts as a "cosmo sim" here alongside
+    external N-body inputs (py21cmfast, Thesan, PKDGrav, etc.)."""
+
+    density_source: Literal['1LPT', '2LPT', '3LPT', 'external'] = '2LPT'
+    """Which mechanism produces the density field. ``'1LPT'``/``'2LPT'``/
+    ``'3LPT'`` mean native LPT at that order (:class:`~beorn.lpt.ZeldovichApproximation`/
+    :class:`~beorn.lpt.SecondOrderLPT`/:class:`~beorn.lpt.ThirdOrderLPT`);
+    ``'external'`` means an external N-body loader (py21cmfast/Thesan/PKDGrav)
+    is used instead. This is a metadata field recording the choice for
+    hashing/reproducibility — it does not itself dispatch which class gets
+    instantiated (you still construct the LPT solver or loader class
+    directly); keep it in sync with whichever you actually use."""
+
+    mass_assignment: Literal['NGP', 'CIC', 'TSC', 'PCS'] = 'CIC'
+    """Mass-assignment scheme used to paint the density field. Read as the
+    default by :meth:`beorn.lpt.LPTBase.get_density` whenever its own
+    ``mass_assignment`` argument isn't given explicitly. Does not affect halo
+    catalog painting (see :attr:`HaloSimParameters.mass_assignment`) or any
+    N-body loader's own particle painting, which reads this same field
+    directly (e.g. the Thesan loader).
+
+    Real-space mass-assignment window deconvolution (correcting the
+    ``sinc^p`` suppression near k_Nyquist) is a per-call ``deconvolve``
+    argument on :meth:`~beorn.lpt.LPTBase.get_density`,
+    :meth:`~beorn.structs.HaloCatalog.to_mesh`,
+    :func:`beorn.particle_mapping.map_particles_to_mesh`, and
+    :meth:`~beorn.structs.TemporalCube.power_spectrum` — each defaulting to
+    ``False`` — rather than a simulation-wide default here. Deconvolving the
+    *real-space field itself* divides out the window in Fourier space, which
+    amplifies noise near k_Nyquist enough to push cells below the physical
+    ``δ = -1`` floor (worse at lower redshift, where small-scale power is
+    larger); that fed straight into ``T_adiab_fluctu``'s ``(1 + δ)**(2/3)``,
+    producing ``NaN`` cells that silently poisoned
+    ``TemporalCube.global_mean``'s per-redshift average (not NaN-aware) for
+    every snapshot at or below the first affected redshift. For P(k)
+    analysis, prefer passing ``deconvolve=True`` directly to
+    :meth:`beorn.structs.TemporalCube.power_spectrum` /
+    :func:`beorn.power_spectrum.power_spectrum_1d`, which deconvolve only for
+    that one measurement without ever writing the noisier field back
+    (issue #48)."""
+
+    oversample: int = 1
+    """Resolution-enhancement factor for any internal grid that gets reduced
+    back down to ``simulation.Ncell`` before being used further. Opposite
+    direction of :attr:`SimulationParameters.degrade_resolution`. A value of
+    1 (default) applies no refinement. Two independent consumers:
+
+    - :meth:`beorn.lpt.LPTBase.get_density` (default, unless its own
+      ``oversample`` argument is given explicitly): paints the LPT-generated
+      field onto an internal ``oversample*Ncell`` mesh, then block-averages
+      back down to ``(Ncell, Ncell, Ncell)`` before returning. Reduces
+      mass-assignment discreteness/aliasing for real-space statistics where
+      :func:`beorn.particle_mapping.deconvolve_mas` doesn't apply (issue #48).
+    - :class:`~beorn.load_input_data.Py21cmFastLoader` (default, unless its
+      own ``oversample`` argument is given explicitly): sets py21cmfast's
+      internal grid ``DIM = Ncell * oversample`` while ``HII_DIM = Ncell``
+      stays the output resolution. A larger factor resolves lower halo
+      masses at the cost of more memory/compute; the minimum resolvable halo
+      mass scales roughly as ``(Lbox / DIM)^3``.
+
+    In both cases ``Ncell`` is always the resulting (coarse) grid size; the
+    finer internal grid is never itself persisted."""
 
     random_seed: int = 12345
-    """Random seed for the random number generator. This is used to generate the random numbers for the halo catalogs and the density fields when using 21cmfast."""
-
-    halo_catalogs_thesan_mass_assignment: Literal['NGP', 'CIC'] = 'CIC'
-    """Method used to assign the halo mass to the grid. Can be either NGP (Nearest Grid Point) or CIC (Cloud In Cell)."""
+    """Random seed for density-field generation: py21cmfast's own IC/perturb-field
+    seed, or (by convention) the seed passed to a native LPT solver's
+    ``seed=`` constructor argument. Independent of
+    :attr:`HaloSimParameters.random_seed` (the halo-catalog-generation seed),
+    so the two never conflict."""
 
     snapshot_redshifts: np.ndarray = None
     """Redshifts of the cosmo-sim snapshots that will be painted (e.g. py21cmfast outputs).
@@ -513,6 +527,76 @@ class CosmoSimParameters:
 
 
 @dataclass(slots = True)
+class HaloSimParameters:
+    """Parameters for how halo catalogs are generated."""
+
+    halo_source: Literal['CHMF', 'external'] = 'CHMF'
+    """How halo catalogs are generated. ``'CHMF'`` — conditional halo mass
+    function sampling on the density field (see :attr:`hmf_model` for the
+    PS/ST calibration). ``'external'`` — read from an external N-body
+    loader's own halo finder (py21cmfast, Thesan, PKDGrav). Kept as a
+    separate axis from :attr:`hmf_model` (rather than folding PS/ST into this
+    field, e.g. ``'CHMF_PS'``) so future native halo-finding methods (e.g.
+    excursion-set/peak-patch, issue #26) can be added as new ``halo_source``
+    values without overloading ``hmf_model``. Metadata field for
+    hashing/reproducibility — does not itself dispatch which loader/sampler
+    gets constructed."""
+
+    hmf_model: Literal['PS', 'ST'] = 'ST'
+    """Only meaningful when :attr:`halo_source` is ``'CHMF'``. ``'PS'`` —
+    pure EPS conditional sampling (volume average = Press-Schechter).
+    ``'ST'`` (default) — Barkana & Loeb (2004) hybrid rescaling so the volume
+    average matches Sheth-Tormen (as in 21cmFAST-family codes). Read as the
+    default by :class:`~beorn.lpt.chmf.CHMFSampler`/
+    :class:`~beorn.load_input_data.LPTHaloLoader` whenever their own
+    ``hmf_model`` argument isn't given explicitly."""
+
+    delta_c: float = 1.686
+    """Linear collapse threshold used by :class:`~beorn.lpt.chmf.CHMF`/
+    :class:`~beorn.lpt.chmf.CHMFSampler`."""
+
+    R_env: float | None = None
+    """Environmental smoothing scale in Mpc/h for CHMF conditioning. ``None``
+    (default) uses the cell size as the conditioning scale."""
+
+    n_mass_bins: int = 40
+    """Number of log-spaced mass bins for CHMF sampling."""
+
+    halo_mass_min: float = 1e8
+    """Lower bound of the CHMF sampling mass range, in M_sun. Independent of
+    :attr:`SourceParameters.halo_mass_min` (the star-forming/painting cutoff
+    applied downstream) — these are different concerns: this controls what's
+    *generated*, source's controls what's *painted*. Same default value for
+    a sane out-of-the-box match, but change them independently as needed."""
+
+    halo_mass_max: float = 1e16
+    """Soft upper bound of the CHMF sampling mass range, in M_sun — not a
+    strong/binding constraint in practice. The real hard ceiling is set by
+    the box itself: per-cell EPS conditioning caps sampleable mass at the
+    per-cell environment mass M_env (set by :attr:`R_env` and cell size), and
+    even without per-cell conditioning the box volume bounds the largest
+    halo that can exist. This field only lets you cap the range *further*
+    below whichever of those applies; it can never raise the effective bound
+    above them. Default 1e16 is effectively a no-op cap for realistic grids."""
+
+    random_seed: int = 42
+    """RNG seed for halo-catalog generation (Poisson draws + intra-cell
+    position sampling) — independent of :attr:`CosmoSimParameters.random_seed`
+    (the density-field generation seed), so the two never conflict. Matches
+    :class:`~beorn.load_input_data.LPTHaloLoader`'s existing hardcoded
+    default of 42 (no default-value change)."""
+
+    mass_assignment: Literal['NGP', 'CIC', 'TSC', 'PCS'] = 'NGP'
+    """Mass-assignment scheme for painting halo *positions* onto the grid
+    (:meth:`beorn.structs.HaloCatalog.to_mesh`) as profile centers for the
+    ionization/heating/Lyman-alpha convolution stage. Leave at ``'NGP'`` —
+    halo catalogs are discrete point sources, and the downstream
+    profile-kernel convolution already does the physical smoothing; painting
+    with CIC/TSC/PCS here adds an extra, unphysical pre-smoothing on top of
+    that. Changing this is almost certainly not what you want."""
+
+
+@dataclass(slots = True)
 class Parameters:
     """
     Group all the parameters for the simulation.
@@ -526,7 +610,11 @@ class Parameters:
     simulation: SimulationParameters = field(default_factory = SimulationParameters)
     """simulation parameters"""
     cosmo_sim: CosmoSimParameters = field(default_factory = CosmoSimParameters)
-    """cosmo-sim input parameters (py21cmfast, Thesan, PKDGrav, etc.)"""
+    """cosmo-sim input parameters (density-field source: native LPT order or
+    external N-body loader, plus mass assignment/oversample/seed for it)"""
+    halo_sim: HaloSimParameters = field(default_factory = HaloSimParameters)
+    """halo-catalog generation parameters (CHMF vs external, HMF calibration,
+    mass range, seed, mass assignment for painting halo positions)"""
 
 
     @property
@@ -659,12 +747,16 @@ class Parameters:
 
         ``cosmo_sim`` is also excluded: it controls *which* input data is used
         but does not affect the underlying physics model — it is already encoded
-        in the input_tag.
+        in the input_tag. Exception: ``cosmo_sim.mass_assignment``/``oversample``
+        *do* affect the painted density field, so they're added back explicitly
+        below even though the rest of ``cosmo_sim`` stays excluded.
         """
         d = {
             'source': to_dict(self.source),
             'solver': to_dict(self.solver),
             'simulation': to_dict(self.simulation),
+            'cosmo_sim_mass_assignment': self.cosmo_sim.mass_assignment,
+            'cosmo_sim_oversample': self.cosmo_sim.oversample,
         }
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 

@@ -62,11 +62,11 @@ def test_oversample_reduces_mas_suppression_near_k_nyquist(solver):
 
 def test_get_density_oversample_parameters_default_and_override():
     # Own Parameters instance (not the module-scoped `solver` fixture) since
-    # this test mutates parameters.simulation.oversample.
+    # this test mutates parameters.cosmo_sim.oversample.
     p = Parameters()
     p.simulation.Ncell = N
     p.simulation.Lbox = L
-    assert p.simulation.oversample == 1
+    assert p.cosmo_sim.oversample == 1
 
     s = ZeldovichApproximation(p, verbose=False, seed=SEED)
     s.generate_initial_conditions()
@@ -75,7 +75,7 @@ def test_get_density_oversample_parameters_default_and_override():
     explicit_1 = s.get_density(Z, mass_assignment='CIC', oversample=1)
     np.testing.assert_allclose(default, explicit_1, rtol=1e-4, atol=1e-6)
 
-    p.simulation.oversample = 4
+    p.cosmo_sim.oversample = 4
     default_4 = s.get_density(Z, mass_assignment='CIC')
     explicit_4 = s.get_density(Z, mass_assignment='CIC', oversample=4)
     np.testing.assert_allclose(default_4, explicit_4, rtol=1e-4, atol=1e-6)

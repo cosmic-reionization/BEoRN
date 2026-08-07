@@ -5,7 +5,7 @@ import numpy as np
 
 from .base import BaseLoader
 from ..structs import Parameters, HaloCatalog
-from ..lpt import ZeldovichApproximation, LPTBase
+from ..lpt import SecondOrderLPT, LPTBase
 from ..lpt.chmf import CHMF, CHMFSampler
 from ..lpt.linear_power import get_power_spectrum
 
@@ -13,9 +13,10 @@ from ..lpt.linear_power import get_power_spectrum
 class LPTHaloLoader(BaseLoader):
     """Generate halo catalogs from an LPT density field via the CHMF.
 
-    The loader pairs a Lagrangian Perturbation Theory solver (default:
-    Zel'dovich Approximation) with a :class:`~beorn.lpt.chmf.CHMFSampler` to
-    sample halos from the conditional halo mass function at each snapshot.
+    The loader pairs a Lagrangian Perturbation Theory solver (default: 2LPT,
+    matching ``parameters.cosmo_sim.density_source``'s own default) with a
+    :class:`~beorn.lpt.chmf.CHMFSampler` to sample halos from the conditional
+    halo mass function at each snapshot.
 
     Density fields are produced deterministically by the LPT solver (seeded at
     construction).  Halo positions within each cell are drawn from a per-snapshot
@@ -25,8 +26,8 @@ class LPTHaloLoader(BaseLoader):
     Args:
         parameters:   BEoRN :class:`~beorn.structs.Parameters` object.
         lpt_solver:   Pre-built :class:`~beorn.lpt.LPTBase` instance.  If
-                      ``None`` (default) a :class:`~beorn.lpt.ZeldovichApproximation`
-                      solver is built automatically.
+                      ``None`` (default) a :class:`~beorn.lpt.SecondOrderLPT`
+                      (2LPT) solver is built automatically.
         ps_method:    Power spectrum method used to build the (single, shared
                       — issue #42, O10) :class:`~beorn.lpt.linear_power.PowerSpectrum`
                       instance passed to both the default solver and the CHMF
@@ -35,16 +36,24 @@ class LPTHaloLoader(BaseLoader):
                       instead, so both stay on the same cosmology.
         seed:         RNG seed for the LPT initial conditions
                       (default ``42``).
+        halo_seed:    RNG seed for halo-catalog generation (Poisson draws +
+                      intra-cell position sampling) — independent of ``seed``
+                      (the LPT IC seed) so the two never conflict. ``None``
+                      (default) reads ``parameters.halo_sim.random_seed``.
         R_env:        Environmental smoothing scale in Mpc/h passed to
                       :meth:`~beorn.lpt.chmf.CHMFSampler.sample`.  ``None``
-                      (default) uses the cell size as the conditioning scale.
-        n_mass_bins:  Number of log-spaced mass bins for the CHMF sampling
-                      (default ``40``).
-        delta_c:      Linear collapse threshold (default ``1.686``).
-        hmf_model:    ``'PS'`` (default) — pure EPS conditional sampling.
-                      ``'ST'`` — Barkana & Loeb (2004) hybrid: rescale so the
-                      mean mass function matches Sheth-Tormen (as in
-                      21cmFAST-family codes).
+                      (default) reads ``parameters.halo_sim.R_env`` (itself
+                      ``None`` — cell size is used as the conditioning scale).
+        n_mass_bins:  Number of log-spaced mass bins for the CHMF sampling.
+                      ``None`` (default) reads ``parameters.halo_sim.n_mass_bins``.
+        delta_c:      Linear collapse threshold. ``None`` (default) reads
+                      ``parameters.halo_sim.delta_c``.
+        hmf_model:    ``'PS'`` — pure EPS conditional sampling. ``'ST'`` —
+                      Barkana & Loeb (2004) hybrid: rescale so the mean mass
+                      function matches Sheth-Tormen (as in 21cmFAST-family
+                      codes). ``None`` (default) reads
+                      ``parameters.halo_sim.hmf_model`` (itself ``'ST'`` by
+                      default).
         **ps_kwargs:  Extra keyword arguments forwarded to the power spectrum
                       constructor (e.g. ``wiggle=True``).
     """
@@ -55,16 +64,17 @@ class LPTHaloLoader(BaseLoader):
         lpt_solver: LPTBase | None = None,
         ps_method: str = 'eisenstein_hu',
         seed: int = 42,
+        halo_seed: int | None = None,
         R_env: float | None = None,
-        n_mass_bins: int = 40,
-        delta_c: float = 1.686,
-        hmf_model: str = 'PS',
+        n_mass_bins: int | None = None,
+        delta_c: float | None = None,
+        hmf_model: str | None = None,
         **ps_kwargs,
     ):
         super().__init__(parameters)
-        self.R_env = R_env
-        self.n_mass_bins = n_mass_bins
-        self._base_seed = seed
+        self.R_env = R_env if R_env is not None else parameters.halo_sim.R_env
+        self.n_mass_bins = n_mass_bins if n_mass_bins is not None else parameters.halo_sim.n_mass_bins
+        self._base_seed = halo_seed if halo_seed is not None else parameters.halo_sim.random_seed
 
         # issue #42, O10: build ONE PowerSpectrum instance and share it with
         # the CHMF below, instead of each independently constructing its own
@@ -74,7 +84,7 @@ class LPTHaloLoader(BaseLoader):
         # cosmologies.
         if lpt_solver is None:
             shared_ps = get_power_spectrum(ps_method, parameters, **ps_kwargs)
-            self.lpt_solver = ZeldovichApproximation(
+            self.lpt_solver = SecondOrderLPT(
                 parameters, power_spectrum=shared_ps, seed=seed, verbose=False,
             )
         else:
@@ -83,15 +93,6 @@ class LPTHaloLoader(BaseLoader):
 
         chmf = CHMF(parameters, power_spectrum=shared_ps, delta_c=delta_c)
         self.sampler = CHMFSampler(parameters, chmf=chmf, hmf_model=hmf_model)
-
-        # Top-hat scale for linear density field conditioning.
-        # Using the sphere-equivalent radius for the cell volume so that
-        # Var[delta_env] = sigma^2(M_env, z) exactly (EPS requirement).
-        if R_env is not None:
-            self._R_tophat = R_env
-        else:
-            cell = parameters.Lbox_hunits / parameters.simulation.Ncell
-            self._R_tophat = (3.0 / (4.0 * np.pi)) ** (1.0 / 3.0) * cell
 
     # ------------------------------------------------------------------
     # BaseLoader interface
@@ -135,7 +136,9 @@ class LPTHaloLoader(BaseLoader):
         # Use the linear density field (IRFFT of D1*delta_k) rather than CIC
         # particle painting to avoid shot noise, which would produce extreme
         # overdensities in individual cells and contaminate the CHMF near M_env.
-        delta = self.lpt_solver.get_linear_density(z, R_tophat=self._R_tophat)
+        # Raw field -- CHMFSampler.sample smooths it to the conditioning
+        # scale internally (issue #54).
+        delta = self.lpt_solver.get_linear_density(z)
         # XOR with index for a unique but reproducible per-snapshot seed
         sample_seed = self._base_seed ^ redshift_index
         return self.sampler.sample(

@@ -12,9 +12,7 @@ simulation:
   cores: 4                      # cores for shared-memory parallelization (1 disables it)
   store_grids: ['delta_b', 'Grid_Temp', 'Grid_xHII', 'Grid_xal']  # base fields written to the output HDF5 file
   degrade_resolution: 1          # block-average N-body density grids by this factor before painting
-  oversample: 1                  # internal resolution factor, downsampled back to Ncell: LPTBase.get_density's painting mesh, and py21cmfast's DIM grid (Py21cmFastLoader)
   use_hunits: true                # Lbox above is in Mpc/h, not physical Mpc (default is false: physical Mpc)
-  mass_assignment: 'CIC'          # default scheme for get_density()/HaloCatalog.to_mesh(): NGP, CIC, TSC, or PCS
   spreading_pixel_threshold: -1   # merge connected regions below this many pixels when spreading excess ionization (-1 = use built-in default)
   spreading_subgrid_approximation: true  # use the subgrid approximation in distance_transform_edt when spreading excess ionization
   minimum_grid_size_heat: 4       # minimum grid size used for the heating kernel
@@ -97,11 +95,26 @@ cosmology:
   ns: 0.96                       # scalar spectral index
 
 cosmo_sim:
-  random_seed: 12345             # random seed for halo catalog / density field generation (read directly by LPTHaloLoader here)
-  halo_catalogs_thesan_mass_assignment: 'CIC'  # mass-assignment scheme for Thesan halo catalogs: NGP or CIC (unused by this script's LPTHaloLoader)
+  density_source: '2LPT'          # which mechanism produces the density field: '1LPT', '2LPT', '3LPT', or 'external'
+                                  # (metadata only -- this script builds a SecondOrderLPT solver directly, matching this value)
+  mass_assignment: 'CIC'          # scheme for painting the LPT-generated density field: NGP, CIC, TSC, or PCS
+  oversample: 1                   # internal resolution factor, downsampled back to Ncell (LPTBase.get_density's painting mesh)
+  random_seed: 12345             # random seed for density-field generation (read directly as the LPT IC seed by this script)
   snapshot_redshifts: [20.0, 19.5, 19.0, 18.5, 18.0, 17.5, 17.0, 16.5, 16.0,
                        15.5, 15.0, 14.5, 14.0, 13.5, 13.0, 12.5, 12.0, 11.5,
                        11.0, 10.5, 10.0, 9.5, 9.0, 8.5, 8.0, 7.5, 7.0, 6.5,
                        6.0, 5.5]  # redshifts of cosmo-sim snapshots to paint (null = use the full solver.redshifts grid)
   file_root: null                # path to external N-body input files; unused by this script's LPTHaloLoader
                                   # (only relevant to N-body loaders, e.g. ThesanLoader/Py21cmFastLoader)
+
+halo_sim:
+  halo_source: 'CHMF'             # how halo catalogs are generated: 'CHMF' (conditional halo mass function sampling) or 'external'
+  hmf_model: 'ST'                 # only meaningful when halo_source is 'CHMF': 'PS' (pure EPS) or 'ST' (Sheth-Tormen calibrated, 21cmFAST-style)
+  delta_c: 1.686                  # linear collapse threshold used by the CHMF
+  R_env: null                     # environmental smoothing scale in Mpc/h for CHMF conditioning (null = use the cell size)
+  n_mass_bins: 40                 # number of log-spaced mass bins for CHMF sampling
+  halo_mass_min: 1.0e+8           # lower bound of the CHMF sampling mass range, in Msun (independent of source.halo_mass_min)
+  halo_mass_max: 1.0e+16          # soft upper bound of the CHMF sampling mass range, in Msun (the real ceiling is set by M_env/box size)
+  random_seed: 12345              # RNG seed for halo-catalog generation (Poisson draws + intra-cell positions), independent of cosmo_sim.random_seed
+                                  # (read directly as this script's LPTHaloLoader halo_seed)
+  mass_assignment: 'NGP'          # scheme for painting halo positions (HaloCatalog.to_mesh) -- leave at NGP, see HaloSimParameters docstring

@@ -49,3 +49,23 @@ def test_to_mesh_deconvolve_true_matches_function(param):
     expected = deconvolve_mas(raw, L, 'NGP')
 
     np.testing.assert_allclose(forced, expected, rtol=1e-5, atol=1e-6)
+
+
+# ── halo_sim.mass_assignment (parameters restructuring) ───────────────────────
+
+def test_halo_sim_mass_assignment_defaults_to_ngp(param):
+    assert param.halo_sim.mass_assignment == 'NGP'
+
+
+def test_to_mesh_reads_halo_sim_mass_assignment_default(param):
+    """to_mesh() must actually read halo_sim.mass_assignment, not just default
+    to a hardcoded 'NGP' literal internally -- overriding the field should
+    change the painted mesh."""
+    catalog = _catalog(param, n=300, seed=3)
+    ngp = catalog.to_mesh(deconvolve=False)
+
+    param.halo_sim.mass_assignment = 'CIC'
+    cic = catalog.to_mesh(deconvolve=False)
+
+    assert not np.allclose(ngp, cic)
+    assert ngp.sum() == pytest.approx(cic.sum(), rel=1e-4)
