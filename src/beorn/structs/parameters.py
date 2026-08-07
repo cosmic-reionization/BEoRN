@@ -549,11 +549,30 @@ class HaloSimParameters:
     hmf_model: Literal['PS', 'ST'] = 'ST'
     """Only meaningful when :attr:`halo_source` is ``'CHMF'``. ``'PS'`` —
     pure EPS conditional sampling (volume average = Press-Schechter).
-    ``'ST'`` (default) — Barkana & Loeb (2004) hybrid rescaling so the volume
-    average matches Sheth-Tormen (as in 21cmFAST-family codes). Read as the
+    ``'ST'`` (default) — conditional sampling calibrated so the volume
+    average matches Sheth-Tormen instead (as in 21cmFAST-family codes); see
+    :attr:`chmf_recipe` for *how* that calibration is done. Read as the
     default by :class:`~beorn.lpt.chmf.CHMFSampler`/
     :class:`~beorn.load_input_data.LPTHaloLoader` whenever their own
     ``hmf_model`` argument isn't given explicitly."""
+
+    chmf_recipe: Literal['BarkanaLoeb2004', 'MovingBarrier'] = 'BarkanaLoeb2004'
+    """Only meaningful when :attr:`hmf_model` is ``'ST'`` (silently ignored
+    for ``'PS'``, which has no ST-calibration route to choose between).
+    Case-insensitive. ``'BarkanaLoeb2004'`` (default) --
+    :meth:`~beorn.lpt.chmf.CHMF.hmf_chmf_field` (pure PS-conditional shape)
+    rescaled by the unconditional ST/PS ratio (Barkana & Loeb 2004, ApJ 609,
+    474, "Unusually Large Fluctuations in the Statistics of Galaxy Formation
+    at High Redshift" -- not to be confused with Barkana & Loeb 2005, ApJ
+    624, L65, a different paper). ``'MovingBarrier'`` --
+    :meth:`~beorn.lpt.chmf.CHMF.hmf_st_movingbarrier`, the direct
+    ellipsoidal-collapse moving-barrier conditional solution (Sheth & Tormen
+    2002), as implemented by Davies, Mesinger & Murray (2025, 21cmFASTv4) --
+    already ST-calibrated on its own, so its conditional *shape* need not
+    match the Barkana & Loeb hybrid's (which inherits its delta-dependence
+    entirely from the pure-PS conditional formula). Read as the default by
+    :class:`~beorn.lpt.chmf.CHMFSampler` whenever its own ``chmf_recipe``
+    argument isn't given explicitly."""
 
     delta_c: float = 1.686
     """Linear collapse threshold used by :class:`~beorn.lpt.chmf.CHMF`/

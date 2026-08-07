@@ -204,6 +204,108 @@ class CHMF:
 
         return (self.rho_m / M) * abs(dln_sigma_eff_dlnM) * f_nu
 
+    def hmf_st_movingbarrier(
+        self,
+        M: float,
+        delta_field: np.ndarray,
+        sigma2_env: float,
+        z: float,
+    ) -> np.ndarray:
+        """Sheth-Tormen conditional dn/d ln M via a moving-barrier excursion-set
+        solution (Sheth & Tormen 2002), as implemented by Davies, Mesinger &
+        Murray (2025, 21cmFASTv4) eqs. 2-4.
+
+        Unlike :meth:`hmf_chmf_field` rescaled by :meth:`st_ps_ratio` (the
+        Barkana & Loeb 2004 hybrid: the pure-PS conditional *shape* times the
+        *unconditional* ST/PS ratio, so its delta-dependence is inherited
+        entirely from PS), this solves the conditional first-crossing problem
+        directly for the ellipsoidal-collapse moving barrier
+        ``B(z, sigma) = sqrt(a) delta_crit(z) (1 + beta (a delta_crit(z)^2 / sigma^2)^-alpha)``
+        (Jenkins et al. 2001 parameters ``a=0.7, alpha=0.81, beta=0.34``),
+        so its delta-dependence need not match PS's at all -- already
+        ST-calibrated on its own, with no separate rescaling ratio needed
+        (see :attr:`beorn.structs.HaloSimParameters.chmf_recipe`).
+
+        Works entirely in Davies et al.'s own convention -- sigma^2 at z=0
+        with a redshift-dependent barrier ``delta_crit(z) = delta_c/D(z)``,
+        rather than BEoRN's own (z-evolved sigma^2, fixed delta_c) convention
+        used everywhere else in this class -- ``delta_field``/``sigma2_env``
+        (both BEoRN-native, z-evolved, i.e. the same inputs
+        :meth:`hmf_chmf_field` takes) are converted internally.
+
+        Args:
+            M:           Halo mass in M_sun (scalar).
+            delta_field: **z-evolved** linear overdensity at each cell (BEoRN's
+                         own convention -- same input as :meth:`hmf_chmf_field`),
+                         any shape.
+            sigma2_env:  **z-evolved** sigma^2 on the environment scale (BEoRN's
+                         own convention -- same as :meth:`hmf_chmf_field`'s
+                         ``sigma2_env``).
+            z:           Redshift.
+
+        Returns:
+            dn/d ln M at each cell, same shape as ``delta_field``, in
+            (Mpc/h)^{-3}. Zero where the (z=0-convention) sigma^2(M) does not
+            exceed the converted conditioning sigma^2 (no valid conditional
+            solution).
+
+        Note:
+            Only implemented for this numpy validation-reference class -- not
+            yet available for the differentiable
+            :func:`conditional_dndlnm_diff`/:func:`halo_field_diff`
+            (jax/torch) expectation-mode path.
+        """
+        import math
+        a, alpha, beta = 0.7, 0.81, 0.34  # Jenkins et al. (2001), as used by Davies et al. (2025)
+
+        D = float(self._D1(z))
+        delta_crit_z = self.delta_c / D  # Davies et al.'s own z-dependent barrier value
+
+        x = float(self.sigma2_z0(M))  # Davies et al.'s "sigma^2" -- z=0 convention
+        sigma2_cond_z0 = np.asarray(sigma2_env, dtype=float) / D ** 2
+        delta_cond_z0 = np.asarray(delta_field, dtype=float) / D
+
+        S_eff = x - sigma2_cond_z0
+        valid = S_eff > 0
+        S_safe = np.where(valid, S_eff, 1.0)
+
+        # B(z, sigma) - eq. 2 - and its Taylor-expansion correction T - eq. 4.
+        # g(x') = B(x') - delta_crit_z = c0_minus + c1 * x'^alpha is a pure
+        # power law in x' = sigma^2 (delta_crit_z fixed at this z), so its
+        # n-th d/dx'^n derivative has a simple closed form (falling-factorial
+        # coefficient); evaluated at x' = x, the halo's own sigma^2 (eq. 4's
+        # own argument list), not at sigma2_cond_z0.
+        c1 = math.sqrt(a) * delta_crit_z * beta * (a * delta_crit_z ** 2) ** (-alpha)
+        c0_minus = math.sqrt(a) * delta_crit_z - delta_crit_z  # (c0 - delta_crit_z)
+        B_x = math.sqrt(a) * delta_crit_z * (1.0 + beta * (a * delta_crit_z ** 2 / x) ** (-alpha))
+
+        T = np.zeros_like(S_eff, dtype=float)
+        falling = 1.0  # running alpha*(alpha-1)*...*(alpha-n+1); empty product (n=0) = 1
+        fact = 1.0
+        for n in range(6):
+            if n == 0:
+                deriv_n = c0_minus + c1 * x ** alpha
+            else:
+                falling *= (alpha - (n - 1))
+                deriv_n = c1 * falling * x ** (alpha - n)
+                fact *= n
+            T = T + (-S_eff) ** n / fact * deriv_n
+
+        sigma_x = math.sqrt(x)
+        # d(sigma)/dM via central finite difference in ln M (z=0 convention),
+        # matching hmf_ps/hmf_chmf_field's own numerical-derivative style.
+        eps = 0.01
+        sigma_p = np.sqrt(self.sigma2_z0(M * (1.0 + eps)))
+        sigma_m = np.sqrt(self.sigma2_z0(M * (1.0 - eps)))
+        dsigma_dM = (sigma_p - sigma_m) / (2.0 * eps * M)
+
+        dn_dM = ((self.rho_m / (np.sqrt(2.0 * np.pi) * M)) * np.abs(T) * np.abs(dsigma_dM)
+                * (2.0 * sigma_x) / S_safe ** 1.5
+                * np.exp(-(B_x - delta_cond_z0) ** 2 / (2.0 * S_safe)))
+        dn_dM = np.where(valid, dn_dM, 0.0)
+
+        return M * dn_dM  # dn/dlnM = M * dn/dM, matching hmf_chmf_field's own return convention
+
 
 # ============================================================
 # CHMFSampler
@@ -231,8 +333,23 @@ class CHMFSampler:
                      Sheth-Tormen instead, as done by 21cmFAST-family codes.
                      ``None`` (default) reads ``parameters.halo_sim.hmf_model``
                      (itself ``'ST'`` by default).
+        chmf_recipe: Only meaningful when ``hmf_model='ST'`` (silently
+                     ignored for ``'PS'``, which has no ST-calibration route
+                     to choose between). Case-insensitive.
+                     ``'BarkanaLoeb2004'`` (default) --
+                     :meth:`CHMF.hmf_chmf_field` (pure PS-conditional shape)
+                     rescaled by the unconditional ST/PS ratio (Barkana &
+                     Loeb 2004, ApJ 609, 474 -- not to be confused with
+                     Barkana & Loeb 2005, ApJ 624, L65, a different paper).
+                     ``'MovingBarrier'`` -- :meth:`CHMF.hmf_st_movingbarrier`,
+                     the direct moving-barrier conditional solution (Davies,
+                     Mesinger & Murray 2025), already ST-calibrated on its
+                     own (no separate rescaling ratio applied). ``None``
+                     (default) reads ``parameters.halo_sim.chmf_recipe``.
         **ps_kwargs: Forwarded to the power spectrum constructor.
     """
+
+    _CHMF_RECIPES = {'barkanaloeb2004', 'movingbarrier'}
 
     def __init__(
         self,
@@ -241,6 +358,7 @@ class CHMFSampler:
         ps_method: str = 'eisenstein_hu',
         delta_c: float | None = None,
         hmf_model: str | None = None,
+        chmf_recipe: str | None = None,
         **ps_kwargs,
     ):
         self.parameters = parameters
@@ -254,12 +372,29 @@ class CHMFSampler:
             )
         self.hmf_model = hmf_model
 
+        chmf_recipe = (chmf_recipe if chmf_recipe is not None
+                       else parameters.halo_sim.chmf_recipe)
+        recipe_key = chmf_recipe.replace('_', '').lower()
+        if recipe_key not in self._CHMF_RECIPES:
+            raise ValueError(
+                f"Unknown chmf_recipe {chmf_recipe!r}. "
+                f"Choose 'BarkanaLoeb2004' or 'MovingBarrier' (case-insensitive)."
+            )
+        self.chmf_recipe = chmf_recipe
+        # MovingBarrier is already ST-calibrated on its own -- applying the
+        # unconditional ST/PS ratio on top would double-count the calibration.
+        self._use_moving_barrier = (hmf_model == 'ST' and recipe_key == 'movingbarrier')
+        self._hmf_field_fn = (self.chmf.hmf_st_movingbarrier if self._use_moving_barrier
+                              else self.chmf.hmf_chmf_field)
+
     def _calibration_ratios(self, M_centers: np.ndarray, z: float) -> np.ndarray:
         """Per-mass-bin calibration factor for the expected counts.
 
-        1 for pure EPS ('PS'); the unconditional ST/PS ratio for 'ST'.
+        1 for pure EPS ('PS') and for the already-self-calibrated
+        MovingBarrier recipe; the unconditional ST/PS ratio for the
+        BarkanaLoeb2004 recipe (the only one that needs it).
         """
-        if self.hmf_model == 'ST':
+        if self.hmf_model == 'ST' and not self._use_moving_barrier:
             return np.asarray(self.chmf.st_ps_ratio(M_centers, z), dtype=float)
         return np.ones(len(M_centers))
 
@@ -352,13 +487,15 @@ class CHMFSampler:
                           z: float, d_grid: np.ndarray | None) -> np.ndarray:
         """Conditional dn/dlnM field via the O6 tabulate-then-interpolate path.
 
-        Falls back to the exact per-cell :meth:`CHMF.hmf_chmf_field` call
-        when ``d_grid`` is ``None`` (``n_delta_nodes=None`` in the public
-        methods) — kept as the validation reference and an explicit opt-out.
+        Falls back to the exact per-cell evaluation (:attr:`_hmf_field_fn` --
+        :meth:`CHMF.hmf_chmf_field` or :meth:`CHMF.hmf_st_movingbarrier`,
+        per :attr:`chmf_recipe`) when ``d_grid`` is ``None``
+        (``n_delta_nodes=None`` in the public methods) — kept as the
+        validation reference and an explicit opt-out.
         """
         if d_grid is None:
-            return self.chmf.hmf_chmf_field(M, delta_env, sigma2_env, z)
-        lam_grid = self.chmf.hmf_chmf_field(M, d_grid, sigma2_env, z)
+            return self._hmf_field_fn(M, delta_env, sigma2_env, z)
+        lam_grid = self._hmf_field_fn(M, d_grid, sigma2_env, z)
         return np.interp(delta_env.ravel(), d_grid, lam_grid).reshape(delta_env.shape)
 
     def _mass_bins(self, M_env: float, n_mass_bins: int):

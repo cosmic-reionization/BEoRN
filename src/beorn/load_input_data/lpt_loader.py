@@ -60,11 +60,20 @@ class LPTHaloLoader(BaseLoader):
         delta_c:      Linear collapse threshold. ``None`` (default) reads
                       ``parameters.halo_sim.delta_c``.
         hmf_model:    ``'PS'`` — pure EPS conditional sampling. ``'ST'`` —
-                      Barkana & Loeb (2004) hybrid: rescale so the mean mass
+                      conditional sampling calibrated so the mean mass
                       function matches Sheth-Tormen (as in 21cmFAST-family
-                      codes). ``None`` (default) reads
-                      ``parameters.halo_sim.hmf_model`` (itself ``'ST'`` by
-                      default).
+                      codes); see ``chmf_recipe`` for *how*. ``None``
+                      (default) reads ``parameters.halo_sim.hmf_model``
+                      (itself ``'ST'`` by default).
+        chmf_recipe:  Only meaningful when ``hmf_model='ST'``.
+                      Case-insensitive. ``'BarkanaLoeb2004'`` (default) --
+                      pure PS-conditional shape rescaled by the unconditional
+                      ST/PS ratio. ``'MovingBarrier'`` -- the direct
+                      ellipsoidal-collapse moving-barrier conditional
+                      solution (Davies, Mesinger & Murray 2025), already
+                      ST-calibrated on its own. ``None`` (default) reads
+                      ``parameters.halo_sim.chmf_recipe``. See
+                      :class:`~beorn.lpt.chmf.CHMFSampler` for details.
         **ps_kwargs:  Extra keyword arguments forwarded to the power spectrum
                       constructor (e.g. ``wiggle=True``).
     """
@@ -80,6 +89,7 @@ class LPTHaloLoader(BaseLoader):
         n_mass_bins: int | None = None,
         delta_c: float | None = None,
         hmf_model: str | None = None,
+        chmf_recipe: str | None = None,
         **ps_kwargs,
     ):
         super().__init__(parameters)
@@ -120,7 +130,8 @@ class LPTHaloLoader(BaseLoader):
             )
 
         chmf = CHMF(parameters, power_spectrum=shared_ps, delta_c=delta_c)
-        self.sampler = CHMFSampler(parameters, chmf=chmf, hmf_model=hmf_model)
+        self.sampler = CHMFSampler(parameters, chmf=chmf, hmf_model=hmf_model,
+                                   chmf_recipe=chmf_recipe)
 
     # ------------------------------------------------------------------
     # BaseLoader interface
