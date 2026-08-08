@@ -18,7 +18,7 @@ from beorn.structs import Parameters
 from beorn.lpt import (
     ZeldovichApproximation, SecondOrderLPT,
     lpt_ics, lpt_displacement, lpt_velocity, lpt_linear_density, lpt_density,
-    CHMF, CHMFSampler, halo_field_diff,
+    CHMF, CHMFSampler, halo_field_diff, conditional_dndlnm_diff,
 )
 from beorn.particle_mapping import paint_mesh
 
@@ -212,6 +212,81 @@ def test_halo_field_diff_stochastic_gradient(param, theta, chmf_setup):
     fd = (total_mass(theta['sigma_8'] + h)
           - total_mass(theta['sigma_8'] - h)) / (2 * h)
     assert float(g) == pytest.approx(float(fd), rel=1e-5)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MovingBarrier chmf_recipe (Davies, Mesinger & Murray 2025, eqs. 2-4) —
+# differentiable port of CHMF.hmf_st_movingbarrier
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_conditional_dndlnm_diff_movingbarrier_matches_numpy_class(param, theta):
+    """chmf_recipe='MovingBarrier' (numpy backend) must reproduce
+    CHMF.hmf_st_movingbarrier exactly -- same physics, independently coded."""
+    chmf = CHMF(param)
+    M_test, z_test = 5e9, 8.0
+    cell = param.simulation.Lbox / param.simulation.Ncell
+    M_env = chmf.rho_m * cell ** 3
+    sigma2_env = float(chmf.sigma2(M_env, z_test))
+    delta_field = np.array([-0.3, 0.0, 0.5, 1.0])
+
+    ref = chmf.hmf_st_movingbarrier(M_test, delta_field, sigma2_env, z_test)
+    diff = conditional_dndlnm_diff(
+        M_test, delta_field, M_env, z_test, **theta,
+        hmf_model='ST', chmf_recipe='MovingBarrier', backend='numpy',
+    )
+    np.testing.assert_allclose(np.asarray(diff), ref, rtol=1e-3)
+
+
+def test_conditional_dndlnm_diff_movingbarrier_ignored_for_ps():
+    """chmf_recipe is only meaningful for hmf_model='ST' (mirrors
+    CHMFSampler.__init__'s identical rule) -- passing chmf_recipe='MovingBarrier'
+    with hmf_model='PS' must be silently ignored, giving the same pure-PS
+    result as the default chmf_recipe."""
+    args = (5e9, np.array([-0.2, 0.5]), 1e12, 8.0, 0.315, 0.049, 0.673, 0.963, 0.81)
+    default = conditional_dndlnm_diff(*args, hmf_model='PS', backend='numpy')
+    moving = conditional_dndlnm_diff(*args, hmf_model='PS',
+                                     chmf_recipe='MovingBarrier', backend='numpy')
+    np.testing.assert_array_equal(default, moving)
+
+
+def test_conditional_dndlnm_diff_movingbarrier_differentiable_jax(param, theta):
+    """jax.grad through the MovingBarrier recipe matches central FD."""
+    chmf = CHMF(param)
+    M_test, z_test = 5e9, 8.0
+    cell = param.simulation.Lbox / param.simulation.Ncell
+    M_env = chmf.rho_m * cell ** 3
+
+    def f(s8):
+        return conditional_dndlnm_diff(
+            M_test, jnp.asarray(0.3), M_env, z_test,
+            theta['Om'], theta['Ob'], theta['h0'], theta['ns'], s8,
+            hmf_model='ST', chmf_recipe='MovingBarrier', backend='jax',
+        )
+
+    g = jax.grad(f)(theta['sigma_8'])
+    h = 1e-4
+    fd = (f(theta['sigma_8'] + h) - f(theta['sigma_8'] - h)) / (2 * h)
+    assert float(g) == pytest.approx(float(fd), rel=1e-4)
+
+
+def test_conditional_dndlnm_diff_rejects_unknown_chmf_recipe():
+    with pytest.raises(ValueError, match="Unknown chmf_recipe"):
+        conditional_dndlnm_diff(
+            5e9, np.array([0.0]), 1e12, 8.0, 0.315, 0.049, 0.673, 0.963, 0.81,
+            hmf_model='ST', chmf_recipe='bogus', backend='numpy',
+        )
+
+
+def test_halo_field_diff_movingbarrier_recipe_runs(param, theta, chmf_setup):
+    """halo_field_diff forwards chmf_recipe through to conditional_dndlnm_diff."""
+    delta, _, _, M_env, V_cell = chmf_setup
+    field, M_centers = halo_field_diff(
+        delta, M_env, Z, **theta, cell_volume=V_cell, M_min=1e9,
+        n_mass_bins=10, weights='counts',
+        hmf_model='ST', chmf_recipe='MovingBarrier',
+    )
+    assert np.all(np.isfinite(np.asarray(field)))
+    assert np.all(M_centers > 0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -250,10 +250,10 @@ class CHMF:
             solution).
 
         Note:
-            Only implemented for this numpy validation-reference class -- not
-            yet available for the differentiable
-            :func:`conditional_dndlnm_diff`/:func:`halo_field_diff`
-            (jax/torch) expectation-mode path.
+            A differentiable (jax/torch) port of this same formula is
+            available via :func:`conditional_dndlnm_diff`/
+            :func:`halo_field_diff` with ``hmf_model='ST',
+            chmf_recipe='MovingBarrier'``.
         """
         import math
         a, alpha, beta = 0.7, 0.81, 0.34  # Jenkins et al. (2001), as used by Davies et al. (2025)
@@ -759,6 +759,7 @@ def conditional_dndlnm_diff(
     n_k=1000,
     n_nodes=512,
     hmf_model='PS',
+    chmf_recipe='BarkanaLoeb2004',
 ):
     """EPS conditional dn/dlnM — backend-generic pure function.
 
@@ -783,10 +784,19 @@ def conditional_dndlnm_diff(
         delta_c:    Linear collapse threshold.
         backend:    'numpy' (default), 'jax' or 'torch'.
         hmf_model:  ``'PS'`` (default) — pure EPS conditional.  ``'ST'`` —
-                    multiply by the unconditional ST/PS ratio (Barkana & Loeb
-                    2004 hybrid) so the volume average matches Sheth-Tormen;
-                    the ratio is a closed-form function of nu, so the result
-                    stays differentiable in all arguments.
+                    Sheth-Tormen calibrated, via whichever ``chmf_recipe`` is
+                    selected below.
+        chmf_recipe: Only meaningful when ``hmf_model='ST'`` (ignored for
+                    ``'PS'``). Case-insensitive. ``'BarkanaLoeb2004'``
+                    (default) — the pure-PS conditional shape multiplied by
+                    the unconditional ST/PS ratio (a closed-form function of
+                    nu, so the result stays differentiable in all arguments).
+                    ``'MovingBarrier'`` — the direct moving-barrier
+                    conditional solution (Davies, Mesinger & Murray 2025,
+                    eqs. 2-4; same physics as :meth:`CHMF.hmf_st_movingbarrier`,
+                    ported to be differentiable w.r.t. the cosmology,
+                    ``delta_c`` and ``delta_env``), already ST-calibrated on
+                    its own with no separate rescaling ratio applied.
 
     Returns:
         dn/dlnM per cell in (Mpc/h)^{-3}, same shape as ``delta_env``; zero
@@ -794,8 +804,19 @@ def conditional_dndlnm_diff(
     """
     import math
     from ..constants import rhoc0
-    from ..cosmo.differentiable import get_backend, device_of, as_array
+    from ..cosmo.differentiable import get_backend, device_of, as_array, growth_factor
     from ..mass_function.differentiable import sigma2_M
+
+    hmf_model_u = hmf_model.upper()
+    if hmf_model_u not in ('PS', 'ST'):
+        raise ValueError(f"Unknown hmf_model {hmf_model!r}. Choose 'PS' or 'ST'.")
+    recipe_key = chmf_recipe.replace('_', '').lower()
+    if recipe_key not in ('barkanaloeb2004', 'movingbarrier'):
+        raise ValueError(
+            f"Unknown chmf_recipe {chmf_recipe!r}. "
+            f"Choose 'BarkanaLoeb2004' or 'MovingBarrier' (case-insensitive)."
+        )
+    use_moving_barrier = (hmf_model_u == 'ST' and recipe_key == 'movingbarrier')
 
     name, xp = get_backend(backend)
     device = device_of(name, xp, delta_env, Om, Ob, h0, ns, sigma_8, delta_c)
@@ -803,6 +824,7 @@ def conditional_dndlnm_diff(
     dc = as_array(delta_c, name, xp, device)
     Om_b = as_array(Om, name, xp, device)
     h0_b = as_array(h0, name, xp, device)
+    rho_m = Om_b * rhoc0 / h0_b
 
     s2_M, dln_M = sigma2_M(M, z, Om, Ob, h0, ns, sigma_8, backend=backend,
                            n_k=n_k, n_nodes=n_nodes, return_dln_dlnM=True)
@@ -815,6 +837,60 @@ def conditional_dndlnm_diff(
     s2_M = as_array(s2_M, name, xp, device)
     dln_M = as_array(dln_M, name, xp, device)
     s2_env = as_array(s2_env, name, xp, device)
+
+    if use_moving_barrier:
+        # Direct moving-barrier conditional solution (Davies, Mesinger &
+        # Murray 2025, eqs. 2-4) — differentiable port of
+        # CHMF.hmf_st_movingbarrier. Works in their own convention (sigma^2
+        # at z=0, redshift-dependent barrier delta_crit(z) = delta_c/D(z));
+        # dln(sigma)/dlnM is z-independent (see sigma2_M's own docstring), so
+        # the z=0 and z-evolved evaluations share the same dln_M computed
+        # above -- only a fresh z=0 sigma^2(M) evaluation is needed.
+        a_mb, alpha_mb, beta_mb = 0.7, 0.81, 0.34  # Jenkins et al. (2001)
+        D1 = as_array(
+            growth_factor(1.0 / (1.0 + z), Om, backend=backend, n_nodes=n_nodes),
+            name, xp, device,
+        )
+        delta_crit_z = dc / D1
+        x = as_array(
+            sigma2_M(M, 0.0, Om, Ob, h0, ns, sigma_8, backend=backend,
+                    n_k=n_k, n_nodes=n_nodes),
+            name, xp, device,
+        )
+        sigma2_cond_z0 = s2_env / D1 ** 2
+        delta_cond_z0 = delta_env / D1
+
+        S_eff = x - sigma2_cond_z0
+        valid = S_eff > 0
+        S_safe = xp.where(valid, S_eff, xp.ones_like(S_eff))
+
+        c1 = xp.sqrt(a_mb) * delta_crit_z * beta_mb * (a_mb * delta_crit_z ** 2) ** (-alpha_mb)
+        c0_minus = delta_crit_z * (xp.sqrt(a_mb) - 1.0)
+        B_x = xp.sqrt(a_mb) * delta_crit_z * (1.0 + beta_mb * (a_mb * delta_crit_z ** 2 / x) ** (-alpha_mb))
+
+        # Taylor expansion of g(x') = B(x') - delta_crit_z about x' = x (the
+        # halo's own sigma^2), matching CHMF.hmf_st_movingbarrier exactly.
+        T = xp.zeros_like(S_eff)
+        falling = 1.0
+        fact = 1.0
+        for n in range(6):
+            if n == 0:
+                deriv_n = c0_minus + c1 * x ** alpha_mb
+            else:
+                falling *= (alpha_mb - (n - 1))
+                deriv_n = c1 * falling * x ** (alpha_mb - n)
+                fact *= n
+            T = T + (-S_eff) ** n / fact * deriv_n
+
+        sigma_x = xp.sqrt(x)
+        # d sigma / dM = (dln sigma/dlnM) * sigma / M — analytic, avoids the
+        # numpy class's finite-difference derivative.
+        dsigma_dM = dln_M * sigma_x / M
+
+        dn_dM = ((rho_m / (math.sqrt(2.0 * math.pi) * M)) * xp.abs(T) * xp.abs(dsigma_dM)
+                * (2.0 * sigma_x) / S_safe ** 1.5
+                * xp.exp(-(B_x - delta_cond_z0) ** 2 / (2.0 * S_safe)))
+        return xp.where(valid, M * dn_dM, xp.zeros_like(dn_dM))
 
     S_eff = s2_M - s2_env
     valid = S_eff > 0
@@ -830,10 +906,9 @@ def conditional_dndlnm_diff(
     f_nu = xp.where(nu_eff > 0, f_nu, zero)          # clamp collapsed cells
     f_nu = xp.where(valid, f_nu, zero)               # S_eff <= 0 -> 0
 
-    rho_m = Om_b * rhoc0 / h0_b
     result = (rho_m / M) * xp.abs(dln_sigma_eff) * f_nu
 
-    if hmf_model.upper() == 'ST':
+    if hmf_model_u == 'ST':
         # Barkana & Loeb (2004) hybrid: unconditional ST/PS ratio
         # f_ST/f_PS = A sqrt(q) (1 + (q nu2)^-p) exp(-(q-1) nu2 / 2)
         # with nu2 = (delta_c / sigma(M, z))^2 — closed form, differentiable.
@@ -843,8 +918,6 @@ def conditional_dndlnm_diff(
         ratio = (A_st * math.sqrt(q_st) * (1.0 + (q_st * nu2) ** (-p_st))
                  * xp.exp(-0.5 * (q_st - 1.0) * nu2))
         result = result * ratio
-    elif hmf_model.upper() != 'PS':
-        raise ValueError(f"Unknown hmf_model {hmf_model!r}. Choose 'PS' or 'ST'.")
 
     return result
 
@@ -866,6 +939,7 @@ def halo_field_diff(
     n_k=1000,
     n_nodes=512,
     hmf_model='PS',
+    chmf_recipe='BarkanaLoeb2004',
 ):
     """Differentiable halo field via expected-number painting (issue #42, G6).
 
@@ -908,8 +982,10 @@ def halo_field_diff(
                     ``rng.standard_normal((n_mass_bins,) + delta.shape)``.
         delta_c:    Linear collapse threshold.
         backend:    ``'numpy'`` (default), ``'jax'`` or ``'torch'``.
-        hmf_model:  ``'PS'`` (default) or ``'ST'`` (Barkana & Loeb 2004
-                    hybrid), as in :func:`conditional_dndlnm_diff`.
+        hmf_model:  ``'PS'`` (default) or ``'ST'``, as in
+                    :func:`conditional_dndlnm_diff`.
+        chmf_recipe: Only meaningful when ``hmf_model='ST'`` — see
+                    :func:`conditional_dndlnm_diff`.
 
     Returns:
         (field, M_centers) — the weighted halo field (backend array, shape of
@@ -957,7 +1033,7 @@ def halo_field_diff(
         lam = conditional_dndlnm_diff(
             float(M), delta_env, M_env, z, Om, Ob, h0, ns, sigma_8,
             delta_c=delta_c, backend=backend, n_k=n_k, n_nodes=n_nodes,
-            hmf_model=hmf_model,
+            hmf_model=hmf_model, chmf_recipe=chmf_recipe,
         ) * (dln_M[i_M] * cell_volume)
 
         n_b = lam
