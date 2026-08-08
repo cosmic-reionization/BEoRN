@@ -26,6 +26,8 @@ from beorn.precomputation.differentiable import (
     mass_accretion_diff, mass_accretion_derivative_diff, ngam_dot_ion_diff,
 )
 from beorn.astro_differentiable import f_star_halo_diff, f_esc_diff
+from beorn.differentiable_pipeline import paint_snapshot_diff, dtb_global_signal_diff
+from beorn.lpt import lpt_ics
 
 jax = pytest.importorskip('jax', reason='differentiable 21-cm tests need jax')
 import jax.numpy as jnp  # noqa: E402
@@ -358,10 +360,14 @@ N, L, Z = 16, 100.0, 9.0
 
 
 def _delta2_21(s8, ngam_amp, backend, noise, eps_halo):
-    """Differentiable toy 21-cm chain hitting every Phase 1+2 G-piece."""
-    from beorn.lpt import lpt_ics, lpt_density, lpt_linear_density
-    from beorn.lpt.chmf import halo_field_diff
+    """Differentiable toy 21-cm chain hitting every Phase 1+2 G-piece.
 
+    The per-snapshot physics (density -> EPS halo field -> painting ->
+    couplings -> dTb) is :func:`beorn.differentiable_pipeline.paint_snapshot_diff`
+    itself (issue #42 G15 multi-z driver) -- not a separately maintained
+    copy -- so this exit test and :func:`~beorn.differentiable_pipeline.dtb_global_signal_diff`
+    are provably running identical single-z physics.
+    """
     Om, Ob, h0, ns = 0.31, 0.045, 0.68, 0.97
     if backend == 'jax':
         xp = jnp
@@ -370,19 +376,8 @@ def _delta2_21(s8, ngam_amp, backend, noise, eps_halo):
         xp = torch
         noise_b = torch.as_tensor(noise)
 
-    # cosmology: ICs -> density (painted) + linear conditioning field
+    # cosmology: ICs (painted density/EPS field are computed per snapshot below)
     dk = lpt_ics(noise_b, L, Om, Ob, h0, ns, s8, backend=backend)
-    delta_b = lpt_density(dk, L, Z, Om, backend=backend)
-    cell = L / N
-    R_cell = (3.0 / (4.0 * np.pi)) ** (1.0 / 3.0) * cell
-    dlin = lpt_linear_density(dk, L, Z, Om, backend=backend, R_tophat=R_cell)
-
-    # EPS halo intensity field (G6) with reparameterised shot noise
-    M_env = 4.0 / 3.0 * np.pi * R_cell ** 3 * 2.775e11 * 0.31  # ~cell mass
-    hmesh, _ = halo_field_diff(dlin, M_env, Z, Om, Ob, h0, ns, s8,
-                               cell_volume=cell ** 3, M_min=1e9,
-                               n_mass_bins=8, weights='counts',
-                               eps=eps_halo, backend=backend)
 
     # astro: bubble radius from the photon-rate ODE (G12). Ngam_dot(z) is a
     # real function of Nion (=ngam_amp) through star-formation efficiency and
@@ -395,25 +390,12 @@ def _delta2_21(s8, ngam_amp, backend, noise, eps_halo):
                              1e8, 0.2, 1e10, 0.0, backend=backend)
     R_b = bubble_radius_diff(z_nodes, Ngam, Om, Ob, h0, backend=backend)[-1]
 
-    # painting (G7 + G8 + G11) — heating stays a fixed toy profile (the X-ray
-    # source term is out of scope for the Ngam_dot(z) builder above, see G14);
-    # ngam_amp/Nion's gradient path runs through the ionization channel only.
-    r_nodes = np.linspace(1e-3, 20.0, 60)
-    prof_T = 100.0 * np.exp(-r_nodes / 3.0)          # toy heating profile
-    prof_T_b = (xp.asarray(prof_T) if backend == 'jax'
-                else xp.as_tensor(prof_T).to(dlin.dtype))
-    xhii, _, dT = paint_fields_diff(hmesh, Z, L, R_bubble=R_b,
-                                    r_temp=r_nodes, prof_temp=prof_T_b,
-                                    backend=backend, xHII_floor=1e-4,
-                                    spread_iter=4)
-
-    # couplings + dTb (G9) — clamp kernel ringing so log(Tk) stays finite
-    dT_pos = xp.where(dT > 0, dT, xp.zeros_like(dT))
-    Tk = dT_pos + 2.0                                # adiabatic floor
-    xal = 1.0e-2 * hmesh                             # toy Ly-a coupling
-    xtot = xal * s_alpha_diff(Z, Tk, 1 - xhii, backend=backend) \
-        + x_coll_diff(Z, Tk, 1 - xhii, 1e-3, backend=backend)
-    dTb = dtb_diff(Z, Tk, xtot, delta_b, xhii, factor=27.0, backend=backend)
+    # painting (G7 + G8 + G11) + couplings + dTb (G9) — heating stays a
+    # fixed toy profile (the X-ray source term is out of scope for the
+    # Ngam_dot(z) builder above, see G14); ngam_amp/Nion's gradient path
+    # runs through the ionization channel only.
+    _, dTb, _, _ = paint_snapshot_diff(Z, dk, R_b, L, N, Om, Ob, h0, ns, s8,
+                                       eps_halo=eps_halo, backend=backend)
 
     ps, k = t2c.power_spectrum_1d(dTb, kbins=4, box_dims=L, backend=backend)
     if backend == 'jax':
@@ -426,6 +408,117 @@ def chain_inputs():
     rng = np.random.default_rng(3)
     return (rng.standard_normal((N,) * 3),
             rng.standard_normal((8,) + (N,) * 3))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G15 — multi-redshift driver (dtb_global_signal_diff)
+#
+# paint_snapshot_diff/dtb_global_signal_diff loop the single-z chain over a
+# redshift grid, solving Ngam_dot(z)/R_bubble(z) once over the whole grid
+# (not re-solved per iteration) and reducing each snapshot to its spatial
+# mean -- the differentiable counterpart of TemporalCube.global_mean.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ASTRO_DEFAULTS_G15 = dict(_ASTRO_PARAM_DEFAULTS)
+_ASTRO_DEFAULTS_G15['ns'] = 0.97
+_ASTRO_DEFAULTS_G15['sigma_8'] = 0.82
+
+
+def _history(z_grid, dk, backend, d=None):
+    d = dict(_ASTRO_DEFAULTS_G15) if d is None else d
+    return dtb_global_signal_diff(
+        z_grid, dk, L, N, d['Om'], d['Ob'], d['h0'], d['ns'], d['sigma_8'],
+        d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'],
+        d['g4'], d['halo_mass_min'], d['f0_esc'], d['Mp_esc'], d['pl_esc'],
+        backend=backend)
+
+
+def test_dtb_global_signal_diff_matches_paint_snapshot_diff_per_snapshot(chain_inputs):
+    """dtb_global_signal_diff's plumbing (Ngam/R_bubble solve + loop + stack)
+    must reproduce a direct paint_snapshot_diff call at every grid point --
+    both run the identical per-snapshot physics, so this isolates the driver's
+    own loop/indexing logic from the physics itself (already verified above
+    and via the exit test below, which now calls paint_snapshot_diff too).
+
+    A single-element z_grid can't be used here: bubble_radius_diff's
+    integrating-factor ODE (cumtrapz_static -> np.diff) needs at least two
+    nodes to define a step, so this uses the smallest grid that's actually
+    valid input to that machinery.
+    """
+    noise, _ = chain_inputs
+    dk = lpt_ics(jnp.asarray(noise), L, 0.31, 0.045, 0.68, 0.97, 0.82,
+                backend='jax')
+    d = _ASTRO_DEFAULTS_G15
+
+    z_grid = np.array([12.0, 9.0])
+    dTb_hist, xHII_hist, Tk_hist = _history(z_grid, dk, 'jax')
+
+    Ngam = ngam_dot_ion_diff(z_grid, 1e10, 0.79, d['Om'], d['Ob'], d['h0'],
+                             d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'],
+                             d['Mt'], d['g3'], d['g4'], d['halo_mass_min'],
+                             d['f0_esc'], d['Mp_esc'], d['pl_esc'], backend='jax')
+    R_b = bubble_radius_diff(z_grid, Ngam, d['Om'], d['Ob'], d['h0'], backend='jax')
+
+    for i, z in enumerate(z_grid):
+        _, dTb_direct, xhii_direct, Tk_direct = paint_snapshot_diff(
+            float(z), dk, R_b[i], L, N, d['Om'], d['Ob'], d['h0'], d['ns'],
+            d['sigma_8'], eps_halo=None, backend='jax')
+
+        assert float(dTb_hist[i]) == pytest.approx(float(jnp.mean(dTb_direct)), rel=1e-10)
+        assert float(xHII_hist[i]) == pytest.approx(float(jnp.mean(xhii_direct)), rel=1e-10)
+        assert float(Tk_hist[i]) == pytest.approx(float(jnp.mean(Tk_direct)), rel=1e-10)
+
+
+def test_dtb_global_signal_diff_multi_z_finite_and_reionizes(chain_inputs):
+    noise, _ = chain_inputs
+    dk = lpt_ics(jnp.asarray(noise), L, 0.31, 0.045, 0.68, 0.97, 0.82,
+                backend='jax')
+    z_grid = np.linspace(15.0, 6.0, 5)   # decreasing z
+    dTb_hist, xHII_hist, Tk_hist = _history(z_grid, dk, 'jax')
+
+    for hist in (dTb_hist, xHII_hist, Tk_hist):
+        assert np.all(np.isfinite(np.asarray(hist)))
+    # reionization proceeds forward in time (decreasing z): allow small
+    # wiggle from the toy chain/single realization, but not a net decrease.
+    xhii = np.asarray(xHII_hist)
+    assert xhii[-1] >= xhii[0]
+    assert np.all(np.diff(xhii) > -0.05)
+
+
+@pytest.mark.parametrize('pname', ['Nion', 'sigma_8'])
+def test_dtb_global_signal_diff_gradient_jax_and_torch(chain_inputs, pname):
+    """d(sum of the dTb history)/dθ, jax vs finite differences, torch vs jax."""
+    noise, _ = chain_inputs
+    z_grid = np.linspace(15.0, 6.0, 3)
+    d = dict(_ASTRO_DEFAULTS_G15)
+    x0 = d.pop(pname)
+
+    def S(val, backend):
+        kw = dict(d)
+        kw[pname] = val
+        if backend == 'jax':
+            noise_b = jnp.asarray(noise)
+        elif backend == 'torch':
+            noise_b = torch.as_tensor(noise)
+        else:
+            noise_b = noise
+        s8 = kw.pop('sigma_8')
+        dk = lpt_ics(noise_b, L, kw['Om'], kw['Ob'], kw['h0'], kw['ns'], s8,
+                    backend=backend)
+        kw['sigma_8'] = s8
+        dTb_hist, _, _ = _history(z_grid, dk, backend, d=kw)
+        return dTb_hist.sum()
+
+    g_jax = jax.grad(lambda v: S(v, 'jax'))(x0)
+    h = 1e-4 * x0
+    fd = (S(x0 + h, 'numpy') - S(x0 - h, 'numpy')) / (2 * h)
+    assert float(g_jax) == pytest.approx(float(fd), rel=1e-2)
+
+    if not _TORCH:
+        pytest.skip('torch not installed')
+    xt = torch.tensor(x0, dtype=torch.float64, requires_grad=True)
+    S(xt, 'torch').backward()
+    assert float(xt.grad) == pytest.approx(float(g_jax), rel=1e-4)
 
 
 @pytest.mark.skipif(not _T2C_BACKEND,
