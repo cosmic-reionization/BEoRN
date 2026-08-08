@@ -1,10 +1,12 @@
-"""Phase 2 (issue #42) differentiable 21-cm tests: G7/G8/G9/G12/G13 + exit test.
+"""Phase 2 (issue #42) differentiable 21-cm tests: G7/G8/G9/G12/G13/G14 + exit test.
 
 The exit test differentiates Δ²₂₁(k) — the power spectrum of the dTb field
 from a full differentiable chain (ICs → LPT density → EPS halo field →
-bubble/profile painting → couplings → dTb) — w.r.t. one astro parameter (the
-ionizing-photon amplitude, standing in for Nion) and one cosmology parameter
-(σ₈), in jax and torch, against central finite differences.
+Ngam_dot(z) from Nion/f_star/f_esc → bubble/profile painting → couplings →
+dTb) — w.r.t. one real astro parameter (``Nion``, via G14's
+:func:`~beorn.precomputation.differentiable.ngam_dot_ion_diff`) and one
+cosmology parameter (σ₈), in jax and torch, against central finite
+differences.
 """
 import warnings
 
@@ -21,7 +23,9 @@ from beorn.painting.differentiable import (
 from beorn.precomputation.differentiable import (
     linear_ode_solution, heat_ode_solution, bubble_radius_diff,
     sample_fst_reparam, interp_profiles_fst,
+    mass_accretion_diff, mass_accretion_derivative_diff, ngam_dot_ion_diff,
 )
+from beorn.astro_differentiable import f_star_halo_diff, f_esc_diff
 
 jax = pytest.importorskip('jax', reason='differentiable 21-cm tests need jax')
 import jax.numpy as jnp  # noqa: E402
@@ -234,6 +238,119 @@ def test_interp_profiles_fst_matches_numpy():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# G14 — real Ngam_dot(z) source terms (astro-parameter gradients)
+#
+# f_star_halo_diff/f_esc_diff/mass_accretion_diff/mass_accretion_derivative_diff/
+# ngam_dot_ion_diff are numpy/jax/torch ports of astro.f_star_Halo/astro.f_esc/
+# massaccretion.mass_accretion/massaccretion.mass_accretion_derivative/
+# helpers.Ngdot_ion's 'SED' branch — checked against those production
+# functions directly (not just "runs"), then gradient-checked in jax and
+# torch against central finite differences.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ASTRO_PARAM_DEFAULTS = dict(
+    Om=0.315, Ob=0.049, h0=0.673, Nion=5000.0,
+    f_st=0.05, Mp=2.8e11 * 0.68, g1=0.49, g2=-0.61, Mt=1e8, g3=4.0, g4=-1.0,
+    halo_mass_min=1e8, f0_esc=0.2, Mp_esc=1e10, pl_esc=0.0,
+)
+
+
+def _astro_params():
+    from beorn.structs import Parameters
+    p = Parameters()
+    for k, v in _ASTRO_PARAM_DEFAULTS.items():
+        if k in ('Om', 'Ob', 'h0'):
+            setattr(p.cosmology, k, v)
+        else:
+            setattr(p.source, k, v)
+    return p
+
+
+def test_f_star_halo_diff_matches_production():
+    from beorn.astro import f_star_Halo
+    p = _astro_params()
+    Mh = np.logspace(7, 13, 200)
+    ref = f_star_Halo(p, Mh.copy())
+    d = _ASTRO_PARAM_DEFAULTS
+    out = f_star_halo_diff(Mh, d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'],
+                           d['g3'], d['g4'], d['halo_mass_min'])
+    np.testing.assert_allclose(np.asarray(out), ref, rtol=1e-12)
+
+
+def test_f_esc_diff_matches_production():
+    from beorn.astro import f_esc
+    p = _astro_params()
+    Mh = np.logspace(7, 13, 200)
+    ref = f_esc(p, Mh.copy())
+    d = _ASTRO_PARAM_DEFAULTS
+    out = f_esc_diff(Mh, d['f0_esc'], d['Mp_esc'], d['pl_esc'])
+    np.testing.assert_allclose(np.asarray(out), ref, rtol=1e-12)
+
+
+def test_mass_accretion_diff_matches_production():
+    from beorn.precomputation.massaccretion import mass_accretion
+    p = _astro_params()
+    z_bins = np.linspace(20.0, 6.0, 30)
+    m_bins = np.array([1e10])
+    alpha_bins = np.array([0.79])
+    Mh_ref, dMh_dt_ref = mass_accretion(p, z_bins, m_bins, alpha_bins)
+
+    Mh = mass_accretion_diff(z_bins, 1e10, 0.79)
+    np.testing.assert_allclose(np.asarray(Mh), Mh_ref[0, 0], rtol=1e-12)
+
+    dMh_dt = mass_accretion_derivative_diff(Mh, 0.79, p.cosmology.Om,
+                                            p.cosmology.h0, z_bins)
+    np.testing.assert_allclose(np.asarray(dMh_dt), dMh_dt_ref[0, 0], rtol=1e-10)
+
+
+def test_ngam_dot_ion_diff_matches_production():
+    from beorn.precomputation.helpers import Ngdot_ion
+    from beorn.precomputation.massaccretion import mass_accretion
+    p = _astro_params()
+    z_bins = np.linspace(20.0, 6.0, 30)
+    m_bins = np.array([1e10])
+    alpha_bins = np.array([0.79])
+    Mh_ref, dMh_dt_ref = mass_accretion(p, z_bins, m_bins, alpha_bins)
+    ref = Ngdot_ion(p, z_bins, Mh_ref, dMh_dt_ref)[0, 0]
+
+    d = _ASTRO_PARAM_DEFAULTS
+    out = ngam_dot_ion_diff(z_bins, 1e10, 0.79, d['Om'], d['Ob'], d['h0'],
+                            d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'],
+                            d['Mt'], d['g3'], d['g4'], d['halo_mass_min'],
+                            d['f0_esc'], d['Mp_esc'], d['pl_esc'])
+    np.testing.assert_allclose(np.asarray(out), ref, rtol=1e-10)
+
+
+@pytest.mark.parametrize('pname', ['Nion', 'f_st', 'f0_esc', 'g1'])
+def test_ngam_dot_ion_diff_gradient_jax_and_torch(pname):
+    """dNgam_dot(z=6)/dθ, jax vs finite differences, torch vs jax."""
+    z_bins = np.linspace(20.0, 6.0, 30)
+    d = dict(_ASTRO_PARAM_DEFAULTS)
+    x0 = d.pop(pname)
+
+    def S(val, backend):
+        kw = dict(d)
+        kw[pname] = val
+        out = ngam_dot_ion_diff(z_bins, 1e10, 0.79, kw['Om'], kw['Ob'],
+                                kw['h0'], kw['Nion'], kw['f_st'], kw['Mp'],
+                                kw['g1'], kw['g2'], kw['Mt'], kw['g3'],
+                                kw['g4'], kw['halo_mass_min'], kw['f0_esc'],
+                                kw['Mp_esc'], kw['pl_esc'], backend=backend)
+        return out[-1]
+
+    g_jax = jax.grad(lambda v: S(v, 'jax'))(x0)
+    h = 1e-4 * x0
+    fd = (S(x0 + h, 'numpy') - S(x0 - h, 'numpy')) / (2 * h)
+    assert float(g_jax) == pytest.approx(float(fd), rel=5e-3)
+
+    if not _TORCH:
+        pytest.skip('torch not installed')
+    xt = torch.tensor(x0, dtype=torch.float64, requires_grad=True)
+    S(xt, 'torch').backward()
+    assert float(xt.grad) == pytest.approx(float(g_jax), rel=1e-6)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Phase 2 exit test — dΔ²₂₁/dθ, one astro + one cosmology parameter
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -267,17 +384,24 @@ def _delta2_21(s8, ngam_amp, backend, noise, eps_halo):
                                n_mass_bins=8, weights='counts',
                                eps=eps_halo, backend=backend)
 
-    # astro: bubble radius from the photon-rate ODE (G12), amp ~ Nion
+    # astro: bubble radius from the photon-rate ODE (G12). Ngam_dot(z) is a
+    # real function of Nion (=ngam_amp) through star-formation efficiency and
+    # escape fraction (G14) now, not a bare amplitude — one representative
+    # (mass, alpha) bin, param.yaml's defaults for the shape parameters not
+    # under test.
     z_nodes = np.linspace(25.0, Z, 30)
-    Ngam = ngam_amp * (1.0e51 * (1 + xp.zeros(z_nodes.size,
-                                              dtype=dlin.dtype)))
+    Ngam = ngam_dot_ion_diff(z_nodes, 1e10, 0.79, Om, Ob, h0, ngam_amp,
+                             0.05, 2.8e11 * h0, 0.49, -0.61, 1e8, 4.0, -1.0,
+                             1e8, 0.2, 1e10, 0.0, backend=backend)
     R_b = bubble_radius_diff(z_nodes, Ngam, Om, Ob, h0, backend=backend)[-1]
 
-    # painting (G7 + G8 + G11)
+    # painting (G7 + G8 + G11) — heating stays a fixed toy profile (the X-ray
+    # source term is out of scope for the Ngam_dot(z) builder above, see G14);
+    # ngam_amp/Nion's gradient path runs through the ionization channel only.
     r_nodes = np.linspace(1e-3, 20.0, 60)
     prof_T = 100.0 * np.exp(-r_nodes / 3.0)          # toy heating profile
-    prof_T_b = ngam_amp * (xp.asarray(prof_T) if backend == 'jax'
-                           else xp.as_tensor(prof_T).to(dlin.dtype))
+    prof_T_b = (xp.asarray(prof_T) if backend == 'jax'
+                else xp.as_tensor(prof_T).to(dlin.dtype))
     xhii, _, dT = paint_fields_diff(hmesh, Z, L, R_bubble=R_b,
                                     r_temp=r_nodes, prof_temp=prof_T_b,
                                     backend=backend, xHII_floor=1e-4,
@@ -306,17 +430,21 @@ def chain_inputs():
 
 @pytest.mark.skipif(not _T2C_BACKEND,
                     reason='tools21cm without differentiable backend')
-@pytest.mark.parametrize('pname,x0', [('sigma_8', 0.82), ('ngam_amp', 1.0)])
+@pytest.mark.parametrize('pname,x0', [('sigma_8', 0.82), ('ngam_amp', 5000.0)])
 def test_exit_grad_jax_21cm(chain_inputs, pname, x0):
     noise, eps_halo = chain_inputs
 
     def S(val):
         s8 = val if pname == 'sigma_8' else 0.82
-        amp = val if pname == 'ngam_amp' else 1.0
+        amp = val if pname == 'ngam_amp' else 5000.0
         return _delta2_21(s8, amp, 'jax', noise, eps_halo)
 
     g = jax.grad(S)(x0)
-    h = 3e-4 * x0
+    # ngam_amp's chain is more nonlinear now (real f_star/f_esc physics, not a
+    # bare amplitude — G14), so central differences need a smaller relative
+    # step than sigma_8's to stay within the finite-difference truncation
+    # tolerance below.
+    h = (3e-4 if pname == 'sigma_8' else 1e-5) * x0
     fd = (S(x0 + h) - S(x0 - h)) / (2 * h)
     assert float(g) == pytest.approx(float(fd), rel=5e-3)
 
@@ -326,9 +454,9 @@ def test_exit_grad_jax_21cm(chain_inputs, pname, x0):
 def test_exit_grad_torch_matches_jax_21cm(chain_inputs):
     noise, eps_halo = chain_inputs
     g_jax = float(jax.grad(
-        lambda a: _delta2_21(0.82, a, 'jax', noise, eps_halo))(1.0))
+        lambda a: _delta2_21(0.82, a, 'jax', noise, eps_halo))(5000.0))
 
-    amp = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
+    amp = torch.tensor(5000.0, dtype=torch.float64, requires_grad=True)
     out = _delta2_21(0.82, amp, 'torch', noise, eps_halo)
     out.backward()
     assert float(amp.grad) == pytest.approx(g_jax, rel=1e-4)

@@ -172,3 +172,22 @@ def hubble_E(z, Om, backend='numpy'):
     z = as_array(z, name, xp, device)
     Om = as_array(Om, name, xp, device)
     return xp.sqrt(Om * (1.0 + z) ** 3 + 1.0 - Om)
+
+
+def hubble_per_yr(z, Om, h0, backend='numpy'):
+    """Hubble parameter [yr⁻¹], flat LCDM.
+
+    Differentiable counterpart of :func:`.background.hubble_per_yr` — same
+    ``h0 * 100 * sec_per_year/km_per_Mpc`` unit conversion, built on
+    :func:`hubble_E` instead of :func:`.background.dark_energy_density_factor`,
+    so (like :func:`hubble_E`) this is flat-LCDM only — the production
+    version's CPL ``w0``/``wa`` dark-energy support isn't carried over here,
+    the same pre-existing limitation :func:`.precomputation.differentiable.bubble_radius_diff`
+    already has via its own use of :func:`hubble_E`.
+    """
+    from ..constants import sec_per_year, km_per_Mpc
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, z, Om, h0)
+    h0 = as_array(h0, name, xp, device)
+    return h0 * 100.0 * sec_per_year / km_per_Mpc * hubble_E(z, Om, backend=backend)
