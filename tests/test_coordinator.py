@@ -87,6 +87,9 @@ def make_parameters(seed=12345):
             compute_s_alpha_fluctuations=False,
             halo_mass_bins=np.array([1.0e8, 1.0e9, 1.0e10]),
             halo_mass_accretion_alpha=np.array([0.5, 1.0]),
+            spreading_method='exact',
+            spreading_diffusion_n_iter=8,
+            spreading_diffusion_R_diffuse=None,
         ),
         source=SimpleNamespace(
             min_xHII_value=0.0,
@@ -879,3 +882,66 @@ def test_mpi_paint_single_fstar_cache_roundtrip(tmp_path, monkeypatch):
     if rank == 0:
         assert len(gathered) == 2
         assert gathered[0] == gathered[1]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# spreading_method dispatch (issue #42 follow-up: exact vs diffusion surrogate)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _bare_coordinator(parameters):
+    """A PaintingCoordinator with only .parameters set, for testing methods
+    (like _spread_excess) that don't need loader/output_handler."""
+    coord = object.__new__(PaintingCoordinator)
+    coord.parameters = parameters
+    return coord
+
+
+def test_spread_excess_default_uses_exact_method(monkeypatch):
+    params = Parameters()
+    assert params.simulation.spreading_method == 'exact'
+    grid = np.random.default_rng(0).random((4, 4, 4)) + 1.0  # some excess
+
+    calls = {}
+
+    def fake_exact(parameters, g):
+        calls['called'] = True
+        return g
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("'diffusion' method should not be called when spreading_method='exact'")
+
+    monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_fast", fake_exact)
+    monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_diff", fail_if_called)
+
+    out = _bare_coordinator(params)._spread_excess(grid)
+    assert calls.get('called')
+    np.testing.assert_array_equal(out, grid)
+
+
+def test_spread_excess_diffusion_method_dispatches_and_forwards_params(monkeypatch):
+    params = Parameters()
+    params.simulation.spreading_method = 'diffusion'
+    params.simulation.spreading_diffusion_n_iter = 3
+    params.simulation.spreading_diffusion_R_diffuse = 5.0
+    params.simulation.Lbox = 50.0
+    params.simulation.use_hunits = True
+    grid = np.random.default_rng(1).random((4, 4, 4)) + 1.0
+
+    captured = {}
+
+    def fake_diff(x, L, R_diffuse=None, n_iter=8, backend='numpy'):
+        captured.update(x=x, L=L, R_diffuse=R_diffuse, n_iter=n_iter)
+        return x
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("'exact' method should not be called when spreading_method='diffusion'")
+
+    monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_diff", fake_diff)
+    monkeypatch.setattr("beorn.painting.coordinator.spreading_excess_fast", fail_if_called)
+
+    out = _bare_coordinator(params)._spread_excess(grid)
+
+    assert captured['L'] == pytest.approx(params.Lbox_hunits)
+    assert captured['n_iter'] == 3
+    assert captured['R_diffuse'] == 5.0
+    np.testing.assert_array_equal(out, grid)

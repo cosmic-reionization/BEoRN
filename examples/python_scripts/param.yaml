@@ -15,6 +15,9 @@ simulation:
   use_hunits: true                # Lbox above is in Mpc/h, not physical Mpc (default is false: physical Mpc)
   spreading_pixel_threshold: -1   # merge connected regions below this many pixels when spreading excess ionization (-1 = use built-in default)
   spreading_subgrid_approximation: true  # use the subgrid approximation in distance_transform_edt when spreading excess ionization
+  spreading_method: 'exact'       # excess-ionization spreading algorithm: 'exact' (connected-component + distance-transform) or 'diffusion' (differentiable FFT-diffusion surrogate, approximate)
+  spreading_diffusion_n_iter: 8   # iteration count for the 'diffusion' method
+  spreading_diffusion_R_diffuse: null  # per-iteration Gaussian diffusion scale in Mpc/h for the 'diffusion' method (null = 2 cells)
   minimum_grid_size_heat: 4       # minimum grid size used for the heating kernel
   minimum_grid_size_lyal: 16      # minimum grid size used for the Lyman-alpha kernel
   compute_s_alpha_fluctuations: true  # include S_alpha fluctuations when computing x_al

@@ -324,6 +324,26 @@ class SimulationParameters:
     spreading_subgrid_approximation: bool = True
     """When spreading the excess ionization fraction and running distance_transform_edt, whether or not to do the subgrid approximation."""
 
+    spreading_method: Literal['exact', 'diffusion'] = 'exact'
+    """Excess-ionization spreading algorithm. ``'exact'`` (default) uses
+    :func:`beorn.painting.spread.spreading_excess_fast` (connected-component
+    + distance-transform, exact but CPU/numpy-only — reads
+    ``spreading_pixel_threshold``/``spreading_subgrid_approximation`` above).
+    ``'diffusion'`` uses :func:`beorn.painting.differentiable.spreading_excess_diff`
+    (FFT-diffusion surrogate, backend-generic and differentiable, approximate
+    — see its docstring for the documented photon-loss tradeoff). Named for
+    the specific algorithm, not just "differentiable" — other differentiable
+    methods may be added as additional options later."""
+
+    spreading_diffusion_n_iter: int = 8
+    """Iteration count for :func:`~beorn.painting.differentiable.spreading_excess_diff`
+    when ``spreading_method='diffusion'``."""
+
+    spreading_diffusion_R_diffuse: float | None = None
+    """Per-iteration Gaussian diffusion scale (Mpc/h) for
+    :func:`~beorn.painting.differentiable.spreading_excess_diff` when
+    ``spreading_method='diffusion'``. ``None`` uses its own default (2 cells)."""
+
     minimum_grid_size_heat: int = 4
     """Minimum grid size used when computing the heat kernel from its associated profile."""
 

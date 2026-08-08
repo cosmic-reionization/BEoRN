@@ -30,6 +30,7 @@ from .helpers import (
     stacked_T_kernel,
 )
 from .spread  import spreading_excess_fast
+from .differentiable import spreading_excess_diff
 from ..cosmo import T_adiab_fluctu
 from ..couplings import S_alpha
 from ..io.handler import Handler
@@ -174,6 +175,23 @@ class PaintingCoordinator:
             Grid_xal += lyal_c
         if temp_c is not None:
             Grid_Temp += temp_c
+
+    def _spread_excess(self, Grid_xHII: np.ndarray) -> np.ndarray:
+        """Redistribute excess ionization (values > 1 from overlapping bubbles).
+
+        Dispatches on ``parameters.simulation.spreading_method``: ``'exact'``
+        (default) is the connected-component + distance-transform algorithm
+        (:func:`~beorn.painting.spread.spreading_excess_fast`); ``'diffusion'``
+        is the FFT-diffusion surrogate
+        (:func:`~beorn.painting.differentiable.spreading_excess_diff`) —
+        backend-generic and differentiable, but approximate.
+        """
+        sim = self.parameters.simulation
+        if sim.spreading_method == 'diffusion':
+            return spreading_excess_diff(Grid_xHII, self.parameters.Lbox_hunits,
+                                         R_diffuse=sim.spreading_diffusion_R_diffuse,
+                                         n_iter=sim.spreading_diffusion_n_iter)
+        return spreading_excess_fast(self.parameters, Grid_xHII)
 
     def _load_fstar_profiles_z_slice(self, profiles_path: Path, profile_z_index: int) -> RadiationProfilesFStarGrid:
         """Load only one redshift slice of f_st-grid profiles from disk.
@@ -710,7 +728,7 @@ class PaintingCoordinator:
 
         ## Excess spreading
         start_time = time.time()
-        Grid_xHII = spreading_excess_fast(self.parameters, Grid_xHII)
+        Grid_xHII = self._spread_excess(Grid_xHII)
 
         self.logger.info(f'Redistributing excess photons from the overlapping regions took {timedelta(seconds=time.time() - start_time)}.')
 
@@ -951,7 +969,7 @@ class PaintingCoordinator:
         Grid_Temp = ifft_field(accum_temp,  (nGrid, nGrid, nGrid), backend=fft_backend, workers=fft_workers) if accum_temp  is not None else zero_grid.copy()
 
         start_time = time.time()
-        Grid_xHII = spreading_excess_fast(self.parameters, Grid_xHII)
+        Grid_xHII = self._spread_excess(Grid_xHII)
         self.logger.info(f'Redistributing excess photons from the overlapping regions took {timedelta(seconds=time.time() - start_time)}.')
 
         start_time = time.time()
