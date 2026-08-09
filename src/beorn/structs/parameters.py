@@ -618,7 +618,7 @@ class HaloSimParameters:
     """Environmental smoothing scale in Mpc/h for CHMF conditioning. ``None``
     (default) uses the cell size as the conditioning scale."""
 
-    n_mass_bins: int = 40
+    n_mass_bins: int = 140
     """Number of log-spaced mass bins for CHMF sampling."""
 
     halo_mass_min: float = 1e8
