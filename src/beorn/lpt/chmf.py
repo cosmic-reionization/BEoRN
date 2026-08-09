@@ -26,6 +26,62 @@ from .linear_power import PowerSpectrum
 logger = logging.getLogger(__name__)
 
 
+def tophat_k2_grid(N: int, Lbox: float) -> np.ndarray:
+    """``|k|^2`` on the ``rfftn``-shaped grid for an ``(N, N, N)`` box of
+    side ``Lbox`` -- the part of :func:`tophat_smooth_static` that is
+    independent of the smoothing radius, so a caller top-hat-smoothing the
+    *same* field at many radii (e.g. an excursion-set scale hierarchy) can
+    build it once and pass it to every call via ``k2=``, rather than
+    rebuilding the meshgrid each time.
+    """
+    dk = 2.0 * np.pi / Lbox
+    kvals = np.fft.fftfreq(N, d=1.0 / N) * dk
+    kz_vals = np.fft.rfftfreq(N, d=1.0 / N) * dk
+    kx, ky, kz = np.meshgrid(kvals, kvals, kz_vals, indexing='ij')
+    return kx ** 2 + ky ** 2 + kz ** 2
+
+
+def tophat_smooth_static(
+    delta: np.ndarray, R: float, Lbox: float,
+    delta_k: np.ndarray | None = None, k2: np.ndarray | None = None,
+) -> np.ndarray:
+    """Real-space top-hat smoothing via FFT.
+
+    Matches the window :class:`CHMF`'s own ``sigma2(M,z)`` assumes (built
+    with ``window='tophat'``) and the smoothing
+    :meth:`beorn.lpt.LPTBase.get_linear_density` applies via its own
+    ``R_tophat`` argument -- so the field this returns has variance
+    ``sigma2(M_of_R(R), z)`` up to finite-box/grid discreteness (issue #54).
+
+    Args:
+        delta:   Real-space overdensity, shape (N, N, N).
+        R:       Top-hat smoothing radius in Mpc/h.
+        Lbox:    Box size in Mpc/h.
+        delta_k: Optional precomputed ``rfftn(delta)`` -- pass this (and
+                 ``k2``) when smoothing the *same* field at many radii (e.g.
+                 an excursion-set scale hierarchy), to do the forward FFT
+                 and k-grid construction once instead of once per radius.
+        k2:      Optional precomputed :func:`tophat_k2_grid` output.
+
+    Returns:
+        Smoothed field, same shape and dtype as ``delta``.
+    """
+    # Runtime import: beorn.mass_function.base imports beorn.lpt at module
+    # load, so a top-level import here would be circular.
+    from ..mass_function.window import TopHatWindow
+
+    N = delta.shape[0]
+    if k2 is None:
+        k2 = tophat_k2_grid(N, Lbox)
+    if delta_k is None:
+        delta_k = np.fft.rfftn(delta)
+    k = np.sqrt(np.where(k2 == 0, 1.0, k2))  # dummy value avoids 0/0 in W
+    W = TopHatWindow().W(k * R)
+    W = np.where(k2 == 0, 1.0, W)            # preserve the DC (mean) mode
+    return np.fft.irfftn(delta_k * W, axes=(0, 1, 2),
+                         s=(N, N, N)).astype(delta.dtype)
+
+
 class CHMF:
     """Conditional Halo Mass Function via Extended Press-Schechter theory.
 
@@ -204,6 +260,49 @@ class CHMF:
 
         return (self.rho_m / M) * abs(dln_sigma_eff_dlnM) * f_nu
 
+    def barrier(self, M: float, z: float, recipe: str = 'MovingBarrier') -> float:
+        """Collapse barrier at mass scale ``M``, in BEoRN's native convention
+        (directly comparable to a z-evolved linear ``delta_field``, e.g.
+        :meth:`~beorn.lpt.LPTBase.get_linear_density`'s output).
+
+        ``recipe='BarkanaLoeb2004'`` -- the constant spherical-collapse
+        barrier, :attr:`delta_c` (redshift-independent in this convention,
+        since ``sigma2(M, z)`` already carries the ``D(z)^2`` factor).
+        ``recipe='MovingBarrier'`` (default) -- the ellipsoidal-collapse
+        moving barrier (Sheth & Tormen 2002; Jenkins et al. 2001 parameters),
+        same ``B(z, sigma)`` used internally by :meth:`hmf_st_movingbarrier`,
+        converted from Davies et al.'s z=0-sigma/z-dependent-barrier
+        convention back to this class's own native one.
+
+        Shared by :meth:`hmf_st_movingbarrier` (its own ``B_x`` term) and the
+        excursion-set halo finder's barrier-crossing test, so both stay
+        physically consistent with whichever ``chmf_recipe`` is selected.
+
+        Args:
+            M:      Halo mass in M_sun (scalar).
+            z:      Redshift.
+            recipe: ``'BarkanaLoeb2004'`` or ``'MovingBarrier'``
+                    (case-insensitive).
+
+        Returns:
+            Barrier value (dimensionless linear overdensity), scalar.
+        """
+        recipe_key = recipe.replace('_', '').lower()
+        if recipe_key == 'barkanaloeb2004':
+            return self.delta_c
+        if recipe_key != 'movingbarrier':
+            raise ValueError(
+                f"Unknown recipe {recipe!r}. "
+                f"Choose 'BarkanaLoeb2004' or 'MovingBarrier' (case-insensitive)."
+            )
+        import math
+        a, alpha, beta = 0.7, 0.81, 0.34  # Jenkins et al. (2001), as used by Davies et al. (2025)
+        D = float(self._D1(z))
+        delta_crit_z = self.delta_c / D
+        x = float(self.sigma2_z0(M))
+        B_x = math.sqrt(a) * delta_crit_z * (1.0 + beta * (a * delta_crit_z ** 2 / x) ** (-alpha))
+        return B_x * D  # convert Davies et al.'s z=0-sigma barrier back to native (z-evolved delta) convention
+
     def hmf_st_movingbarrier(
         self,
         M: float,
@@ -277,7 +376,9 @@ class CHMF:
         # own argument list), not at sigma2_cond_z0.
         c1 = math.sqrt(a) * delta_crit_z * beta * (a * delta_crit_z ** 2) ** (-alpha)
         c0_minus = math.sqrt(a) * delta_crit_z - delta_crit_z  # (c0 - delta_crit_z)
-        B_x = math.sqrt(a) * delta_crit_z * (1.0 + beta * (a * delta_crit_z ** 2 / x) ** (-alpha))
+        # B_x in Davies et al.'s own z=0-sigma convention -- self.barrier
+        # returns the native (z-evolved) convention, so divide D back out.
+        B_x = self.barrier(M, z, recipe='MovingBarrier') / D
 
         T = np.zeros_like(S_eff, dtype=float)
         falling = 1.0  # running alpha*(alpha-1)*...*(alpha-n+1); empty product (n=0) = 1
@@ -403,7 +504,7 @@ class CHMFSampler:
     # ------------------------------------------------------------------
 
     def _tophat_smooth(self, delta: np.ndarray, R: float) -> np.ndarray:
-        """Real-space top-hat smoothing via FFT.
+        """Real-space top-hat smoothing via FFT -- see :func:`tophat_smooth_static`.
 
         Matches the window :attr:`chmf`'s own ``sigma2(M,z)`` assumes
         (``CHMF`` always builds its ``MassFunction`` with ``window='tophat'``)
@@ -419,22 +520,7 @@ class CHMFSampler:
         Returns:
             Smoothed field, same shape and dtype as ``delta``.
         """
-        # Runtime import: beorn.mass_function.base imports beorn.lpt at
-        # module load, so a top-level import here would be circular.
-        from ..mass_function.window import TopHatWindow
-
-        N = delta.shape[0]
-        L = self.parameters.Lbox_hunits
-        dk = 2.0 * np.pi / L
-        kvals = np.fft.fftfreq(N, d=1.0 / N) * dk
-        kz_vals = np.fft.rfftfreq(N, d=1.0 / N) * dk
-        kx, ky, kz = np.meshgrid(kvals, kvals, kz_vals, indexing='ij')
-        k2 = kx ** 2 + ky ** 2 + kz ** 2
-        k = np.sqrt(np.where(k2 == 0, 1.0, k2))  # dummy value avoids 0/0 in W
-        W = TopHatWindow().W(k * R)
-        W = np.where(k2 == 0, 1.0, W)            # preserve the DC (mean) mode
-        return np.fft.irfftn(np.fft.rfftn(delta) * W, axes=(0, 1, 2),
-                             s=(N, N, N)).astype(delta.dtype)
+        return tophat_smooth_static(delta, R, self.parameters.Lbox_hunits)
 
     def _resolve_environment(
         self, delta_field: np.ndarray | None, R_env: float | None,
@@ -517,12 +603,22 @@ class CHMFSampler:
         lam_grid = self._hmf_field_fn(M, d_grid, sigma2_env, z)
         return np.interp(delta_env.ravel(), d_grid, lam_grid).reshape(delta_env.shape)
 
-    def _mass_bins(self, M_env: float, n_mass_bins: int):
+    def _mass_bins(self, M_env: float, n_mass_bins: int, M_split: float | None = None):
         """Log-spaced mass bins between halo_sim.halo_mass_min and
-        min(halo_sim.halo_mass_max, M_env)."""
+        min(halo_sim.halo_mass_max, M_env, M_split).
+
+        ``M_split`` (issue: excursion-set hybrid sampler) caps the
+        stochastic tier's own range at the deterministic/stochastic
+        boundary, so it never independently samples mass the excursion-set
+        tier already claims -- ``None`` (the default, and the only
+        behavior when the excursion-set tier is off) reproduces today's
+        ``M_env``-only cap exactly.
+        """
         params = self.parameters
         M_min = params.halo_sim.halo_mass_min
         M_max_req = params.halo_sim.halo_mass_max
+        if M_split is not None:
+            M_max_req = min(M_max_req, M_split)
 
         if M_env <= M_min:
             raise ValueError(
@@ -532,13 +628,18 @@ class CHMFSampler:
             )
 
         M_max = min(M_max_req, M_env * 0.999)
-        if M_max < M_max_req:
+        if M_max < params.halo_sim.halo_mass_max:
+            if M_split is not None and M_split <= M_env * 0.999:
+                reason = (f"M_split = {M_split:.2e} Msun (the excursion-set "
+                         f"tier claims mass at or above this)")
+            else:
+                reason = (f"M_env = {M_env:.2e} Msun (cell mass for "
+                         f"N={params.simulation.Ncell}, L={params.Lbox_hunits} Mpc/h)")
             warnings.warn(
-                f"CHMF can only sample halos with M < M_env = {M_env:.2e} Msun "
-                f"(cell mass for N={params.simulation.Ncell}, "
-                f"L={params.Lbox_hunits} Mpc/h).  "
+                f"CHMF can only sample halos with M < {reason}.  "
                 f"Capping M_max at {M_max:.2e} Msun.  "
-                f"Increase R_env or use a coarser grid to access higher masses.",
+                f"Increase R_env/M_split or use a coarser grid to access "
+                f"higher masses.",
                 stacklevel=3,
             )
 
@@ -555,6 +656,8 @@ class CHMFSampler:
         n_mass_bins: int | None = None,
         n_delta_nodes: int | None = 512,
         precomputed_delta_env: tuple[np.ndarray, float] | None = None,
+        M_split: float | None = None,
+        deterministic_mass_fraction: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Expected halo counts per cell and mass bin — the Poisson intensity.
 
@@ -593,6 +696,19 @@ class CHMFSampler:
                 :class:`~beorn.load_input_data.LPTHaloLoader`). When given,
                 ``delta_field``/``R_env`` are ignored entirely and
                 ``delta_field`` may be ``None``.
+            M_split: Cap the sampled mass range at this value in addition
+                to ``M_env``/``halo_sim.halo_mass_max`` — the deterministic
+                excursion-set tier's own boundary (see
+                :attr:`~beorn.structs.HaloSimParameters.M_split`). ``None``
+                (default) reproduces today's ``M_env``-only cap exactly.
+            deterministic_mass_fraction: Per-cell fraction (shape matching
+                ``delta_env``, values in ``[0, 1]``) of each cell's mass
+                already claimed by the excursion-set tier — every
+                mass-bin's expected count is rescaled by
+                ``(1 - deterministic_mass_fraction)`` before being returned,
+                mirroring Davies, Mesinger & Murray (2025)'s own mass-
+                conservation prescription. ``None`` (default) applies no
+                rescaling.
 
         Returns:
             (M_centers, lam) — bin-centre masses (n_mass_bins,) in M_sun and
@@ -610,15 +726,18 @@ class CHMFSampler:
 
         delta_env, M_env = self._resolve_environment(delta_field, R_env, precomputed_delta_env)
         sigma2_env = float(self.chmf.sigma2(M_env, z))
-        M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
+        M_centers, dln_M = self._mass_bins(M_env, n_mass_bins, M_split)
         ratios = self._calibration_ratios(M_centers, z)
         d_grid = (self._delta_grid(delta_env, n_delta_nodes)
                  if n_delta_nodes is not None else None)
+        remaining = (1.0 - deterministic_mass_fraction
+                    if deterministic_mass_fraction is not None else None)
 
         lam = np.empty((len(M_centers),) + delta_env.shape, dtype=np.float64)
         for i_M, M in enumerate(M_centers):
             n_cond = self._tabulated_n_cond(M, delta_env, sigma2_env, z, d_grid)
-            lam[i_M] = np.maximum(n_cond * ratios[i_M] * dln_M[i_M] * V_cell, 0.0)
+            lam_i = np.maximum(n_cond * ratios[i_M] * dln_M[i_M] * V_cell, 0.0)
+            lam[i_M] = lam_i if remaining is None else lam_i * remaining
         return M_centers, lam
 
     # ------------------------------------------------------------------
@@ -634,6 +753,8 @@ class CHMFSampler:
         seed: int | None = None,
         n_delta_nodes: int | None = 512,
         precomputed_delta_env: tuple[np.ndarray, float] | None = None,
+        M_split: float | None = None,
+        deterministic_mass_fraction: np.ndarray | None = None,
     ) -> HaloCatalog:
         """Sample a halo catalog from the conditional HMF.
 
@@ -673,6 +794,14 @@ class CHMFSampler:
                 internally — see :meth:`expected_counts`'s identical
                 argument. When given, ``delta_field``/``R_env`` are ignored
                 entirely and ``delta_field`` may be ``None``.
+            M_split: Cap the sampled mass range at this value in addition
+                to ``M_env``/``halo_sim.halo_mass_max`` — see
+                :meth:`expected_counts`'s identical argument. ``None``
+                (default) reproduces today's ``M_env``-only cap exactly.
+            deterministic_mass_fraction: Per-cell fraction of each cell's
+                mass already claimed by the excursion-set tier — see
+                :meth:`expected_counts`'s identical argument. ``None``
+                (default) applies no rescaling.
 
         Returns:
             :class:`~beorn.structs.HaloCatalog` with positions in Mpc/h and
@@ -693,11 +822,13 @@ class CHMFSampler:
         # ── Environment, sigma and mass bins ───────────────────────────
         delta_env, M_env = self._resolve_environment(delta_field, R_env, precomputed_delta_env)
         sigma2_env = float(self.chmf.sigma2(M_env, z))
-        M_centers, dln_M = self._mass_bins(M_env, n_mass_bins)
+        M_centers, dln_M = self._mass_bins(M_env, n_mass_bins, M_split)
         ratios = self._calibration_ratios(M_centers, z)
         M_min, M_max = M_centers[0], M_centers[-1]
         d_grid = (self._delta_grid(delta_env, n_delta_nodes)
                  if n_delta_nodes is not None else None)
+        remaining = (1.0 - deterministic_mass_fraction
+                    if deterministic_mass_fraction is not None else None)
 
         # ── Poisson sampling ───────────────────────────────────────────
         rng = np.random.default_rng(seed)
@@ -707,6 +838,8 @@ class CHMFSampler:
         for i_M, M in enumerate(M_centers):
             n_cond = self._tabulated_n_cond(M, delta_env, sigma2_env, z, d_grid)
             N_expected = np.maximum(n_cond * ratios[i_M] * dln_M[i_M] * V_cell, 0.0)
+            if remaining is not None:
+                N_expected = N_expected * remaining
             N_sample = rng.poisson(N_expected)  # shape (N, N, N) int
 
             occupied = np.argwhere(N_sample > 0)  # (K, 3)

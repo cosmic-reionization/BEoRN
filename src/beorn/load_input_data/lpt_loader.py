@@ -11,6 +11,7 @@ from ..lpt import SecondOrderLPT, LPTBase
 from ..lpt.chmf import CHMF, CHMFSampler
 from ..lpt.linear_power import get_power_spectrum
 from ..lpt.lpt import synchronized_white_noise, extract_synced_delta_k
+from ..particle_mapping.resample import coarsen_field
 from ..cosmo import D
 
 
@@ -86,6 +87,23 @@ class LPTHaloLoader(BaseLoader):
                       passed in, since the synchronized finer-resolution
                       noise realisation can only be generated for a
                       loader-built solver.
+        excursion_set_method: ``'off'`` (default), ``'exact'`` or ``'soft'`` --
+                      see :attr:`~beorn.structs.HaloSimParameters.excursion_set_method`.
+                      ``None`` reads ``parameters.halo_sim.excursion_set_method``.
+        M_split:      Mass threshold between the deterministic excursion-set
+                      tier and the stochastic CHMF -- see
+                      :attr:`~beorn.structs.HaloSimParameters.M_split`. ``None``
+                      (default) reads ``parameters.halo_sim.M_split`` (itself
+                      ``None`` -- inherits the per-cell environment mass).
+        excursion_set_n_scales: Number of scale-hierarchy nodes for the
+                      excursion-set walk. ``None`` (default) reads
+                      ``parameters.halo_sim.excursion_set_n_scales``.
+        excursion_set_M_max: Upper mass bound of the excursion-set walk.
+                      ``None`` (default) reads
+                      ``parameters.halo_sim.excursion_set_M_max``.
+        excursion_set_min_patch_mass: Reject excursion-set patches below
+                      this mass. ``None`` (default) reads
+                      ``parameters.halo_sim.excursion_set_min_patch_mass``.
         **ps_kwargs:  Extra keyword arguments forwarded to the power spectrum
                       constructor (e.g. ``wiggle=True``).
     """
@@ -103,6 +121,11 @@ class LPTHaloLoader(BaseLoader):
         hmf_model: str | None = None,
         chmf_recipe: str | None = None,
         field_oversample: int | None = None,
+        excursion_set_method: str | None = None,
+        M_split: float | None = None,
+        excursion_set_n_scales: int | None = None,
+        excursion_set_M_max: float | None = None,
+        excursion_set_min_patch_mass: float | None = None,
         **ps_kwargs,
     ):
         super().__init__(parameters)
@@ -195,6 +218,54 @@ class LPTHaloLoader(BaseLoader):
         self.sampler = CHMFSampler(parameters, chmf=chmf, hmf_model=hmf_model,
                                    chmf_recipe=chmf_recipe)
 
+        # ── Excursion-set tier (massive halos, deterministic) ──────────────
+        self.excursion_set_method = (
+            excursion_set_method if excursion_set_method is not None
+            else parameters.halo_sim.excursion_set_method
+        )
+        cell_size_coarse = parameters.Lbox_hunits / parameters.simulation.Ncell
+        M_env_coarse = (chmf.rho_m * cell_size_coarse ** 3 if self.R_env is None
+                        else chmf.M_of_R(self.R_env))
+        self.M_split = (M_split if M_split is not None
+                        else parameters.halo_sim.M_split
+                        if parameters.halo_sim.M_split is not None
+                        else M_env_coarse)
+        self.excursion_set_n_scales = (
+            excursion_set_n_scales if excursion_set_n_scales is not None
+            else parameters.halo_sim.excursion_set_n_scales
+        )
+        self.excursion_set_M_max = (
+            excursion_set_M_max if excursion_set_M_max is not None
+            else parameters.halo_sim.excursion_set_M_max
+        )
+        self.excursion_set_min_patch_mass = (
+            excursion_set_min_patch_mass if excursion_set_min_patch_mass is not None
+            else parameters.halo_sim.excursion_set_min_patch_mass
+        )
+        self._excursion_finder = None
+        if self.excursion_set_method == 'exact':
+            from ..lpt.excursion_set import ExcursionSetFinder
+            self._excursion_finder = ExcursionSetFinder(
+                chmf, chmf_recipe=self.sampler.chmf_recipe,
+            )
+        elif self.excursion_set_method == 'soft':
+            # 'soft' returns a continuous mass field (beorn.lpt.excursion_set_diff),
+            # not discrete positions -- incompatible with LPTHaloLoader's
+            # HaloCatalog contract. Use excursion_set_field_diff directly in
+            # a differentiable pipeline instead (see halo_field_diff for the
+            # analogous stochastic-tier pattern).
+            raise ValueError(
+                "excursion_set_method='soft' is not usable via LPTHaloLoader "
+                "(it produces a continuous mass field, not discrete halo "
+                "positions) -- call beorn.lpt.excursion_set_diff directly in "
+                "a differentiable pipeline instead."
+            )
+        elif self.excursion_set_method != 'off':
+            raise ValueError(
+                f"Unknown excursion_set_method {self.excursion_set_method!r}. "
+                f"Choose 'off', 'exact' or 'soft'."
+            )
+
     # ------------------------------------------------------------------
     # BaseLoader interface
     # ------------------------------------------------------------------
@@ -237,6 +308,17 @@ class LPTHaloLoader(BaseLoader):
         window's residual bias from ``Ncell``'s own, too-coarse Nyquist
         frequency.
 
+        When ``excursion_set_method='exact'`` was resolved at construction,
+        the deterministic excursion-set tier (:class:`~beorn.lpt.excursion_set.ExcursionSetFinder`)
+        runs first on the raw (un-smoothed) linear field -- the fine,
+        phase-synchronized field above when ``field_oversample > 1``, or the
+        coarse field otherwise -- claiming halos at or above
+        :attr:`M_split`. The fraction of each coarse cell's mass it claimed
+        is block-averaged down to ``Ncell`` and passed to
+        :meth:`CHMFSampler.sample` as ``deterministic_mass_fraction``, so the
+        stochastic tier never independently samples mass already claimed;
+        the two catalogs are concatenated before returning.
+
         Args:
             redshift_index: Index into :attr:`redshifts`.
 
@@ -253,6 +335,9 @@ class LPTHaloLoader(BaseLoader):
             delta_fine = np.fft.irfftn(
                 D1 * self._fine_delta_k, s=(self._N_fine,) * 3,
             ).astype(np.float32)
+
+            det_catalog, det_mass_fraction = self._run_excursion_set(delta_fine, z)
+
             delta_env_fine, M_env = self.sampler._environment(delta_fine, self.R_env)
             # Decimate (point-sample), don't block-average: delta_env_fine is
             # already band-limited well below Ncell's Nyquist by the R_env
@@ -265,14 +350,17 @@ class LPTHaloLoader(BaseLoader):
             # than not oversampling at all (verified numerically).
             field_oversample = self._N_fine // self.parameters.simulation.Ncell
             delta_env = delta_env_fine[::field_oversample, ::field_oversample, ::field_oversample]
-            return self.sampler.sample(
+            stoch_catalog = self.sampler.sample(
                 delta_field=None,
                 z=z,
                 R_env=self.R_env,
                 n_mass_bins=self.n_mass_bins,
                 seed=sample_seed,
                 precomputed_delta_env=(delta_env, M_env),
+                M_split=self.M_split if det_catalog is not None else None,
+                deterministic_mass_fraction=det_mass_fraction,
             )
+            return self._merge_catalogs(det_catalog, stoch_catalog)
 
         # Use the linear density field (IRFFT of D1*delta_k) rather than CIC
         # particle painting to avoid shot noise, which would produce extreme
@@ -280,12 +368,65 @@ class LPTHaloLoader(BaseLoader):
         # Raw field -- CHMFSampler.sample smooths it to the conditioning
         # scale internally (issue #54).
         delta = self.lpt_solver.get_linear_density(z)
-        return self.sampler.sample(
+
+        det_catalog, det_mass_fraction = self._run_excursion_set(delta, z)
+
+        stoch_catalog = self.sampler.sample(
             delta_field=delta,
             z=z,
             R_env=self.R_env,
             n_mass_bins=self.n_mass_bins,
             seed=sample_seed,
+            M_split=self.M_split if det_catalog is not None else None,
+            deterministic_mass_fraction=det_mass_fraction,
+        )
+        return self._merge_catalogs(det_catalog, stoch_catalog)
+
+    def _run_excursion_set(self, delta_field: np.ndarray, z: float):
+        """Run the deterministic excursion-set tier if enabled.
+
+        Args:
+            delta_field: Raw linear overdensity to walk -- the fine,
+                phase-synchronized field when ``field_oversample > 1``, or
+                the coarse field otherwise. May be at a finer resolution
+                than ``Ncell``.
+            z: Redshift.
+
+        Returns:
+            (catalog, deterministic_mass_fraction) -- ``(None, None)`` when
+            :attr:`excursion_set_method` is ``'off'``; otherwise the claimed
+            :class:`~beorn.structs.HaloCatalog` and the per-*coarse*-cell
+            claimed-mass fraction (block-averaged down from
+            ``delta_field``'s own resolution when finer than ``Ncell``),
+            ready to pass to :meth:`~beorn.lpt.chmf.CHMFSampler.sample` as
+            ``deterministic_mass_fraction``.
+        """
+        if self._excursion_finder is None:
+            return None, None
+        catalog, claimed = self._excursion_finder.find(
+            delta_field.astype(np.float64), z, M_split=self.M_split,
+            M_max=self.excursion_set_M_max, n_scales=self.excursion_set_n_scales,
+            min_patch_mass=self.excursion_set_min_patch_mass,
+        )
+        N_coarse = self.parameters.simulation.Ncell
+        oversample = claimed.shape[0] // N_coarse
+        claimed_fraction = claimed.astype(np.float64)
+        if oversample > 1:
+            claimed_fraction = coarsen_field(claimed_fraction, oversample)
+        return catalog, claimed_fraction
+
+    def _merge_catalogs(self, det_catalog: HaloCatalog | None,
+                        stoch_catalog: HaloCatalog) -> HaloCatalog:
+        """Concatenate the deterministic (excursion-set) and stochastic
+        (CHMF) catalogs into one -- a no-op when the excursion-set tier is
+        off (``det_catalog is None``, returns ``stoch_catalog`` unchanged)."""
+        if det_catalog is None:
+            return stoch_catalog
+        return HaloCatalog(
+            positions=np.concatenate([det_catalog.positions, stoch_catalog.positions], axis=0),
+            masses=np.concatenate([det_catalog.masses, stoch_catalog.masses]),
+            parameters=self.parameters,
+            redshift=stoch_catalog.redshift,
         )
 
     def load_rsd_fields(self, redshift_index: int):

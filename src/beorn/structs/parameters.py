@@ -573,14 +573,14 @@ class HaloSimParameters:
     halo_source: Literal['CHMF', 'external'] = 'CHMF'
     """How halo catalogs are generated. ``'CHMF'`` — conditional halo mass
     function sampling on the density field (see :attr:`hmf_model` for the
-    PS/ST calibration). ``'external'`` — read from an external N-body
-    loader's own halo finder (py21cmfast, Thesan, PKDGrav). Kept as a
-    separate axis from :attr:`hmf_model` (rather than folding PS/ST into this
-    field, e.g. ``'CHMF_PS'``) so future native halo-finding methods (e.g.
-    excursion-set/peak-patch, issue #26) can be added as new ``halo_source``
-    values without overloading ``hmf_model``. Metadata field for
-    hashing/reproducibility — does not itself dispatch which loader/sampler
-    gets constructed."""
+    PS/ST calibration; see :attr:`excursion_set_method` for the deterministic
+    massive-halo tier layered on top of it). ``'external'`` — read from an
+    external N-body loader's own halo finder (py21cmfast, Thesan, PKDGrav).
+    Kept as a separate axis from :attr:`hmf_model` (rather than folding PS/ST
+    into this field, e.g. ``'CHMF_PS'``) so future native halo-finding
+    methods can be added as new ``halo_source`` values without overloading
+    ``hmf_model``. Metadata field for hashing/reproducibility — does not
+    itself dispatch which loader/sampler gets constructed."""
 
     hmf_model: Literal['PS', 'ST'] = 'ST'
     """Only meaningful when :attr:`halo_source` is ``'CHMF'``. ``'PS'`` —
@@ -692,6 +692,70 @@ class HaloSimParameters:
     the CHMF's own conditioning field is affected) and does not trigger any
     warning, unlike the seed-mismatch case above -- there is no
     decorrelation risk here since both are views of the same realisation."""
+
+    M_split: float | None = None
+    """Mass threshold separating the two CHMFSampler regimes: halos with
+    mass at or above this are assigned deterministically by the
+    excursion-set tier (see :attr:`excursion_set_method`); below it, halos
+    are sampled stochastically from the CHMF as usual. ``None`` (default)
+    inherits the per-cell environment mass ``M_env`` (the same quantity
+    :attr:`R_env` already resolves to) -- a purely *additive* default: it
+    only enables sampling mass that is hard-capped away entirely today
+    (``CHMFSampler``'s per-cell conditioning cannot represent anything at or
+    above ``M_env``), without changing any existing sub-``M_env``
+    statistics. Setting ``M_split`` below ``M_env`` is a more aggressive
+    mode -- it reassigns part of the existing near-``M_env`` mass range from
+    stochastic to deterministic treatment, and requires
+    :attr:`field_oversample` ``> 1`` (the excursion-set walk needs
+    sub-cell resolution to do this meaningfully; using it with
+    ``field_oversample == 1`` raises ``ValueError``)."""
+
+    excursion_set_method: Literal['off', 'exact', 'soft'] = 'off'
+    """Whether/how the deterministic excursion-set tier (mass >=
+    :attr:`M_split`) is computed. ``'off'`` (default) -- disabled; halo
+    generation is exactly today's CHMFSampler-only behavior. ``'exact'`` --
+    a genuine barrier first-crossing walk over a decreasing-smoothing-scale
+    hierarchy (Mesinger & Furlanetto 2007's DexM algorithm, as used by
+    Davies, Mesinger & Murray 2025's hybrid sampler), with connected
+    patches of crossing cells merged into single halos -- numpy-only,
+    non-differentiable, the accuracy reference. ``'soft'`` -- a
+    differentiable surrogate (sigmoid-relaxed crossing test + a
+    scale-by-scale survival-product in place of the hard first-crossing
+    choice) that returns a smooth deterministically-collapsed mass *field*
+    rather than discrete halos, for use in gradient-based pipelines;
+    documented as an approximation, with ``'exact'`` as its reference (same
+    relationship as :attr:`~beorn.structs.SimulationParameters.spreading_method`'s
+    ``'exact'``/``'diffusion'`` pair for ionization-excess spreading).
+    Named "excursion-set", not "peak-finding": the underlying algorithm is
+    barrier first-crossing + connected-component merging, not classic
+    peak-patch (explicit local-maxima tracking across scales) -- a related
+    but distinct technique."""
+
+    excursion_set_n_scales: int = 32
+    """Number of log-spaced mass/smoothing-scale nodes between
+    :attr:`excursion_set_M_max` and :attr:`M_split` for the excursion-set
+    walk. Only meaningful when :attr:`excursion_set_method` is not
+    ``'off'``."""
+
+    excursion_set_M_max: float | None = None
+    """Upper end of the excursion-set walk's mass/scale hierarchy, in
+    M_sun. ``None`` (default) picks a conservative fraction of the box mass.
+    Only meaningful when :attr:`excursion_set_method` is not ``'off'``."""
+
+    excursion_set_min_patch_mass: float | None = None
+    """Reject excursion-set patches below this mass (their cells remain
+    available to cross at a smaller scale instead). ``None`` (default)
+    uses :attr:`M_split` itself -- a patch resolving below the
+    deterministic/stochastic boundary shouldn't have been claimed
+    deterministically at all. Only meaningful when
+    :attr:`excursion_set_method` is ``'exact'``."""
+
+    excursion_set_soft_T: float = 0.1
+    """Temperature (dimensionless, same units as the overdensity field) of
+    the sigmoid barrier-crossing relaxation in the ``'soft'`` excursion-set
+    surrogate -- smaller values track the ``'exact'`` tier's hard threshold
+    more closely at the cost of a sharper (less smooth) gradient landscape.
+    Only meaningful when :attr:`excursion_set_method` is ``'soft'``."""
 
     mass_assignment: Literal['NGP', 'CIC', 'TSC', 'PCS'] = 'NGP'
     """Mass-assignment scheme for painting halo *positions* onto the grid
