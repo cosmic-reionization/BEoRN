@@ -997,9 +997,10 @@ def conditional_dndlnm_diff(
         valid = S_eff > 0
         S_safe = xp.where(valid, S_eff, xp.ones_like(S_eff))
 
-        c1 = xp.sqrt(a_mb) * delta_crit_z * beta_mb * (a_mb * delta_crit_z ** 2) ** (-alpha_mb)
-        c0_minus = delta_crit_z * (xp.sqrt(a_mb) - 1.0)
-        B_x = xp.sqrt(a_mb) * delta_crit_z * (1.0 + beta_mb * (a_mb * delta_crit_z ** 2 / x) ** (-alpha_mb))
+        sqrt_a_mb = math.sqrt(a_mb)  # plain float: xp.sqrt requires a tensor in torch
+        c1 = sqrt_a_mb * delta_crit_z * beta_mb * (a_mb * delta_crit_z ** 2) ** (-alpha_mb)
+        c0_minus = delta_crit_z * (sqrt_a_mb - 1.0)
+        B_x = sqrt_a_mb * delta_crit_z * (1.0 + beta_mb * (a_mb * delta_crit_z ** 2 / x) ** (-alpha_mb))
 
         # Taylor expansion of g(x') = B(x') - delta_crit_z about x' = x (the
         # halo's own sigma^2), matching CHMF.hmf_st_movingbarrier exactly.

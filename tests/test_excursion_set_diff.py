@@ -163,6 +163,69 @@ def test_jax_grad_matches_central_fd(params, theta, M_env):
     assert float(g) == pytest.approx(float(fd), rel=1e-3, abs=1e-6)
 
 
+@pytest.mark.skipif(not _TORCH, reason='torch not installed')
+def test_torch_grad_matches_central_fd(params, theta, M_env):
+    """torch autograd (.backward()) w.r.t. sigma_8 through the full
+    multi-scale walk matches central finite differences, and gradients also
+    flow through the conditioning field ``delta`` itself.
+
+    Regression test for a real bug: the MovingBarrier recipe's barrier
+    formula computed ``xp.sqrt(a_mb)`` on ``a_mb`` (a plain Python float,
+    the fixed Jenkins et al. 2001 constant) -- ``torch.sqrt`` requires a
+    Tensor argument (unlike ``jnp.sqrt``/``np.sqrt``, which auto-convert),
+    so this raised ``TypeError`` for every torch + ``chmf_recipe=
+    'MovingBarrier'`` call. Fixed by precomputing ``math.sqrt(a_mb)`` as a
+    plain float (the same fix applied to
+    :func:`beorn.lpt.chmf.conditional_dndlnm_diff`, which has the identical
+    pre-existing bug -- see ``test_differentiable_pipeline.py``'s own
+    torch regression test)."""
+    delta_small = np.random.default_rng(1).standard_normal((8, 8, 8)) * 0.3
+
+    def total_mass(s8, delta):
+        field = excursion_set_field_diff(
+            delta, params.Lbox_hunits, M_env, Z_LOW,
+            theta['Om'], theta['Ob'], theta['h0'], theta['ns'], s8,
+            n_scales=8, T=0.1, backend='torch', chmf_recipe='MovingBarrier',
+        )
+        return field.sum()
+
+    delta_t = torch.tensor(delta_small, dtype=torch.float64)
+    s8 = torch.tensor(theta['sigma_8'], dtype=torch.float64, requires_grad=True)
+    out = total_mass(s8, delta_t)
+    out.backward()
+    g = s8.grad.item()
+
+    h = 1e-4
+    with torch.no_grad():
+        fp = total_mass(torch.tensor(theta['sigma_8'] + h, dtype=torch.float64), delta_t).item()
+        fm = total_mass(torch.tensor(theta['sigma_8'] - h, dtype=torch.float64), delta_t).item()
+    fd = (fp - fm) / (2 * h)
+    assert g == pytest.approx(fd, rel=1e-3)
+
+    delta_grad_t = torch.tensor(delta_small, dtype=torch.float64, requires_grad=True)
+    total_mass(s8.detach(), delta_grad_t).backward()
+    assert torch.any(delta_grad_t.grad != 0.0)
+
+
+def test_backend_agreement_movingbarrier_numpy_jax_torch(params, theta, M_env):
+    """Same regression as above, cross-checked as backend agreement
+    (numpy/jax never hit the torch-only bug, so this pins the MovingBarrier
+    branch -- not just the default BarkanaLoeb2004 branch the other
+    backend-agreement tests exercise -- to also agree across backends)."""
+    delta_small = np.random.default_rng(4).standard_normal((8, 8, 8)) * 0.3
+    kwargs = dict(Lbox=params.Lbox_hunits, M_split=M_env, z=Z_LOW, **theta,
+                  n_scales=8, T=0.1, chmf_recipe='MovingBarrier')
+
+    field_np = excursion_set_field_diff(delta_small, backend='numpy', **kwargs)
+    field_jax = excursion_set_field_diff(jnp.asarray(delta_small), backend='jax', **kwargs)
+    np.testing.assert_allclose(np.asarray(field_np), np.asarray(field_jax), rtol=1e-6)
+
+    if _TORCH:
+        field_torch = excursion_set_field_diff(
+            torch.as_tensor(delta_small, dtype=torch.float64), backend='torch', **kwargs)
+        np.testing.assert_allclose(np.asarray(field_np), field_torch.numpy(), rtol=1e-6)
+
+
 def test_backend_agreement_numpy_jax(params, theta, M_env):
     delta_small = np.random.default_rng(2).standard_normal((8, 8, 8)) * 0.3
 

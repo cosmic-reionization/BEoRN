@@ -25,6 +25,7 @@ own expectation-mode philosophy), not a discrete halo catalog.
 """
 from __future__ import annotations
 
+import math
 import numpy as np
 
 from ..constants import rhoc0
@@ -103,7 +104,7 @@ def _barrier_diff(M, z, delta_c, Om, Ob, h0, ns, sigma_8, backend,
                 n_k=n_k, n_nodes=n_nodes),
         name, xp, device,
     )
-    B_x = xp.sqrt(a_mb) * delta_crit_z * (1.0 + beta_mb * (a_mb * delta_crit_z ** 2 / x) ** (-alpha_mb))
+    B_x = math.sqrt(a_mb) * delta_crit_z * (1.0 + beta_mb * (a_mb * delta_crit_z ** 2 / x) ** (-alpha_mb))
     return B_x * D1  # native (z-evolved) convention, matching CHMF.barrier
 
 

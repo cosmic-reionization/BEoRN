@@ -269,6 +269,41 @@ def test_conditional_dndlnm_diff_movingbarrier_differentiable_jax(param, theta):
     assert float(g) == pytest.approx(float(fd), rel=1e-4)
 
 
+@pytest.mark.skipif(not _TORCH, reason='torch not installed')
+def test_conditional_dndlnm_diff_movingbarrier_differentiable_torch(param, theta):
+    """torch autograd through the MovingBarrier recipe matches central FD.
+
+    Regression test for a real bug: the barrier formula computed
+    ``xp.sqrt(a_mb)`` on ``a_mb`` (a plain Python float, the fixed Jenkins
+    et al. 2001 constant) -- ``torch.sqrt`` requires a Tensor argument
+    (unlike ``jnp.sqrt``/``np.sqrt``, which auto-convert), so every torch +
+    ``chmf_recipe='MovingBarrier'`` call raised ``TypeError``. Fixed by
+    precomputing ``math.sqrt(a_mb)`` as a plain float."""
+    chmf = CHMF(param)
+    M_test, z_test = 5e9, 8.0
+    cell = param.simulation.Lbox / param.simulation.Ncell
+    M_env = chmf.rho_m * cell ** 3
+    delta_field = torch.tensor([-0.3, 0.0, 0.5, 1.0], dtype=torch.float64)
+
+    def f(s8):
+        return conditional_dndlnm_diff(
+            M_test, delta_field, M_env, z_test,
+            theta['Om'], theta['Ob'], theta['h0'], theta['ns'], s8,
+            hmf_model='ST', chmf_recipe='MovingBarrier', backend='torch',
+        ).sum()
+
+    s8 = torch.tensor(float(theta['sigma_8']), dtype=torch.float64, requires_grad=True)
+    f(s8).backward()
+    g = s8.grad.item()
+
+    h = 1e-4
+    with torch.no_grad():
+        fp = f(torch.tensor(float(theta['sigma_8']) + h, dtype=torch.float64)).item()
+        fm = f(torch.tensor(float(theta['sigma_8']) - h, dtype=torch.float64)).item()
+    fd = (fp - fm) / (2 * h)
+    assert g == pytest.approx(fd, rel=1e-4)
+
+
 def test_conditional_dndlnm_diff_rejects_unknown_chmf_recipe():
     with pytest.raises(ValueError, match="Unknown chmf_recipe"):
         conditional_dndlnm_diff(
