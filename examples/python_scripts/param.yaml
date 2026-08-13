@@ -98,7 +98,7 @@ cosmology:
   ns: 0.96                       # scalar spectral index
 
 cosmo_sim:
-  density_source: '2LPT'          # which mechanism produces the density field: '1LPT', '2LPT', '3LPT', or 'external'
+  density_source: '2LPT'          # which mechanism produces the density field: '1LPT', '2LPT', '3LPT', '21cmfast', or 'external'
                                   # (metadata only -- this script builds a SecondOrderLPT solver directly, matching this value)
   mass_assignment: 'CIC'          # scheme for painting the LPT-generated density field: NGP, CIC, TSC, or PCS
   oversample: 1                   # internal resolution factor, downsampled back to Ncell (LPTBase.get_density's painting mesh)
@@ -111,7 +111,7 @@ cosmo_sim:
                                   # (only relevant to N-body loaders, e.g. ThesanLoader/Py21cmFastLoader)
 
 halo_sim:
-  halo_source: 'CHMF'             # how halo catalogs are generated: 'CHMF' (conditional halo mass function sampling) or 'external'
+  halo_source: 'CHMF'             # how halo catalogs are generated: 'CHMF' (conditional halo mass function sampling), '21cmfast', or 'external'
   hmf_model: 'ST'                 # only meaningful when halo_source is 'CHMF': 'PS' (pure EPS) or 'ST' (Sheth-Tormen calibrated, 21cmFAST-style)
   delta_c: 1.686                  # linear collapse threshold used by the CHMF
   R_env: null                     # environmental smoothing scale in Mpc/h for CHMF conditioning (null = use the cell size)

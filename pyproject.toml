@@ -25,7 +25,7 @@ dev = [
     "pytest>=7.0",
 ]
 extra = [
-    "21cmfast>=3.4.0,<4",
+    "21cmfast>=3.4.0",
     "hmf>=3.4",
     "colossus>=1.3",
 ]

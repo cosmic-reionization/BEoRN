@@ -184,3 +184,43 @@ def test_lptbase_seed_defaults_from_cosmo_sim_ic_seed(params):
     params.cosmo_sim.IC_seed = 777
     solver = SecondOrderLPT(params, verbose=False)
     assert solver.seed == 777
+
+
+# ── '21cmfast' as an explicit density_source/halo_source value ────────────────
+
+def test_cosmo_sim_density_source_accepts_21cmfast():
+    assert CosmoSimParameters(density_source='21cmfast').density_source == '21cmfast'
+
+
+def test_halo_sim_halo_source_accepts_21cmfast():
+    assert HaloSimParameters(halo_source='21cmfast').halo_source == '21cmfast'
+
+
+def test_parameters_warns_when_density_source_and_halo_source_disagree_about_21cmfast(caplog):
+    Parameters(
+        cosmo_sim=CosmoSimParameters(density_source='21cmfast'),
+        halo_sim=HaloSimParameters(halo_source='CHMF'),
+    )
+    assert any('disagree about py21cmfast' in r.message for r in caplog.records)
+
+
+def test_parameters_warns_the_other_direction_too(caplog):
+    Parameters(
+        cosmo_sim=CosmoSimParameters(density_source='2LPT'),
+        halo_sim=HaloSimParameters(halo_source='21cmfast'),
+    )
+    assert any('disagree about py21cmfast' in r.message for r in caplog.records)
+
+
+def test_parameters_silent_when_both_agree_on_21cmfast(caplog):
+    Parameters(
+        cosmo_sim=CosmoSimParameters(density_source='21cmfast'),
+        halo_sim=HaloSimParameters(halo_source='21cmfast'),
+    )
+    assert not any('disagree about py21cmfast' in r.message for r in caplog.records)
+
+
+def test_parameters_silent_when_neither_mentions_21cmfast(params, caplog):
+    """Default Parameters() -- density_source='2LPT', halo_source='CHMF' --
+    must not trigger the py21cmfast mismatch warning."""
+    assert not any('disagree about py21cmfast' in r.message for r in caplog.records)

@@ -464,15 +464,19 @@ class CosmoSimParameters:
     native LPT (1LPT/2LPT/3LPT) counts as a "cosmo sim" here alongside
     external N-body inputs (py21cmfast, Thesan, PKDGrav, etc.)."""
 
-    density_source: Literal['1LPT', '2LPT', '3LPT', 'external'] = '2LPT'
+    density_source: Literal['1LPT', '2LPT', '3LPT', 'external', '21cmfast'] = '2LPT'
     """Which mechanism produces the density field. ``'1LPT'``/``'2LPT'``/
     ``'3LPT'`` mean native LPT at that order (:class:`~beorn.lpt.ZeldovichApproximation`/
     :class:`~beorn.lpt.SecondOrderLPT`/:class:`~beorn.lpt.ThirdOrderLPT`);
-    ``'external'`` means an external N-body loader (py21cmfast/Thesan/PKDGrav)
-    is used instead. This is a metadata field recording the choice for
+    ``'21cmfast'`` means :class:`~beorn.load_input_data.Py21cmFastLoader`
+    specifically; ``'external'`` means any other external N-body loader
+    (Thesan/PKDGrav). This is a metadata field recording the choice for
     hashing/reproducibility — it does not itself dispatch which class gets
     instantiated (you still construct the LPT solver or loader class
-    directly); keep it in sync with whichever you actually use."""
+    directly); keep it in sync with whichever you actually use, and see
+    :attr:`HaloSimParameters.halo_source` — a mismatch (e.g. this is
+    ``'21cmfast'`` but that isn't) logs a warning from
+    :meth:`Parameters.__post_init__`."""
 
     mass_assignment: Literal['NGP', 'CIC', 'TSC', 'PCS'] = 'CIC'
     """Mass-assignment scheme used to paint the density field. Read as the
@@ -570,17 +574,21 @@ class CosmoSimParameters:
 class HaloSimParameters:
     """Parameters for how halo catalogs are generated."""
 
-    halo_source: Literal['CHMF', 'external'] = 'CHMF'
+    halo_source: Literal['CHMF', 'external', '21cmfast'] = 'CHMF'
     """How halo catalogs are generated. ``'CHMF'`` — conditional halo mass
     function sampling on the density field (see :attr:`hmf_model` for the
     PS/ST calibration; see :attr:`excursion_set_method` for the deterministic
-    massive-halo tier layered on top of it). ``'external'`` — read from an
-    external N-body loader's own halo finder (py21cmfast, Thesan, PKDGrav).
+    massive-halo tier layered on top of it). ``'21cmfast'`` —
+    :class:`~beorn.load_input_data.Py21cmFastLoader`'s own halo finder
+    (DexM in py21cmfast v3, optionally the CHMF sampler in v4). ``'external'``
+    — any other external N-body loader's own halo finder (Thesan, PKDGrav).
     Kept as a separate axis from :attr:`hmf_model` (rather than folding PS/ST
     into this field, e.g. ``'CHMF_PS'``) so future native halo-finding
     methods can be added as new ``halo_source`` values without overloading
     ``hmf_model``. Metadata field for hashing/reproducibility — does not
-    itself dispatch which loader/sampler gets constructed."""
+    itself dispatch which loader/sampler gets constructed; see
+    :attr:`CosmoSimParameters.density_source` for the cross-check against a
+    mismatched ``density_source``."""
 
     hmf_model: Literal['PS', 'ST'] = 'ST'
     """Only meaningful when :attr:`halo_source` is ``'CHMF'``. ``'PS'`` —
@@ -827,6 +835,15 @@ class Parameters:
     """halo-catalog generation parameters (CHMF vs external, HMF calibration,
     mass range, seed, mass assignment for painting halo positions)"""
 
+    def __post_init__(self):
+        ds, hs = self.cosmo_sim.density_source, self.halo_sim.halo_source
+        if '21cmfast' in (ds, hs) and ds != hs:
+            logger.warning(
+                f"cosmo_sim.density_source={ds!r} and halo_sim.halo_source={hs!r} "
+                "disagree about py21cmfast. If you are using Py21cmFastLoader "
+                "for both fields, set both to '21cmfast'; if intentionally "
+                "mixing sources, this warning is safe to ignore."
+            )
 
     @property
     def Lbox_hunits(self) -> float:

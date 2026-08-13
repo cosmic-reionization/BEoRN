@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from ..structs import HaloCatalog
+from ..mass_function import HaloMassFunction
 
 
 def plot_halo_mass_function(
@@ -11,12 +12,13 @@ def plot_halo_mass_function(
     label: str = None,
     color: str = None,
     analytical: bool = True,
-    analytical_model: str = 'Tinker08',
+    analytical_model: str = 'ST',
 ) -> None:
     """Plot the halo mass function from a :class:`HaloCatalog`.
 
-    Optionally overlays an analytical reference curve computed with the
-    ``hmf`` package (Tinker et al. 2008 by default).
+    Optionally overlays an analytical reference curve computed with BEoRN's
+    own :class:`~beorn.mass_function.HaloMassFunction` — no external
+    dependency required.
 
     Args:
         ax (matplotlib.axes.Axes): Axis to draw the HMF on.
@@ -25,9 +27,11 @@ def plot_halo_mass_function(
         label (str, optional): Legend label for the simulation data points.
         color (str, optional): Line/marker color for the simulation data points.
         analytical (bool): If ``True`` (default), overlay an analytical HMF curve.
-            Requires the ``hmf`` package (``pip install hmf``).
-        analytical_model (str): ``hmf`` model name passed to
-            :class:`hmf.MassFunction`. Default is ``'Tinker08'``.
+        analytical_model (str): Model passed to
+            :class:`~beorn.mass_function.HaloMassFunction` (case-insensitive).
+            One of ``'ST'``/``'sheth_tormen'`` (default, matching
+            :attr:`~beorn.structs.HaloSimParameters.hmf_model`'s own default),
+            ``'PS'``/``'press_schechter'``, or ``'ellipsoidal'``.
     """
     bin_edges, hmf_sim, hmf_err = halo_catalog.halo_mass_function(bin_count)
     bin_centers = np.sqrt(bin_edges[1:] * bin_edges[:-1])
@@ -41,23 +45,17 @@ def plot_halo_mass_function(
     if not analytical:
         return
 
-    try:
-        import hmf as hmf_pkg
-    except ImportError:
-        return
-
-    cosmo = halo_catalog.parameters.cosmology
     z = halo_catalog.redshift
     if z is None:
         raise ValueError(
             "HaloCatalog.redshift is not set — cannot compute the analytical HMF. "
             "Pass analytical=False or use a loader that sets HaloCatalog.redshift."
         )
-    mf = hmf_pkg.MassFunction(
-        z = z,
-        Mmin = np.log10(bin_edges[0]),
-        Mmax = np.log10(bin_edges[-1]),
-        hmf_model = analytical_model,
-        cosmo_params = dict(Om0=cosmo.Om, Ob0=cosmo.Ob, H0=cosmo.h0 * 100),
+    hmf = HaloMassFunction(
+        halo_catalog.parameters,
+        model=analytical_model.lower(),
+        delta_c=halo_catalog.parameters.halo_sim.delta_c,
     )
-    ax.plot(mf.m, mf.dndlnm, ls='--', color='grey', label=f'{analytical_model} (analytical)')
+    M_grid = np.logspace(np.log10(bin_edges[0]), np.log10(bin_edges[-1]), 200)
+    n = hmf.dndlnm(M_grid, z)
+    ax.plot(M_grid, n, ls='--', color='grey', label=f'{analytical_model} (analytical)')
