@@ -21,6 +21,7 @@ import warnings
 import numpy as np
 
 from ..structs import Parameters, HaloCatalog
+from ..particle_mapping import displace_positions
 from .linear_power import PowerSpectrum
 
 logger = logging.getLogger(__name__)
@@ -296,7 +297,9 @@ class CHMF:
                 f"Choose 'BarkanaLoeb2004' or 'MovingBarrier' (case-insensitive)."
             )
         import math
-        a, alpha, beta = 0.7, 0.81, 0.34  # Jenkins et al. (2001), as used by Davies et al. (2025)
+        a, alpha, beta = 0.700, 0.810, 0.340  # Jenkins et al. (2001), as used by Davies et al. (2025)
+        # a, alpha, beta = 0.707, 0.615, 0.485  # as used by Meriot & Semelin (2024)
+
         D = float(self._D1(z))
         delta_crit_z = self.delta_c / D
         x = float(self.sigma2_z0(M))
@@ -355,7 +358,8 @@ class CHMF:
             chmf_recipe='MovingBarrier'``.
         """
         import math
-        a, alpha, beta = 0.7, 0.81, 0.34  # Jenkins et al. (2001), as used by Davies et al. (2025)
+        a, alpha, beta = 0.700, 0.810, 0.340  # Jenkins et al. (2001), as used by Davies et al. (2025)
+        # a, alpha, beta = 0.707, 0.615, 0.485  # as used by Meriot & Semelin (2024)
 
         D = float(self._D1(z))
         delta_crit_z = self.delta_c / D  # Davies et al.'s own z-dependent barrier value
@@ -369,13 +373,26 @@ class CHMF:
         S_safe = np.where(valid, S_eff, 1.0)
 
         # B(z, sigma) - eq. 2 - and its Taylor-expansion correction T - eq. 4.
-        # g(x') = B(x') - delta_crit_z = c0_minus + c1 * x'^alpha is a pure
-        # power law in x' = sigma^2 (delta_crit_z fixed at this z), so its
-        # n-th d/dx'^n derivative has a simple closed form (falling-factorial
-        # coefficient); evaluated at x' = x, the halo's own sigma^2 (eq. 4's
-        # own argument list), not at sigma2_cond_z0.
+        # Davies et al. (2025)'s own eq. 4 literally Taylor-expands
+        # g(x') = B(x') - delta_crit, but that's a transcription error: T
+        # plays the role EPS's own (delta_crit - delta_cond) prefactor plays
+        # (eq. 1), and the exponential term below already subtracts
+        # delta_cond (not delta_crit) from B(z, sigma) -- so the prefactor
+        # must too, or the two terms are built from inconsistent barrier
+        # offsets. Confirmed numerically: expanding g(x') = B(x') -
+        # delta_cond instead closes a ~2-4x deficit against the
+        # unconditional/volume-averaged Sheth-Tormen HMF down to a ~25-35%
+        # residual, roughly flat across mass (consistent with this Taylor
+        # technique's own expected accuracy -- unaffected by extending the
+        # truncation order past n=5, which already converges there).
+        # g(x') = c0_minus + c1 * x'^alpha is still a pure power law in
+        # x' = sigma^2 (delta_cond_z0, like delta_crit, is constant w.r.t.
+        # x'), so its n-th d/dx'^n derivative for n >= 1 is unaffected (same
+        # closed-form falling-factorial coefficient); only the n=0 term
+        # picks up delta_cond_z0. Evaluated at x' = x, the halo's own
+        # sigma^2 (eq. 4's own argument list), not at sigma2_cond_z0.
         c1 = math.sqrt(a) * delta_crit_z * beta * (a * delta_crit_z ** 2) ** (-alpha)
-        c0_minus = math.sqrt(a) * delta_crit_z - delta_crit_z  # (c0 - delta_crit_z)
+        c0_minus = math.sqrt(a) * delta_crit_z - delta_cond_z0  # (c0 - delta_cond), not (c0 - delta_crit)
         # B_x in Davies et al.'s own z=0-sigma convention -- self.barrier
         # returns the native (z-evolved) convention, so divide D back out.
         B_x = self.barrier(M, z, recipe='MovingBarrier') / D
@@ -550,6 +567,19 @@ class CHMFSampler:
         requires ``Var(delta_env) = sigma2(M_env, z)``, and the caller is not
         expected to have done this smoothing themselves (issue #54).
 
+        ``cell_size`` is deliberately always ``Lbox / parameters.simulation.Ncell``
+        -- the *output* grid's own cell size -- not derived from
+        ``delta_field.shape[0]``. ``LPTHaloLoader``'s ``field_oversample``
+        path calls this on a finer field precisely to get a *less biased
+        estimate of the same coarse-cell quantity* (issue #56); ``M_env``
+        must stay tied to the coarse cell regardless, since the returned
+        ``delta_env`` is later decimated back down to ``Ncell`` and fed to
+        :meth:`CHMFSampler.sample`, whose whole per-cell Poisson framework
+        assumes one draw per ``Ncell``-grid cell of mass ``M_env`` -- keying
+        ``cell_size`` off the fine array's shape here would silently
+        mismatch ``M_env`` against the volume each decimated cell actually
+        represents.
+
         Returns:
             (delta_env, M_env) — the smoothed conditioning field and the
             environmental mass scale in M_sun.
@@ -603,22 +633,36 @@ class CHMFSampler:
         lam_grid = self._hmf_field_fn(M, d_grid, sigma2_env, z)
         return np.interp(delta_env.ravel(), d_grid, lam_grid).reshape(delta_env.shape)
 
-    def _mass_bins(self, M_env: float, n_mass_bins: int, M_split: float | None = None):
-        """Log-spaced mass bins between halo_sim.halo_mass_min and
-        min(halo_sim.halo_mass_max, M_env, M_split).
+    def _mass_range(self, M_env: float, M_split: float | None = None) -> tuple[float, float]:
+        """(M_min, M_max) for the stochastic tier's samplable mass range --
+        ``halo_sim.halo_mass_min`` and
+        ``min(halo_sim.halo_mass_max, 0.999*M_env, 0.999*M_split)``.
+
+        Shared by the binned (:meth:`_mass_bins`) and continuous
+        (:meth:`sample`'s ``n_mass_bins=None`` path) tiers so both apply the
+        identical cap.
+
+        ``halo_sim.halo_mass_max`` of ``None`` (default) applies no extra
+        cap -- only ``M_env``/``M_split`` bind.
 
         ``M_split`` (issue: excursion-set hybrid sampler) caps the
         stochastic tier's own range at the deterministic/stochastic
         boundary, so it never independently samples mass the excursion-set
         tier already claims -- ``None`` (the default, and the only
         behavior when the excursion-set tier is off) reproduces today's
-        ``M_env``-only cap exactly.
+        ``M_env``-only cap exactly. Gets the same ``0.999`` safety margin
+        ``M_env`` already does (rather than entering the cap raw) so the
+        stochastic tier's mass range stays strictly below ``M_split``,
+        never touching it -- otherwise the excursion-set tier's own
+        smallest halo mass (exactly ``M_split``) and this tier's top bin
+        edge would coincide at the same value.
         """
         params = self.parameters
         M_min = params.halo_sim.halo_mass_min
-        M_max_req = params.halo_sim.halo_mass_max
+        user_cap = params.halo_sim.halo_mass_max
+        M_max_req = user_cap if user_cap is not None else np.inf
         if M_split is not None:
-            M_max_req = min(M_max_req, M_split)
+            M_max_req = min(M_max_req, M_split * 0.999)
 
         if M_env <= M_min:
             raise ValueError(
@@ -628,8 +672,8 @@ class CHMFSampler:
             )
 
         M_max = min(M_max_req, M_env * 0.999)
-        if M_max < params.halo_sim.halo_mass_max:
-            if M_split is not None and M_split <= M_env * 0.999:
+        if user_cap is None or M_max < user_cap:
+            if M_split is not None and M_split <= M_env:
                 reason = (f"M_split = {M_split:.2e} Msun (the excursion-set "
                          f"tier claims mass at or above this)")
             else:
@@ -642,11 +686,101 @@ class CHMFSampler:
                 f"higher masses.",
                 stacklevel=3,
             )
+        return M_min, M_max
 
+    def _mass_bins(self, M_env: float, n_mass_bins: int, M_split: float | None = None):
+        """Log-spaced mass bins between halo_sim.halo_mass_min and
+        min(halo_sim.halo_mass_max, 0.999*M_env, 0.999*M_split) --
+        see :meth:`_mass_range`."""
+        M_min, M_max = self._mass_range(M_env, M_split)
         M_edges = np.logspace(np.log10(M_min), np.log10(M_max), n_mass_bins + 1)
         M_centers = np.sqrt(M_edges[:-1] * M_edges[1:])
         dln_M = np.diff(np.log(M_edges))
         return M_centers, dln_M
+
+    def _sample_continuous(
+        self, delta_env: np.ndarray, sigma2_env: float, z: float,
+        rng: np.random.Generator, cell_size: float, V_cell: float,
+        M_min: float, M_max: float, remaining: np.ndarray | None,
+        n_mass_nodes: int, n_delta_nodes: int | None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Continuous inverse-CDF halo-mass sampling (``n_mass_bins=None``):
+        draw ONE total Poisson count per cell, then sample each halo's mass
+        continuously from the CHMF's own inverse-CDF -- Davies, Mesinger &
+        Murray (2025), eq. 5-6 -- rather than :meth:`sample`'s other branch
+        (one independent Poisson draw per log-mass bin with bin-center
+        masses).
+
+        Builds a small ``(n_mass_nodes, n_delta_nodes)`` cumulative-dn/dlnM
+        table (mass-integrated via the trapezoidal rule, reusing the O6
+        delta-grid/interpolation machinery :meth:`_tabulated_n_cond` already
+        uses for the binned path) rather than a full ``(n_mass_nodes, N, N,
+        N)`` field -- the same memory-scaling caveat :meth:`expected_counts`
+        documents would otherwise apply per *node* instead of per *bin*,
+        and ``n_mass_nodes`` defaults far higher (512) than any sane
+        ``n_mass_bins``. Always uses a delta grid for this table regardless
+        of ``n_delta_nodes`` (``None``'s "exact, no interpolation" opt-out
+        only has meaning for the binned path's per-cell field evaluation).
+        """
+        M_nodes = np.logspace(np.log10(M_min), np.log10(M_max), n_mass_nodes)
+        lnM_nodes = np.log(M_nodes)
+        ratio_nodes = self._calibration_ratios(M_nodes, z)
+        d_grid = self._delta_grid(delta_env, n_delta_nodes if n_delta_nodes is not None else 512)
+
+        dndlnM_grid = np.empty((n_mass_nodes, len(d_grid)), dtype=np.float64)
+        for i_M, M in enumerate(M_nodes):
+            vals = self._hmf_field_fn(M, d_grid, sigma2_env, z)
+            dndlnM_grid[i_M] = np.maximum(np.asarray(vals, dtype=float) * ratio_nodes[i_M], 0.0)
+
+        # Cumulative trapezoid over ln M -> N(<M | delta_node) per cell.
+        d_lnM = np.diff(lnM_nodes)
+        avg = 0.5 * (dndlnM_grid[:-1] + dndlnM_grid[1:])
+        cdf_grid = np.concatenate([
+            np.zeros((1, len(d_grid))), np.cumsum(avg * d_lnM[:, None], axis=0),
+        ], axis=0) * V_cell  # (n_mass_nodes, n_delta_nodes)
+
+        N_expected_total = np.interp(delta_env.ravel(), d_grid, cdf_grid[-1]).reshape(delta_env.shape)
+        if remaining is not None:
+            N_expected_total = N_expected_total * remaining
+
+        N_sample = rng.poisson(np.maximum(N_expected_total, 0.0))  # (N, N, N) int
+        occupied = np.argwhere(N_sample > 0)  # (K, 3)
+        if occupied.size == 0:
+            return np.zeros((0, 3), dtype=np.float32), np.zeros(0, dtype=np.float64)
+
+        counts = N_sample[occupied[:, 0], occupied[:, 1], occupied[:, 2]]
+        total = int(counts.sum())
+
+        repeated_cells = np.repeat(occupied, counts, axis=0)  # (total, 3)
+        offsets = rng.random((total, 3)) * cell_size
+        pos = repeated_cells * cell_size + offsets
+
+        # Per-halo continuous mass: bracket the two nearest delta_grid nodes
+        # at the halo's own cell delta, linearly interpolate the CDF curve
+        # between them, normalize to [0, 1], and invert at a fresh uniform
+        # draw -- fully vectorised (no per-halo Python loop).
+        delta_at_occupied = delta_env[occupied[:, 0], occupied[:, 1], occupied[:, 2]]
+        delta_per_halo = np.repeat(delta_at_occupied, counts)
+
+        i1 = np.clip(np.searchsorted(d_grid, delta_per_halo), 1, len(d_grid) - 1)
+        i0 = i1 - 1
+        w = (delta_per_halo - d_grid[i0]) / (d_grid[i1] - d_grid[i0])
+
+        cdf_T = cdf_grid.T  # (n_delta_nodes, n_mass_nodes)
+        cdf_per_halo = (1.0 - w)[:, None] * cdf_T[i0] + w[:, None] * cdf_T[i1]  # (total, n_mass_nodes)
+        cdf_norm = cdf_per_halo / np.maximum(cdf_per_halo[:, -1:], 1e-300)
+
+        u = rng.random(total)
+        idx = np.clip(np.sum(cdf_norm < u[:, None], axis=1), 1, n_mass_nodes - 1)
+        j0, j1 = idx - 1, idx
+        cdf0 = np.take_along_axis(cdf_norm, j0[:, None], axis=1).ravel()
+        cdf1 = np.take_along_axis(cdf_norm, j1[:, None], axis=1).ravel()
+        lnM0, lnM1 = lnM_nodes[j0], lnM_nodes[j1]
+        denom = np.where(cdf1 > cdf0, cdf1 - cdf0, 1.0)
+        frac = np.where(cdf1 > cdf0, (u - cdf0) / denom, 0.0)
+        masses = np.exp(lnM0 + frac * (lnM1 - lnM0))
+
+        return pos.astype(np.float32), masses
 
     def expected_counts(
         self,
@@ -678,7 +812,11 @@ class CHMFSampler:
                 :meth:`sample`). ``None`` (default) reads
                 ``parameters.halo_sim.R_env``.
             n_mass_bins: Number of log-spaced mass bins. ``None`` (default)
-                reads ``parameters.halo_sim.n_mass_bins``.
+                reads ``parameters.halo_sim.n_mass_bins``, which itself
+                resolves to a fixed internal default (40) here -- unlike
+                :meth:`sample`'s catalog, this method's contract is always a
+                dense *binned* field, so "continuous" (:meth:`sample`'s own
+                meaning for ``None``) doesn't apply.
             n_delta_nodes: Resolution of the per-bin Λ(M_b, δ) lookup table
                 (issue #42, O6) — δ -> dn/dlnM is evaluated at this many
                 points spanning the field's actual delta range and linearly
@@ -722,6 +860,13 @@ class CHMFSampler:
         params = self.parameters
         R_env = R_env if R_env is not None else params.halo_sim.R_env
         n_mass_bins = n_mass_bins if n_mass_bins is not None else params.halo_sim.n_mass_bins
+        if n_mass_bins is None:
+            # Unlike sample()'s catalog, this method's contract is a dense
+            # *binned* field -- "continuous" has no meaning here, so None
+            # (continuous-sampling mode elsewhere) resolves to a fixed
+            # internal default bin count purely for this field's own
+            # resolution, rather than erroring or building a per-node field.
+            n_mass_bins = 40
         V_cell = (params.Lbox_hunits / params.simulation.Ncell) ** 3
 
         delta_env, M_env = self._resolve_environment(delta_field, R_env, precomputed_delta_env)
@@ -755,6 +900,8 @@ class CHMFSampler:
         precomputed_delta_env: tuple[np.ndarray, float] | None = None,
         M_split: float | None = None,
         deterministic_mass_fraction: np.ndarray | None = None,
+        n_mass_nodes: int = 512,
+        displacement_field: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
     ) -> HaloCatalog:
         """Sample a halo catalog from the conditional HMF.
 
@@ -782,7 +929,15 @@ class CHMFSampler:
             n_mass_bins: Number of log-spaced mass bins between
                          ``halo_sim.halo_mass_min`` and
                          ``min(halo_sim.halo_mass_max, M_env)``. ``None``
-                         (default) reads ``parameters.halo_sim.n_mass_bins``.
+                         (default) reads ``parameters.halo_sim.n_mass_bins``,
+                         which itself defaults to ``None`` — draw one total
+                         Poisson count per cell and sample each halo's mass
+                         continuously from the CHMF's own inverse-CDF
+                         (Davies, Mesinger & Murray 2025, eq. 5-6), instead
+                         of one independent Poisson draw per bin with
+                         bin-center masses. An explicit integer (either here
+                         or via ``halo_sim.n_mass_bins``) keeps the
+                         bin-center behavior unchanged.
             seed:        Random seed for reproducible Poisson draws and
                          intra-cell position sampling. ``None`` (default)
                          reads ``parameters.halo_sim.halo_sampler_seed``.
@@ -802,6 +957,28 @@ class CHMFSampler:
                 mass already claimed by the excursion-set tier — see
                 :meth:`expected_counts`'s identical argument. ``None``
                 (default) applies no rescaling.
+            n_mass_nodes: Only used when ``n_mass_bins`` resolves to
+                ``None`` (continuous sampling) — quadrature-node resolution
+                for the mass-integral/inverse-CDF table, analogous to
+                ``n_delta_nodes``'s role for the delta axis. Not a
+                user-facing discretization choice like ``n_mass_bins`` (it
+                only controls numerical accuracy of the *continuous* draw,
+                not its coarseness) — default 512 is the same order as
+                ``n_delta_nodes``'s own default.
+            displacement_field: ``(psi_x, psi_y, psi_z)`` LPT displacement
+                components, each shape ``(N, N, N)`` in Mpc/h (e.g.
+                :meth:`~beorn.lpt.LPTBase.get_displacement`'s output) — when
+                given, every sampled halo's Lagrangian position is corrected
+                to Eulerian via ``pos_eulerian = (pos_lagrangian + psi) % L``
+                (periodic wrap, matching
+                :meth:`~beorn.lpt.LPTBase.get_positions`'s own convention),
+                gathering ``psi`` at each halo's own position via
+                :func:`~beorn.particle_mapping.interpolate_field_at_positions`.
+                ``None`` (default) leaves positions at their Lagrangian
+                cell location, today's behavior unchanged. The displacement
+                grid's own resolution need not match ``delta_field``'s (any
+                consistent physical box is fine — interpolation is done in
+                the displacement grid's own cell units).
 
         Returns:
             :class:`~beorn.structs.HaloCatalog` with positions in Mpc/h and
@@ -819,50 +996,62 @@ class CHMFSampler:
         cell_size = L / N
         V_cell = cell_size ** 3
 
-        # ── Environment, sigma and mass bins ───────────────────────────
+        # ── Environment, sigma ──────────────────────────────────────────
         delta_env, M_env = self._resolve_environment(delta_field, R_env, precomputed_delta_env)
         sigma2_env = float(self.chmf.sigma2(M_env, z))
-        M_centers, dln_M = self._mass_bins(M_env, n_mass_bins, M_split)
-        ratios = self._calibration_ratios(M_centers, z)
-        M_min, M_max = M_centers[0], M_centers[-1]
-        d_grid = (self._delta_grid(delta_env, n_delta_nodes)
-                 if n_delta_nodes is not None else None)
         remaining = (1.0 - deterministic_mass_fraction
                     if deterministic_mass_fraction is not None else None)
-
-        # ── Poisson sampling ───────────────────────────────────────────
         rng = np.random.default_rng(seed)
-        positions_list: list[np.ndarray] = []
-        masses_list: list[np.ndarray] = []
 
-        for i_M, M in enumerate(M_centers):
-            n_cond = self._tabulated_n_cond(M, delta_env, sigma2_env, z, d_grid)
-            N_expected = np.maximum(n_cond * ratios[i_M] * dln_M[i_M] * V_cell, 0.0)
-            if remaining is not None:
-                N_expected = N_expected * remaining
-            N_sample = rng.poisson(N_expected)  # shape (N, N, N) int
-
-            occupied = np.argwhere(N_sample > 0)  # (K, 3)
-            if occupied.size == 0:
-                continue
-
-            counts = N_sample[occupied[:, 0], occupied[:, 1], occupied[:, 2]]
-            total = int(counts.sum())
-
-            # Vectorised position placement within cells
-            repeated_cells = np.repeat(occupied, counts, axis=0)  # (total, 3)
-            offsets = rng.random((total, 3)) * cell_size             # (total, 3)
-            pos = repeated_cells * cell_size + offsets               # (total, 3)
-
-            positions_list.append(pos.astype(np.float32))
-            masses_list.append(np.full(total, M, dtype=np.float64))
-
-        if positions_list:
-            positions = np.concatenate(positions_list, axis=0)
-            masses = np.concatenate(masses_list)
+        if n_mass_bins is None:
+            # ── Continuous inverse-CDF sampling ─────────────────────────
+            M_min, M_max = self._mass_range(M_env, M_split)
+            positions, masses = self._sample_continuous(
+                delta_env, sigma2_env, z, rng, cell_size, V_cell,
+                M_min, M_max, remaining, n_mass_nodes, n_delta_nodes,
+            )
         else:
-            positions = np.zeros((0, 3), dtype=np.float32)
-            masses = np.zeros(0, dtype=np.float64)
+            # ── Binned Poisson-per-bin sampling ─────────────────────────
+            M_centers, dln_M = self._mass_bins(M_env, n_mass_bins, M_split)
+            ratios = self._calibration_ratios(M_centers, z)
+            M_min, M_max = M_centers[0], M_centers[-1]
+            d_grid = (self._delta_grid(delta_env, n_delta_nodes)
+                     if n_delta_nodes is not None else None)
+
+            positions_list: list[np.ndarray] = []
+            masses_list: list[np.ndarray] = []
+
+            for i_M, M in enumerate(M_centers):
+                n_cond = self._tabulated_n_cond(M, delta_env, sigma2_env, z, d_grid)
+                N_expected = np.maximum(n_cond * ratios[i_M] * dln_M[i_M] * V_cell, 0.0)
+                if remaining is not None:
+                    N_expected = N_expected * remaining
+                N_sample = rng.poisson(N_expected)  # shape (N, N, N) int
+
+                occupied = np.argwhere(N_sample > 0)  # (K, 3)
+                if occupied.size == 0:
+                    continue
+
+                counts = N_sample[occupied[:, 0], occupied[:, 1], occupied[:, 2]]
+                total = int(counts.sum())
+
+                # Vectorised position placement within cells
+                repeated_cells = np.repeat(occupied, counts, axis=0)  # (total, 3)
+                offsets = rng.random((total, 3)) * cell_size             # (total, 3)
+                pos = repeated_cells * cell_size + offsets               # (total, 3)
+
+                positions_list.append(pos.astype(np.float32))
+                masses_list.append(np.full(total, M, dtype=np.float64))
+
+            if positions_list:
+                positions = np.concatenate(positions_list, axis=0)
+                masses = np.concatenate(masses_list)
+            else:
+                positions = np.zeros((0, 3), dtype=np.float32)
+                masses = np.zeros(0, dtype=np.float64)
+
+        if displacement_field is not None and positions.shape[0] > 0:
+            positions = displace_positions(positions, displacement_field, L)
 
         logger.debug(
             "CHMF sampled %d halos at z=%.3f (M range [%.1e, %.1e] Msun)",
@@ -979,7 +1168,9 @@ def conditional_dndlnm_diff(
         # dln(sigma)/dlnM is z-independent (see sigma2_M's own docstring), so
         # the z=0 and z-evolved evaluations share the same dln_M computed
         # above -- only a fresh z=0 sigma^2(M) evaluation is needed.
-        a_mb, alpha_mb, beta_mb = 0.7, 0.81, 0.34  # Jenkins et al. (2001)
+        a_mb, alpha_mb, beta_mb = 0.700, 0.810, 0.340  # Jenkins et al. (2001)
+        # a_mb, alpha_mb, beta_mb = 0.707, 0.615, 0.485  # as used by Meriot & Semelin (2024)
+        
         D1 = as_array(
             growth_factor(1.0 / (1.0 + z), Om, backend=backend, n_nodes=n_nodes),
             name, xp, device,
@@ -999,11 +1190,14 @@ def conditional_dndlnm_diff(
 
         sqrt_a_mb = math.sqrt(a_mb)  # plain float: xp.sqrt requires a tensor in torch
         c1 = sqrt_a_mb * delta_crit_z * beta_mb * (a_mb * delta_crit_z ** 2) ** (-alpha_mb)
-        c0_minus = delta_crit_z * (sqrt_a_mb - 1.0)
+        c0_minus = sqrt_a_mb * delta_crit_z - delta_cond_z0  # (c0 - delta_cond), not (c0 - delta_crit)
         B_x = sqrt_a_mb * delta_crit_z * (1.0 + beta_mb * (a_mb * delta_crit_z ** 2 / x) ** (-alpha_mb))
 
-        # Taylor expansion of g(x') = B(x') - delta_crit_z about x' = x (the
-        # halo's own sigma^2), matching CHMF.hmf_st_movingbarrier exactly.
+        # Taylor expansion of g(x') = B(x') - delta_cond about x' = x (the
+        # halo's own sigma^2) -- see CHMF.hmf_st_movingbarrier's own comment
+        # for why it's delta_cond, not Davies et al. (2025)'s literal
+        # delta_crit (a transcription error in eq. 4). Matches that method
+        # exactly, ported to be differentiable.
         T = xp.zeros_like(S_eff)
         falling = 1.0
         fact = 1.0

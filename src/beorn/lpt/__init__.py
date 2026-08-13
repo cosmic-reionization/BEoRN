@@ -43,6 +43,7 @@ from .differentiable import (
     lpt_velocity,
     lpt_linear_density,
     lpt_density,
+    eulerian_field_diff,
 )
 
 __all__ = [
@@ -81,4 +82,5 @@ __all__ = [
     'lpt_velocity',
     'lpt_linear_density',
     'lpt_density',
+    'eulerian_field_diff',
 ]

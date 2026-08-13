@@ -191,3 +191,90 @@ def test_expected_counts_volume_average_matches_ps_with_raw_field():
 
     rel_err = np.abs(dndlnm_measured / dndlnm_analytic - 1.0)
     assert np.all(rel_err < 0.15), rel_err
+
+
+# ── Item 3: continuous inverse-CDF sampling (n_mass_bins=None) ────────────────
+
+def test_n_mass_bins_and_halo_mass_max_default_to_none(params):
+    """New nullable defaults -- n_mass_bins=None opts into continuous
+    sampling, halo_mass_max=None applies no extra cap (equivalent to the
+    old 1e16 no-op default)."""
+    assert params.halo_sim.n_mass_bins is None
+    assert params.halo_sim.halo_mass_max is None
+
+
+def test_expected_counts_none_n_mass_bins_resolves_to_internal_default(params, delta_field):
+    """expected_counts always returns a dense binned field -- n_mass_bins
+    =None (continuous-sampling mode elsewhere) resolves to a fixed internal
+    bin count (40) here, not an error and not a per-node field."""
+    sampler = CHMFSampler(params, chmf=CHMF(params))
+    assert params.halo_sim.n_mass_bins is None
+    M_centers, lam = sampler.expected_counts(delta_field, Z)
+    assert M_centers.shape == (40,)
+    assert lam.shape == (40,) + delta_field.shape
+
+
+def test_sample_continuous_default_produces_continuous_masses(params, delta_field):
+    """n_mass_bins=None (the default) must sample masses continuously from
+    the CHMF's own inverse-CDF, not from a small fixed set of bin-center
+    values -- the defining behavioral difference from the binned path."""
+    sampler = CHMFSampler(params, chmf=CHMF(params))
+    cat = sampler.sample(delta_field, Z)
+    assert cat.masses.size > 20  # enough halos for the uniqueness check below
+    n_unique = np.unique(cat.masses).size
+    # Binned sampling with this many halos would collapse onto a handful of
+    # bin-center values; continuous sampling should give (almost) as many
+    # distinct masses as halos.
+    assert n_unique > 0.9 * cat.masses.size
+
+
+def test_sample_continuous_masses_within_range(params, delta_field):
+    sampler = CHMFSampler(params, chmf=CHMF(params))
+    cell_size = params.Lbox_hunits / params.simulation.Ncell
+    M_env = sampler.chmf.rho_m * cell_size ** 3
+    cat = sampler.sample(delta_field, Z)
+    assert cat.masses.size > 0
+    assert np.all(cat.masses >= params.halo_sim.halo_mass_min)
+    assert np.all(cat.masses < M_env)
+
+
+def test_sample_continuous_reproducible_with_seed(params, delta_field):
+    params.halo_sim.halo_sampler_seed = 321
+    sampler = CHMFSampler(params, chmf=CHMF(params))
+    cat1 = sampler.sample(delta_field, Z)
+    cat2 = sampler.sample(delta_field, Z)
+    np.testing.assert_array_equal(cat1.masses, cat2.masses)
+    np.testing.assert_array_equal(cat1.positions, cat2.positions)
+
+
+def test_sample_continuous_total_count_matches_expected_counts_integral(params, delta_field):
+    """Statistical cross-check: the continuous path's total halo count
+    should agree with the analytic expectation (integral of dn/dlnM over
+    the samplable mass range, summed over cells) within Poisson noise --
+    not exactly (it's still a stochastic draw), but not wildly off either."""
+    sampler = CHMFSampler(params, chmf=CHMF(params))
+    cat = sampler.sample(delta_field, Z)
+
+    cell_size = params.Lbox_hunits / params.simulation.Ncell
+    V_cell = cell_size ** 3
+    M_centers, lam = sampler.expected_counts(delta_field, Z, n_mass_bins=200)
+    N_expected = lam.sum()
+
+    N_sampled = cat.masses.size
+    # Generous tolerance: Poisson noise over ~O(1e2-1e3) total halos plus the
+    # binned-reference's own residual discretization error.
+    assert N_sampled == pytest.approx(N_expected, rel=0.35)
+
+
+def test_sample_explicit_n_mass_bins_keeps_binned_behavior(params, delta_field):
+    """An explicit integer -- even though the new default is None -- must
+    still reproduce today's per-bin-Poisson, bin-center-mass behavior."""
+    sampler = CHMFSampler(params, chmf=CHMF(params))
+    cat = sampler.sample(delta_field, Z, n_mass_bins=10)
+    M_centers, _ = sampler._mass_bins(
+        sampler.chmf.rho_m * (params.Lbox_hunits / params.simulation.Ncell) ** 3,
+        n_mass_bins=10,
+    )
+    if cat.masses.size:
+        # Every sampled mass must be exactly one of the 10 bin centers.
+        assert np.all(np.isin(cat.masses, M_centers))

@@ -356,3 +356,73 @@ def lpt_density(delta_k, L, z, Om, backend='numpy', order=1,
                      mass_assignment=mass_assignment, backend=name,
                      deconvolve=False)
     return mesh / mesh.mean() - 1.0
+
+
+def eulerian_field_diff(lagrangian_field, delta_k, L, z, Om, backend='numpy',
+                        order=1, mass_assignment='CIC', n_nodes=512):
+    """Repaint a field defined on the regular Lagrangian grid (e.g.
+    :func:`~beorn.lpt.chmf.halo_field_diff`'s own output) onto Eulerian
+    positions via LPT displacement — the differentiable-tier counterpart of
+    the exact tier's gather-kernel position correction (issue: Eulerian
+    halo positions).
+
+    No new numerical kernel is needed here (unlike the exact tier's
+    :func:`~beorn.particle_mapping.interpolate_field_at_positions`):
+    ``halo_field_diff``/``excursion_set_field_diff`` already produce fields
+    on the regular grid, not scattered discrete positions, so this reuses
+    the exact displaced-position/painting pattern already proven in
+    :func:`lpt_density` — just swapping ``lpt_density``'s "weights = matter
+    mass" for "weights = the Lagrangian field's own per-cell values".
+
+    Args:
+        lagrangian_field: Backend array, shape ``(N, N, N)`` — a field
+            defined on the regular Lagrangian grid (e.g.
+            :func:`~beorn.lpt.chmf.halo_field_diff`'s ``field`` return).
+        delta_k: δ(k) at z = 0, shape ``(N, N, N//2+1)`` — same input
+            :func:`lpt_displacement` takes (must be the SAME realization
+            ``lagrangian_field`` was itself conditioned on, for the
+            displacement to correlate with what moved).
+        L:       Box side length in Mpc/h.
+        z:       Redshift (static float).
+        Om:      Matter density parameter (scalar or 0-dim tensor).
+        backend: ``'numpy'`` (default), ``'jax'`` or ``'torch'``.
+        order:   1 → Zel'dovich, 2 → 2LPT (matches
+                 :meth:`~beorn.lpt.LPTBase`'s own displacement order
+                 convention — pass ``order=2`` for consistency with the
+                 exact tier's default 2LPT solver).
+        mass_assignment: ``'NGP'``, ``'CIC'`` (default), ``'TSC'`` or
+                 ``'PCS'`` — forwarded to
+                 :func:`~beorn.particle_mapping.paint_mesh`.
+
+    Returns:
+        Backend array, shape ``(N, N, N)`` — ``lagrangian_field``'s total
+        (``sum w``, not normalised) repainted at Eulerian positions.
+    """
+    from ..particle_mapping import paint_mesh
+    from ..cosmo.differentiable import get_backend, device_of, as_const
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, delta_k, Om)
+    psi_x, psi_y, psi_z = lpt_displacement(delta_k, L, z, Om, backend=backend,
+                                           order=order, n_nodes=n_nodes)
+    N = psi_x.shape[0]
+    cell = float(L) / N
+    q1d = (np.arange(N) + 0.5) * cell
+    qx = as_const(q1d[:, None, None], name, xp, device)
+    qy = as_const(q1d[None, :, None], name, xp, device)
+    qz = as_const(q1d[None, None, :], name, xp, device)
+
+    x = (qx + psi_x) % L
+    y = (qy + psi_y) % L
+    z_pos = (qz + psi_z) % L
+
+    if name == 'torch':
+        positions = xp.stack(
+            [x.reshape(-1), y.reshape(-1), z_pos.reshape(-1)], dim=-1)
+    else:
+        positions = xp.stack(
+            [x.reshape(-1), y.reshape(-1), z_pos.reshape(-1)], axis=-1)
+
+    weights = lagrangian_field.reshape(-1)
+    return paint_mesh(positions, weights, N, L, mass_assignment=mass_assignment,
+                     backend=name, deconvolve=False)

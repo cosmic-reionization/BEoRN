@@ -55,7 +55,7 @@ def test_halo_sim_defaults_match_prior_hardcoded_constructor_defaults(params):
     hs = params.halo_sim
     assert hs.delta_c == pytest.approx(1.686)
     assert hs.R_env is None
-    assert hs.n_mass_bins == 40
+    assert hs.n_mass_bins is None
     assert hs.halo_sampler_seed == 42
     assert hs.mass_assignment == 'NGP'
     assert hs.halo_source == 'CHMF'
@@ -81,7 +81,8 @@ def test_halo_sim_mass_range_independent_of_source(params):
     """halo_sim.halo_mass_min/max are their own fields, decoupled from
     source.halo_mass_min/max (the star-forming/painting cutoff)."""
     assert params.halo_sim.halo_mass_min == pytest.approx(params.source.halo_mass_min)
-    assert params.halo_sim.halo_mass_max == pytest.approx(params.source.halo_mass_max)
+    assert params.halo_sim.halo_mass_max is None
+    assert params.source.halo_mass_max == pytest.approx(1e16)
     params.halo_sim.halo_mass_min = 1e7
     assert params.source.halo_mass_min == pytest.approx(1e8)
 
@@ -113,6 +114,22 @@ def test_parameters_from_dict_round_trips_halo_sim(tmp_path):
     assert loaded.halo_sim.n_mass_bins == 20
     assert loaded.cosmo_sim.density_source == '1LPT'
     assert loaded.cosmo_sim.mass_assignment == 'TSC'
+
+
+def test_parameters_from_dict_round_trips_none_n_mass_bins(tmp_path):
+    """n_mass_bins/halo_mass_max's None default (continuous-sampling mode)
+    must round-trip through YAML as None, not e.g. the string 'null' or be
+    dropped/coerced to something else."""
+    p = Parameters()
+    assert p.halo_sim.n_mass_bins is None
+    assert p.halo_sim.halo_mass_max is None
+
+    yaml_path = tmp_path / "params.yaml"
+    p.to_yaml(yaml_path)
+    loaded = Parameters.from_yaml(yaml_path)
+
+    assert loaded.halo_sim.n_mass_bins is None
+    assert loaded.halo_sim.halo_mass_max is None
 
 
 # ── beorn_hash sensitivity (issue: relocated fields must stay hash-visible) ───

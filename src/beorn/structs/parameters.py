@@ -618,8 +618,18 @@ class HaloSimParameters:
     """Environmental smoothing scale in Mpc/h for CHMF conditioning. ``None``
     (default) uses the cell size as the conditioning scale."""
 
-    n_mass_bins: int = 140
-    """Number of log-spaced mass bins for CHMF sampling."""
+    n_mass_bins: int | None = None
+    """Number of log-spaced mass bins for CHMF sampling. ``None`` (default)
+    draws continuously from the CHMF's own inverse-CDF instead of binning
+    (:class:`~beorn.lpt.chmf.CHMFSampler.sample`'s exact tier; matches
+    Davies, Mesinger & Murray 2025 eq. 5-6 more closely than a fixed grid of
+    bin-center masses). An explicit integer keeps the earlier per-bin
+    Poisson-draw behavior unchanged, and is *required* (raises
+    ``ValueError`` if left ``None``) for the differentiable
+    (:func:`~beorn.lpt.chmf.halo_field_diff`/
+    :func:`~beorn.lpt.chmf.conditional_dndlnm_diff`) path, which needs a
+    concrete bin count for its quadrature and has no continuous-sampling
+    equivalent."""
 
     halo_mass_min: float = 1e8
     """Lower bound of the CHMF sampling mass range, in M_sun. Independent of
@@ -628,7 +638,7 @@ class HaloSimParameters:
     *generated*, source's controls what's *painted*. Same default value for
     a sane out-of-the-box match, but change them independently as needed."""
 
-    halo_mass_max: float = 1e16
+    halo_mass_max: float | None = None
     """Soft upper bound of the CHMF sampling mass range, in M_sun — not a
     strong/binding constraint in practice. The real hard ceiling is set by
     the box itself: per-cell EPS conditioning caps sampleable mass at the
@@ -636,7 +646,13 @@ class HaloSimParameters:
     even without per-cell conditioning the box volume bounds the largest
     halo that can exist. This field only lets you cap the range *further*
     below whichever of those applies; it can never raise the effective bound
-    above them. Default 1e16 is effectively a no-op cap for realistic grids."""
+    above them. ``None`` (default) applies no additional cap (equivalent to
+    the old default of 1e16, which was already effectively a no-op for
+    realistic grids). Like :attr:`n_mass_bins`, ``None`` is an *error* if
+    resolved into the differentiable
+    (:func:`~beorn.lpt.chmf.halo_field_diff`/
+    :func:`~beorn.lpt.chmf.conditional_dndlnm_diff`) path, which needs a
+    concrete numeric cap for its quadrature."""
 
     halo_sampler_seed: int = 42
     """RNG seed for halo-catalog generation (Poisson draws + intra-cell
@@ -699,16 +715,24 @@ class HaloSimParameters:
     excursion-set tier (see :attr:`excursion_set_method`); below it, halos
     are sampled stochastically from the CHMF as usual. ``None`` (default)
     inherits the per-cell environment mass ``M_env`` (the same quantity
-    :attr:`R_env` already resolves to) -- a purely *additive* default: it
-    only enables sampling mass that is hard-capped away entirely today
-    (``CHMFSampler``'s per-cell conditioning cannot represent anything at or
-    above ``M_env``), without changing any existing sub-``M_env``
-    statistics. Setting ``M_split`` below ``M_env`` is a more aggressive
-    mode -- it reassigns part of the existing near-``M_env`` mass range from
-    stochastic to deterministic treatment, and requires
-    :attr:`field_oversample` ``> 1`` (the excursion-set walk needs
-    sub-cell resolution to do this meaningfully; using it with
-    ``field_oversample == 1`` raises ``ValueError``)."""
+    :attr:`R_env` already resolves to) evaluated at whichever grid the
+    excursion-set walk actually operates on -- the :attr:`field_oversample`
+    -refined fine grid when that is ``> 1``, the coarse ``Ncell`` grid
+    otherwise -- matching Davies, Mesinger & Murray (2025, Sec. 2.2), where
+    the DexM/CHMF cutover mass is the Lagrangian mass of *the* simulation
+    cell (their pipeline has no coarse/fine split; :attr:`field_oversample`
+    is BEoRN's own addition, and the fine grid plays that paper's "cell"
+    role whenever it is active). With :attr:`field_oversample` ``== 1``
+    (fine and coarse grids coincide) this remains a purely *additive*
+    default: it only enables sampling mass that is hard-capped away
+    entirely today (``CHMFSampler``'s per-cell conditioning cannot
+    represent anything at or above ``M_env``), without changing any
+    existing sub-``M_env`` statistics. Setting ``M_split`` below the
+    resolved default is a more aggressive mode -- it reassigns part of the
+    existing near-``M_env`` mass range from stochastic to deterministic
+    treatment, and requires :attr:`field_oversample` ``> 1`` (the
+    excursion-set walk needs sub-cell resolution to do this meaningfully;
+    using it with ``field_oversample == 1`` raises ``ValueError``)."""
 
     excursion_set_method: Literal['off', 'exact', 'soft'] = 'off'
     """Whether/how the deterministic excursion-set tier (mass >=
@@ -756,6 +780,21 @@ class HaloSimParameters:
     surrogate -- smaller values track the ``'exact'`` tier's hard threshold
     more closely at the cost of a sharper (less smooth) gradient landscape.
     Only meaningful when :attr:`excursion_set_method` is ``'soft'``."""
+
+    apply_eulerian_displacement: bool = True
+    """Whether sampled/found halo positions are corrected from their
+    Lagrangian cell location to Eulerian via the LPT displacement field
+    (``pos_eulerian = (pos_lagrangian + psi) % L``) -- both
+    :class:`~beorn.lpt.chmf.CHMFSampler`'s stochastic tier and
+    :class:`~beorn.lpt.excursion_set.ExcursionSetFinder`'s deterministic
+    tier place halos at their host cell's Lagrangian position with no
+    displacement applied otherwise. ``True`` (default) is a correctness
+    fix, not an opt-in feature: halos physically move with the density
+    field they were sampled from, so :class:`~beorn.load_input_data.LPTHaloLoader`
+    reads this to compute and apply that displacement by default in
+    :meth:`~beorn.load_input_data.LPTHaloLoader.load_halo_catalog`. Set
+    ``False`` to keep halos pinned to their Lagrangian cell position
+    (e.g. to reproduce pre-Eulerian-correction results)."""
 
     mass_assignment: Literal['NGP', 'CIC', 'TSC', 'PCS'] = 'NGP'
     """Mass-assignment scheme for painting halo *positions* onto the grid

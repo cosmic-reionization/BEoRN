@@ -219,6 +219,164 @@ _NUMPY_BATCH_FN = {
 }
 
 
+# ── Pure-NumPy gather kernels (issue: Eulerian halo positions) ───────────────
+#
+# The mathematical dual of the scatter kernels above: instead of depositing a
+# particle's weight onto its neighboring mesh cells, read *out* a weighted
+# sum of the neighboring mesh cells at the particle's position -- the same
+# stencils (NGP/CIC/TSC/PCS), same cell-centered convention, just applied as
+# a gather (mesh -> value at position) instead of a scatter (position ->
+# mesh). This is what lets a smooth field defined on the regular grid (e.g.
+# an LPT displacement component) be evaluated at the arbitrary, generally
+# off-grid positions of already-placed halos.
+
+def _ngp_gather(field, N, px, py, pz):
+    ix = np.round(px).astype(np.int32) % N
+    iy = np.round(py).astype(np.int32) % N
+    iz = np.round(pz).astype(np.int32) % N
+    return field[ix, iy, iz]
+
+
+def _cic_gather(field, N, px, py, pz):
+    value = np.zeros(len(px), dtype=field.dtype)
+    stencils = []
+    for p in (px, py, pz):
+        i0 = np.floor(p).astype(np.int32)
+        d1 = (p - i0).astype(p.dtype)
+        d0 = 1.0 - d1
+        i0 %= N
+        i1 = (i0 + 1) % N
+        stencils.append(((i0, d0), (i1, d1)))
+    for cx, wx in stencils[0]:
+        for cy, wy in stencils[1]:
+            for cz, wz in stencils[2]:
+                value += field[cx, cy, cz] * (wx * wy * wz)
+    return value
+
+
+def _tsc_gather(field, N, px, py, pz):
+    value = np.zeros(len(px), dtype=field.dtype)
+    i_cen_x = np.round(px).astype(np.int32)
+    i_cen_y = np.round(py).astype(np.int32)
+    i_cen_z = np.round(pz).astype(np.int32)
+    for kx in (-1, 0, 1):
+        ix = (i_cen_x + kx) % N
+        wx = _w_tsc(px - (i_cen_x + kx))
+        for ky in (-1, 0, 1):
+            iy = (i_cen_y + ky) % N
+            wy = _w_tsc(py - (i_cen_y + ky))
+            for kz in (-1, 0, 1):
+                iz = (i_cen_z + kz) % N
+                wz = _w_tsc(pz - (i_cen_z + kz))
+                value += field[ix, iy, iz] * (wx * wy * wz)
+    return value
+
+
+def _pcs_gather(field, N, px, py, pz):
+    value = np.zeros(len(px), dtype=field.dtype)
+    i_cen_x = np.floor(px).astype(np.int32)
+    i_cen_y = np.floor(py).astype(np.int32)
+    i_cen_z = np.floor(pz).astype(np.int32)
+    for kx in (-1, 0, 1, 2):
+        ix = (i_cen_x + kx) % N
+        wx = _w_pcs(px - (i_cen_x + kx))
+        for ky in (-1, 0, 1, 2):
+            iy = (i_cen_y + ky) % N
+            wy = _w_pcs(py - (i_cen_y + ky))
+            for kz in (-1, 0, 1, 2):
+                iz = (i_cen_z + kz) % N
+                wz = _w_pcs(pz - (i_cen_z + kz))
+                value += field[ix, iy, iz] * (wx * wy * wz)
+    return value
+
+
+_NUMPY_GATHER_FN = {
+    'NGP': _ngp_gather,
+    'CIC': _cic_gather,
+    'TSC': _tsc_gather,
+    'PCS': _pcs_gather,
+}
+
+
+def interpolate_field_at_positions(
+    field: np.ndarray,
+    box_size: float,
+    particle_positions: np.ndarray,
+    mass_assignment: str = 'CIC',
+) -> np.ndarray:
+    """Interpolate *field* at arbitrary positions -- the gather dual of
+    :func:`map_particles_to_mesh`'s scatter (positions -> mesh).
+
+    Args:
+        field: float32 or float64 3-D array, shape ``(N, N, N)`` -- the grid
+            to sample (e.g. one component of an LPT displacement field).
+        box_size: Side length of the simulation box (same units as
+            ``particle_positions``).
+        particle_positions: Array of shape ``(n_parts, 3)``. Cell-centered.
+            same convention as :func:`map_particles_to_mesh`. Cast to
+            ``field.dtype`` internally.
+        mass_assignment: ``'NGP'``, ``'CIC'``, ``'TSC'``, or ``'PCS'`` --
+            should match whichever scheme ``field`` was itself painted with,
+            if it was painted rather than analytically defined on the grid
+            (e.g. an LPT displacement field has no painting scheme of its
+            own, so any consistent choice -- default ``'CIC'`` -- is fine).
+
+    Returns:
+        Array of shape ``(n_parts,)``, dtype ``field.dtype`` -- ``field``
+        interpolated at each position.
+    """
+    scheme = mass_assignment.upper()
+    if scheme not in _SCHEMES:
+        raise ValueError(
+            f"NumPy backend: unknown mass_assignment {mass_assignment!r}. "
+            f"Choose from {_SCHEMES}."
+        )
+    assert field.ndim == 3 and field.shape[0] == field.shape[1] == field.shape[2], \
+        "field must be a cubic 3-D array"
+
+    N = field.shape[0]
+    dtype = field.dtype
+    scale = dtype.type(N / box_size)
+    pos = np.asarray(particle_positions, dtype=dtype) * scale - dtype.type(0.5)
+
+    _fn = _NUMPY_GATHER_FN[scheme]
+    return _fn(field, N, pos[:, 0], pos[:, 1], pos[:, 2])
+
+
+def displace_positions(
+    positions: np.ndarray,
+    displacement_field: tuple[np.ndarray, np.ndarray, np.ndarray],
+    box_size: float,
+    mass_assignment: str = 'CIC',
+) -> np.ndarray:
+    """Correct Lagrangian *positions* to Eulerian via an LPT displacement
+    field: ``pos_eulerian = (pos_lagrangian + psi) % box_size``, gathering
+    ``psi`` at each position via :func:`interpolate_field_at_positions` --
+    the same convention :meth:`~beorn.lpt.LPTBase.get_positions` uses for
+    its own regular-grid particles, just applied at arbitrary (generally
+    off-grid) positions instead.
+
+    Args:
+        positions: Array of shape ``(n_parts, 3)``, Lagrangian positions.
+        displacement_field: ``(psi_x, psi_y, psi_z)``, each shape
+            ``(N, N, N)``, same units as ``box_size`` (e.g.
+            :meth:`~beorn.lpt.LPTBase.get_displacement`'s output).
+        box_size: Side length of the simulation box.
+        mass_assignment: Gather scheme -- see
+            :func:`interpolate_field_at_positions`.
+
+    Returns:
+        Array of shape ``(n_parts, 3)``, same dtype as ``positions``.
+    """
+    psi_x, psi_y, psi_z = displacement_field
+    psi = np.stack([
+        interpolate_field_at_positions(psi_x, box_size, positions, mass_assignment),
+        interpolate_field_at_positions(psi_y, box_size, positions, mass_assignment),
+        interpolate_field_at_positions(psi_z, box_size, positions, mass_assignment),
+    ], axis=-1)
+    return ((positions + psi) % box_size).astype(positions.dtype)
+
+
 # ── Fused grid+displacement painter (issue #47) ──────────────────────────────
 
 def paint_displacement_field(

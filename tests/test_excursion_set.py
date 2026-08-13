@@ -71,9 +71,20 @@ def test_finder_finds_massive_halos_at_low_z(params, chmf):
     assert cat.masses.size > 0
     assert np.all(cat.masses >= M_env)
     assert claimed.mean() > 0.0
-    # every claimed cell's mass is accounted for by some patch
-    assert cat.masses.sum() == pytest.approx(
-        chmf.rho_m * np.count_nonzero(claimed) * (params.Lbox_hunits / N) ** 3, rel=1e-8)
+
+    # Mass convention (post-fix): every accepted patch gets the nominal
+    # filter mass M(R) at its crossing scale, not a pixel-count-derived
+    # value -- so every catalog mass must be exactly one of the walk's
+    # log-spaced M(R) nodes (mirroring find()'s own internal M_values).
+    M_max = 0.1 * chmf.rho_m * params.Lbox_hunits ** 3
+    M_values = np.logspace(np.log10(M_max), np.log10(M_env), 24)
+    assert np.all(np.isin(cat.masses, M_values))
+
+    # The fixed convention assigns >= the old (undercounting) pixel-count
+    # mass would have for the same claimed volume -- a directional sanity
+    # check standing in for the old exact accounting identity, which relied
+    # on the since-removed pixel-count mass convention.
+    assert cat.masses.sum() >= chmf.rho_m * np.count_nonzero(claimed) * (params.Lbox_hunits / N) ** 3
 
 
 def test_finder_small_patch_rejected_below_min_patch_mass(params, chmf):
@@ -173,6 +184,24 @@ def test_m_split_caps_mass_bins_below_halo_mass_max(params):
     assert M_centers_split[-1] <= M_split
 
 
+def test_m_split_bin_edge_stays_strictly_below_m_split(params):
+    """The stochastic tier's mass range must stay strictly below M_split,
+    not touch it -- otherwise its top bin edge and the excursion-set
+    tier's own smallest halo mass (exactly M_split) would coincide."""
+    sampler = CHMFSampler(params, chmf=CHMF(params))
+    M_env = sampler.chmf.rho_m * (params.Lbox_hunits / N) ** 3
+    M_split = M_env / 10.0
+
+    # Delegates to _mass_range rather than re-deriving the cap logic inline,
+    # so this test can't drift out of sync with it again (issue: this test
+    # broke when halo_mass_max's default changed from 1e16 to None, because
+    # its own inline copy of the capping logic didn't handle None).
+    M_min, M_max = sampler._mass_range(M_env, M_split)
+    M_edges = np.logspace(np.log10(M_min), np.log10(M_max), 11)
+
+    assert M_edges[-1] < M_split
+
+
 def test_m_split_none_reproduces_default_mass_bins(params):
     """Regression guard: M_split=None (the excursion-set-off default) must
     not change _mass_bins' behavior at all."""
@@ -188,8 +217,11 @@ def test_m_split_none_reproduces_default_mass_bins(params):
 
 def test_loader_off_is_bitwise_identical_to_legacy_call(params):
     """excursion_set_method='off' (default) must reproduce sampler.sample()
-    called without any of the new kwargs, exactly."""
+    called without any of the new kwargs, exactly. Isolated from the
+    (separate) apply_eulerian_displacement axis, which defaults to True and
+    would otherwise diverge from this undisplaced direct call."""
     params.solver.redshifts = np.array([Z_LOW])
+    params.halo_sim.apply_eulerian_displacement = False
     loader = LPTHaloLoader(params, n_mass_bins=10)
     assert loader._excursion_finder is None
 
@@ -211,6 +243,28 @@ def test_loader_exact_extends_mass_range_beyond_m_env(params):
 
     cat = loader.load_halo_catalog(0)
     assert cat.masses.max() > loader.M_split
+
+
+def test_loader_exact_stochastic_and_excursion_masses_are_disjoint_at_m_split(params):
+    """The two tiers' mass ranges must not overlap: every stochastically
+    sampled halo's mass must be strictly below M_split, and the
+    excursion-set tier's smallest halo mass must be exactly M_split (its
+    own walk's own floor) -- a boundary-overlap regression guard."""
+    params.solver.redshifts = np.array([Z_LOW])
+    params.halo_sim.excursion_set_method = 'exact'
+    loader = LPTHaloLoader(params, n_mass_bins=10)
+
+    delta = loader.lpt_solver.get_linear_density(Z_LOW)
+    det_catalog, det_mass_fraction = loader._run_excursion_set(delta, Z_LOW)
+    stoch_catalog = loader.sampler.sample(
+        delta_field=delta, z=Z_LOW, n_mass_bins=10, seed=loader._base_seed ^ 0,
+        M_split=loader.M_split, deterministic_mass_fraction=det_mass_fraction,
+    )
+
+    if stoch_catalog.masses.size:
+        assert stoch_catalog.masses.max() < loader.M_split
+    if det_catalog is not None and det_catalog.masses.size:
+        assert det_catalog.masses.min() >= loader.M_split
 
 
 def test_loader_exact_reproducible(params):
@@ -236,24 +290,47 @@ def test_loader_unknown_excursion_set_method_raises(params):
         LPTHaloLoader(params)
 
 
-def test_loader_m_split_below_m_env_requires_field_oversample(params):
+# N, L for the two M_split-below-M_env tests below: with field_oversample=3
+# and M_split=M_env/5, ExcursionSetFinder walks the (oversample-refined) fine
+# field all the way down to a small M_split, and the number of accepted
+# patches its per-patch Python loop must process grows steeply with grid
+# resolution (measured: N=16/fineN=48 -> 663 patches/~1s; N=32/fineN=96 ->
+# 5130 patches/~48s) -- the module's own file-level N=64 (fineN=192) blows
+# this up past 30 minutes. N_SMALL/L_SMALL keep the same cell size (and thus
+# the same resolving power for finding real structure) as N, L above while
+# shrinking the total box volume, so the test still meaningfully exercises
+# the M_split < M_env-with-oversampling code path without the runtime blowup.
+N_SMALL, L_SMALL = 16, 50.0
+
+
+def _small_oversample_params():
+    p = Parameters()
+    p.simulation.Ncell = N_SMALL
+    p.simulation.Lbox = L_SMALL
+    p.simulation.use_hunits = True
+    return p
+
+
+def test_loader_m_split_below_m_env_requires_field_oversample():
     """M_split < M_env with field_oversample == 1 (the default) must raise
     at the point of use, since the coarse grid alone cannot resolve
     sub-cell mass scales."""
+    params = _small_oversample_params()
     params.solver.redshifts = np.array([Z_LOW])
     params.halo_sim.excursion_set_method = 'exact'
-    M_env = CHMF(params).rho_m * (params.Lbox_hunits / N) ** 3
+    M_env = CHMF(params).rho_m * (params.Lbox_hunits / N_SMALL) ** 3
     params.halo_sim.M_split = M_env / 5.0
     loader = LPTHaloLoader(params, n_mass_bins=10)
     with pytest.raises(ValueError, match="own cell size"):
         loader.load_halo_catalog(0)
 
 
-def test_loader_m_split_below_m_env_works_with_field_oversample(params):
+def test_loader_m_split_below_m_env_works_with_field_oversample():
+    params = _small_oversample_params()
     params.solver.redshifts = np.array([Z_LOW])
     params.halo_sim.excursion_set_method = 'exact'
     params.halo_sim.field_oversample = 3
-    M_env = CHMF(params).rho_m * (params.Lbox_hunits / N) ** 3
+    M_env = CHMF(params).rho_m * (params.Lbox_hunits / N_SMALL) ** 3
     params.halo_sim.M_split = M_env / 5.0
     loader = LPTHaloLoader(params, n_mass_bins=10)
     cat = loader.load_halo_catalog(0)

@@ -18,8 +18,29 @@ This is the "exact" counterpart of ``HaloSimParameters.excursion_set_method``
 ``spreading_method='exact'``/``'diffusion'`` split for ionization-excess
 spreading).
 
-Known limitation: connected-component labelling does not wrap patches
-across periodic box boundaries (the same limitation
+Mass convention (fixed after an under-prediction bug): each accepted patch
+is assigned the *nominal filter mass* ``M(R)`` at its crossing scale
+(Mesinger & Furlanetto 2007's own convention), not the pixel count of its
+thresholded blob. A real density peak's smoothed value only exceeds the
+barrier in a small core near its center -- nowhere close to the full
+geometric sphere of radius R the filter scale represents -- so counting
+literal crossing pixels systematically undercounted the true mass, worse at
+larger R, and caused patches near ``M_split`` to fall below
+``min_patch_mass`` and be dropped entirely. The pixel count is still used,
+but only as a size filter to reject spurious few-pixel noise crossings
+before trusting a patch's nominal ``M(R)``.
+
+Correspondingly, once a patch is accepted its full R-sphere (not just its
+thresholded pixels) is excluded from smaller scales -- the "full exclusion"
+criterion Bond & Myers (1996b) use to stop a halo's outer envelope from
+being independently re-detected as extra, smaller halos once its denser
+core keeps crossing at finer R. A patch whose peak has already been claimed
+by another patch accepted earlier at the *same* scale (their spheres can
+overlap even when the raw threshold-crossing blobs do not touch) is
+discarded outright, matching the same criterion.
+
+Known limitation: neither the connected-component labelling nor the sphere
+exclusion wraps across periodic box boundaries (the same limitation
 :func:`beorn.painting.spread.spreading_excess_fast` already has) -- accepted
 for now; the bias is small whenever halo sizes are small relative to the
 box.
@@ -32,9 +53,32 @@ import numpy as np
 from skimage.measure import label
 
 from ..structs import HaloCatalog
+from ..particle_mapping import displace_positions
 from .chmf import CHMF, tophat_k2_grid, tophat_smooth_static
 
 logger = logging.getLogger(__name__)
+
+
+def _exclude_sphere(active: np.ndarray, peak_idx: np.ndarray, R: float,
+                    cell_size: float) -> None:
+    """Mark all cells within physical radius ``R`` of ``peak_idx`` as
+    inactive, in place -- the "full exclusion" criterion (Bond & Myers 1996b)
+    that stops an accepted halo's outer envelope from being independently
+    re-detected as extra, smaller halos at finer scales.
+
+    Restricted to a local bounding box around ``peak_idx`` (cheap even for
+    a large R, since the box is at most a small fraction of the full field).
+    Non-periodic -- clipped at the box edges, the same accepted limitation
+    as the connected-component labelling's own lack of periodic wrapping.
+    """
+    shape = active.shape
+    r_cells = int(np.ceil(R / cell_size))
+    lo = [max(int(p) - r_cells, 0) for p in peak_idx]
+    hi = [min(int(p) + r_cells + 1, s) for p, s in zip(peak_idx, shape)]
+    sl = tuple(slice(l, h) for l, h in zip(lo, hi))
+    grids = np.meshgrid(*[np.arange(l, h) for l, h in zip(lo, hi)], indexing='ij')
+    dist2 = sum((g - p) ** 2 for g, p in zip(grids, peak_idx)) * cell_size ** 2
+    active[sl][dist2 <= R ** 2] = False
 
 
 class ExcursionSetFinder:
@@ -64,6 +108,7 @@ class ExcursionSetFinder:
         M_max: float | None = None,
         n_scales: int = 32,
         min_patch_mass: float | None = None,
+        displacement_field: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
     ) -> tuple[HaloCatalog, np.ndarray]:
         """Walk the excursion-set hierarchy and return the resulting halos.
 
@@ -81,19 +126,29 @@ class ExcursionSetFinder:
                 (default) uses 10% of the box mass.
             n_scales:    Number of log-spaced mass nodes between ``M_max``
                 and ``M_split``.
-            min_patch_mass: Reject patches below this mass (their cells
-                remain eligible to cross at a smaller scale). ``None``
-                (default) uses ``M_split`` itself.
+            min_patch_mass: Reject patches whose thresholded blob's own
+                pixel-count mass falls below this (their cells remain
+                eligible to cross at a smaller scale) -- a size filter
+                against spurious few-pixel noise crossings, not the mass
+                actually assigned to an accepted patch (see module
+                docstring). ``None`` (default) uses ``M_split`` itself.
+            displacement_field: ``(psi_x, psi_y, psi_z)`` LPT displacement
+                components -- see
+                :meth:`~beorn.lpt.chmf.CHMFSampler.sample`'s identical
+                argument. When given, each accepted patch's Lagrangian
+                position (``(peak_idx + 0.5) * cell_size``) is corrected to
+                Eulerian the same way. ``None`` (default) leaves positions
+                at their Lagrangian peak location, today's behavior
+                unchanged.
 
         Returns:
             (catalog, claimed) — a :class:`~beorn.structs.HaloCatalog` of
-            the accepted halos, and a boolean array (shape of
-            ``delta_field``) marking cells claimed by some accepted patch —
+            the accepted halos (each mass exactly one of the walk's
+            log-spaced ``M(R)`` nodes, per the module docstring's mass
+            convention), and a boolean array (shape of ``delta_field``)
+            marking cells excluded by some accepted patch's full R-sphere —
             the latter is what the caller reduces to
-            ``CHMFSampler.sample``'s ``deterministic_mass_fraction`` (every
-            claimed cell contributes exactly ``rho_m`` to its patch, by
-            construction, so "claimed" is already the per-cell collapsed
-            fraction before any coarse block-averaging).
+            ``CHMFSampler.sample``'s ``deterministic_mass_fraction``.
 
         Raises:
             ValueError: If ``M_max <= M_split``, or if ``M_split`` implies a
@@ -156,17 +211,31 @@ class ExcursionSetFinder:
             labeled = label(mask)
             for patch_id in range(1, int(labeled.max()) + 1):
                 patch_mask = labeled == patch_id
-                n_pix = int(np.count_nonzero(patch_mask))
-                patch_mass = self.chmf.rho_m * n_pix * cell_volume
-                if patch_mass < min_patch_mass:
-                    continue  # leave active -- may resolve at a smaller R
-
                 patch_coords = np.argwhere(patch_mask)
                 patch_vals = delta_smoothed[patch_mask]
                 peak_idx = patch_coords[np.argmax(patch_vals)]
+
+                if not active[tuple(peak_idx)]:
+                    # Already claimed by another patch accepted earlier at
+                    # this same scale -- their exclusion spheres can overlap
+                    # even when the raw threshold-crossing blobs themselves
+                    # do not touch (full exclusion, Bond & Myers 1996b).
+                    continue
+
+                n_pix = int(np.count_nonzero(patch_mask))
+                filter_mass = self.chmf.rho_m * n_pix * cell_volume
+                if filter_mass < min_patch_mass:
+                    continue  # leave active -- may resolve at a smaller R
+
+                # Mass is the nominal filter mass M(R) at this crossing
+                # scale (see module docstring) -- not filter_mass, which
+                # systematically undercounts the true mass and is used only
+                # as the size filter above.
                 positions_list.append((peak_idx + 0.5) * cell_size)
-                masses_list.append(patch_mass)
+                masses_list.append(float(M_R))
+
                 active[patch_mask] = False
+                _exclude_sphere(active, peak_idx, float(R), cell_size)
 
         if positions_list:
             positions = np.asarray(positions_list, dtype=np.float32)
@@ -174,6 +243,9 @@ class ExcursionSetFinder:
         else:
             positions = np.zeros((0, 3), dtype=np.float32)
             masses = np.zeros(0, dtype=np.float64)
+
+        if displacement_field is not None and positions.shape[0] > 0:
+            positions = displace_positions(positions, displacement_field, Lbox)
 
         logger.debug(
             "Excursion-set finder claimed %d halos at z=%.3f "

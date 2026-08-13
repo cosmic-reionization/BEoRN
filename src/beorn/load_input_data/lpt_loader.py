@@ -94,7 +94,9 @@ class LPTHaloLoader(BaseLoader):
                       tier and the stochastic CHMF -- see
                       :attr:`~beorn.structs.HaloSimParameters.M_split`. ``None``
                       (default) reads ``parameters.halo_sim.M_split`` (itself
-                      ``None`` -- inherits the per-cell environment mass).
+                      ``None`` -- inherits the per-cell environment mass
+                      ``M_env``, evaluated at the ``field_oversample``-fine
+                      grid when active, the coarse grid otherwise).
         excursion_set_n_scales: Number of scale-hierarchy nodes for the
                       excursion-set walk. ``None`` (default) reads
                       ``parameters.halo_sim.excursion_set_n_scales``.
@@ -104,6 +106,12 @@ class LPTHaloLoader(BaseLoader):
         excursion_set_min_patch_mass: Reject excursion-set patches below
                       this mass. ``None`` (default) reads
                       ``parameters.halo_sim.excursion_set_min_patch_mass``.
+        apply_eulerian_displacement: Correct sampled/found halo positions
+                      from their Lagrangian cell location to Eulerian via
+                      the LPT displacement field. ``None`` (default) reads
+                      ``parameters.halo_sim.apply_eulerian_displacement``
+                      (itself ``False`` -- today's Lagrangian-only behavior
+                      unchanged).
         **ps_kwargs:  Extra keyword arguments forwarded to the power spectrum
                       constructor (e.g. ``wiggle=True``).
     """
@@ -126,12 +134,17 @@ class LPTHaloLoader(BaseLoader):
         excursion_set_n_scales: int | None = None,
         excursion_set_M_max: float | None = None,
         excursion_set_min_patch_mass: float | None = None,
+        apply_eulerian_displacement: bool | None = None,
         **ps_kwargs,
     ):
         super().__init__(parameters)
         self.R_env = R_env if R_env is not None else parameters.halo_sim.R_env
         self.n_mass_bins = n_mass_bins if n_mass_bins is not None else parameters.halo_sim.n_mass_bins
         self._base_seed = halo_seed if halo_seed is not None else parameters.halo_sim.halo_sampler_seed
+        self.apply_eulerian_displacement = (
+            apply_eulerian_displacement if apply_eulerian_displacement is not None
+            else parameters.halo_sim.apply_eulerian_displacement
+        )
 
         field_oversample = (
             field_oversample if field_oversample is not None
@@ -223,13 +236,25 @@ class LPTHaloLoader(BaseLoader):
             excursion_set_method if excursion_set_method is not None
             else parameters.halo_sim.excursion_set_method
         )
-        cell_size_coarse = parameters.Lbox_hunits / parameters.simulation.Ncell
-        M_env_coarse = (chmf.rho_m * cell_size_coarse ** 3 if self.R_env is None
-                        else chmf.M_of_R(self.R_env))
+        # Davies, Mesinger & Murray (2025), Sec. 2.2: the DexM/CHMF cutover
+        # mass is the Lagrangian mass of *the* simulation cell -- in their
+        # pipeline a single grid resolution serves both roles. BEoRN's
+        # field_oversample (issue #56) splits that into two resolutions (a
+        # coarse Ncell grid for the CHMF's own per-cell sampling/output, and
+        # a finer phase-synchronized grid the excursion-set walk actually
+        # operates on) -- when it is active, the fine grid is the one
+        # playing the paper's "simulation cell" role, so M_split's default
+        # must resolve to *its* cell mass, not the coarser Ncell grid's
+        # (using the coarse cell here would leave part of the resolution
+        # field_oversample was built to provide untapped by this tier).
+        N_for_M_split = self._N_fine if self._N_fine is not None else parameters.simulation.Ncell
+        cell_size_for_M_split = parameters.Lbox_hunits / N_for_M_split
+        M_env_default = (chmf.rho_m * cell_size_for_M_split ** 3 if self.R_env is None
+                         else chmf.M_of_R(self.R_env))
         self.M_split = (M_split if M_split is not None
                         else parameters.halo_sim.M_split
                         if parameters.halo_sim.M_split is not None
-                        else M_env_coarse)
+                        else M_env_default)
         self.excursion_set_n_scales = (
             excursion_set_n_scales if excursion_set_n_scales is not None
             else parameters.halo_sim.excursion_set_n_scales
@@ -330,13 +355,21 @@ class LPTHaloLoader(BaseLoader):
         # XOR with index for a unique but reproducible per-snapshot seed
         sample_seed = self._base_seed ^ redshift_index
 
+        # Computed once per snapshot and passed into both tiers (the coarse
+        # Ncell resolution self.lpt_solver always builds this at is fine even
+        # when the excursion-set walk below operates on a finer
+        # field_oversample grid -- interpolation is done in the displacement
+        # field's own cell units, independent of the density field's).
+        displacement = (self.lpt_solver.get_displacement(z)
+                        if self.apply_eulerian_displacement else None)
+
         if self._fine_delta_k is not None:
             D1 = D(1.0 / (1.0 + z), self.parameters) / D(1.0, self.parameters)
             delta_fine = np.fft.irfftn(
                 D1 * self._fine_delta_k, s=(self._N_fine,) * 3,
             ).astype(np.float32)
 
-            det_catalog, det_mass_fraction = self._run_excursion_set(delta_fine, z)
+            det_catalog, det_mass_fraction = self._run_excursion_set(delta_fine, z, displacement)
 
             delta_env_fine, M_env = self.sampler._environment(delta_fine, self.R_env)
             # Decimate (point-sample), don't block-average: delta_env_fine is
@@ -359,6 +392,7 @@ class LPTHaloLoader(BaseLoader):
                 precomputed_delta_env=(delta_env, M_env),
                 M_split=self.M_split if det_catalog is not None else None,
                 deterministic_mass_fraction=det_mass_fraction,
+                displacement_field=displacement,
             )
             return self._merge_catalogs(det_catalog, stoch_catalog)
 
@@ -369,7 +403,7 @@ class LPTHaloLoader(BaseLoader):
         # scale internally (issue #54).
         delta = self.lpt_solver.get_linear_density(z)
 
-        det_catalog, det_mass_fraction = self._run_excursion_set(delta, z)
+        det_catalog, det_mass_fraction = self._run_excursion_set(delta, z, displacement)
 
         stoch_catalog = self.sampler.sample(
             delta_field=delta,
@@ -379,10 +413,14 @@ class LPTHaloLoader(BaseLoader):
             seed=sample_seed,
             M_split=self.M_split if det_catalog is not None else None,
             deterministic_mass_fraction=det_mass_fraction,
+            displacement_field=displacement,
         )
         return self._merge_catalogs(det_catalog, stoch_catalog)
 
-    def _run_excursion_set(self, delta_field: np.ndarray, z: float):
+    def _run_excursion_set(
+        self, delta_field: np.ndarray, z: float,
+        displacement_field: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
+    ):
         """Run the deterministic excursion-set tier if enabled.
 
         Args:
@@ -391,6 +429,11 @@ class LPTHaloLoader(BaseLoader):
                 the coarse field otherwise. May be at a finer resolution
                 than ``Ncell``.
             z: Redshift.
+            displacement_field: ``(psi_x, psi_y, psi_z)`` LPT displacement
+                components -- see
+                :meth:`~beorn.lpt.chmf.CHMFSampler.sample`'s identical
+                argument. Forwarded to
+                :meth:`~beorn.lpt.excursion_set.ExcursionSetFinder.find`.
 
         Returns:
             (catalog, deterministic_mass_fraction) -- ``(None, None)`` when
@@ -407,6 +450,7 @@ class LPTHaloLoader(BaseLoader):
             delta_field.astype(np.float64), z, M_split=self.M_split,
             M_max=self.excursion_set_M_max, n_scales=self.excursion_set_n_scales,
             min_patch_mass=self.excursion_set_min_patch_mass,
+            displacement_field=displacement_field,
         )
         N_coarse = self.parameters.simulation.Ncell
         oversample = claimed.shape[0] // N_coarse
