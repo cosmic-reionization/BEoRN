@@ -538,9 +538,14 @@ class Py21cmFastLoader(BaseLoader):
                 pbar.set_postfix(z=f"{redshift:.3f}", refresh=False)
                 z_start = time.process_time()
 
+                # Never cached: its result is only ever used transiently within
+                # this same iteration (written to our own densities_z*.h5 below),
+                # unlike determine_halo_catalog's result, which is threaded
+                # forward as the next iteration's descendant_halos. Caching it
+                # too would roughly double native-cache disk usage for no
+                # resumability benefit.
                 perturbed_field = p21c.perturb_field(
                     redshift=redshift, inputs=inputs, initial_conditions=ics,
-                    cache=cache, write=write_native, regenerate=regenerate_native,
                 )
                 # descendant_halos is None on the first (lowest-z) step and
                 # whenever chained=False (halo_sim.chain_halos=False keeps
