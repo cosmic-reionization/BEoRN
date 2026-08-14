@@ -1,4 +1,7 @@
-from .coordinator import PaintingCoordinator as PaintingCoordinator
+from .coordinator import (
+    PaintingCoordinator as PaintingCoordinator,
+    HaloProfileCoverageError as HaloProfileCoverageError,
+)
 from .helpers import profile_to_3Dkernel as profile_to_3Dkernel
 from .differentiable import (
     bubble_kernel_fourier as bubble_kernel_fourier,

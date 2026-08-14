@@ -428,6 +428,57 @@ def test_paint_single_fstar_fails_early_for_alpha_specific_mass_gap(monkeypatch)
     assert paint_calls["count"] == 0
 
 
+def test_paint_simple_loop_skips_and_warns_on_profile_coverage_gap(tmp_path, monkeypatch, caplog):
+    """A HaloProfileCoverageError from one snapshot must not abort the whole
+    paint_simple_loop run -- it should be logged as a warning and skipped,
+    with the other snapshot(s) still painted and returned."""
+    import logging
+    from beorn.io.handler import Handler
+    from beorn.painting.coordinator import HaloProfileCoverageError
+
+    halo_catalog = DummyHaloCatalog(
+        masses=np.array([2.0e8, 3.0e8]),
+        alpha_vals=np.array([0.7, 0.7]),
+    )
+    params = Parameters()
+    params.simulation.Ncell = 4
+    params.simulation.Lbox = 10.0
+    params.simulation.store_grids = ["Grid_xHII", "Grid_Temp", "Grid_xal"]
+    loader = DummyLoader(halo_catalog)  # redshifts = [12.0, 10.0]
+    output_handler = Handler(file_root=tmp_path)
+    coordinator = PaintingCoordinator(params, loader, output_handler, cache_handler=None)
+    radiation_profiles = SimpleNamespace(z_history=loader.redshifts)
+
+    good_cube = CoevalCube(
+        z=10.0,
+        parameters=params,
+        delta_b=np.zeros((4, 4, 4), dtype=float),
+        Grid_Temp=np.ones((4, 4, 4), dtype=float),
+        Grid_xHII=np.full((4, 4, 4), 0.25, dtype=float),
+        Grid_xal=np.full((4, 4, 4), 2.0, dtype=float),
+    )
+
+    def fake_paint_single(self, loop_index, profiles):
+        if loop_index == 0:
+            raise HaloProfileCoverageError(
+                "Halo catalog at z=12.000 contains 1 halo(s) outside the precomputed mass/alpha coverage."
+            )
+        return good_cube
+
+    monkeypatch.setattr(PaintingCoordinator, "paint_single", fake_paint_single)
+
+    with caplog.at_level(logging.WARNING):
+        cube = coordinator.paint_simple_loop(radiation_profiles, active_indices=[0, 1])
+
+    assert isinstance(cube, TemporalCube)
+    assert cube.snapshot_path(10.0).exists()
+    assert not cube.snapshot_path(12.0).exists()
+
+    messages = [r.message for r in caplog.records]
+    assert any("Skipping z=12.000" in m for m in messages)
+    assert any("Skipped 1/2 snapshot(s)" in m for m in messages)
+
+
 class DummyLegacyProfiles:
     def __init__(self):
         self.z_history = np.array([12.0, 10.0])

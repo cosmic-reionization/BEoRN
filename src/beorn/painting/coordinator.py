@@ -42,6 +42,17 @@ from ..structs.halo_catalog import HaloCatalog
 from ..load_input_data.base import BaseLoader
 
 
+class HaloProfileCoverageError(RuntimeError):
+    """Raised when a snapshot's halo catalog contains halo(s) outside the
+    precomputed profile mass/accretion-alpha coverage.
+
+    A distinct type (rather than a bare :class:`RuntimeError`) so orchestration
+    code (:meth:`PaintingCoordinator.paint_simple_loop`/:meth:`~.paint_mpi`) can
+    catch *this specific* failure to skip and warn about the offending
+    snapshot without also swallowing unrelated bugs.
+    """
+
+
 class PaintingCoordinator:
     @staticmethod
     def _profile_redshift_array(z_history) -> np.ndarray:
@@ -137,7 +148,7 @@ class PaintingCoordinator:
                 "Msol and recompute the profiles, or narrow the halo_mass_accretion_alpha grid."
             )
 
-        raise RuntimeError(
+        raise HaloProfileCoverageError(
             f"Halo catalog at z={float(zgrid):.3f} contains {unsupported.size} halo(s) outside "
             "the precomputed mass/alpha coverage. Painting would later drop those halos and "
             "fail the halo-count invariant. Coverage is alpha-dependent even when the global "
@@ -446,9 +457,16 @@ class PaintingCoordinator:
                 }
 
                 if rank == 0:
+                    skipped = []
                     for future in as_completed(futures):
                         loop_index = futures[future]
-                        grid_data = future.result()
+                        try:
+                            grid_data = future.result()
+                        except HaloProfileCoverageError as exc:
+                            z = float(self.loader.redshifts[loop_index])
+                            self.logger.warning(f"Skipping z_index={loop_index} (z={z:.3f}) — {exc}")
+                            skipped.append(z)
+                            continue
                         self.logger.info(
                             "Received finished snapshot from worker for z_index=%d (z=%.2f). Appending to temporal output.",
                             loop_index,
@@ -461,7 +479,15 @@ class PaintingCoordinator:
                             float(grid_data.z),
                         )
 
-                    self.logger.info(f"Painting of {self.snapshot_count} snapshots done.")
+                    self.logger.info(f"Painting of {len(missing_indices) - len(skipped)} snapshots done.")
+                    if skipped:
+                        self.logger.warning(
+                            f"Skipped {len(skipped)}/{len(missing_indices)} snapshot(s) due to halo/profile "
+                            f"mass-coverage gaps: z={', '.join(f'{z:.3f}' for z in skipped)}. Increase "
+                            "solver.halo_mass_bin_max (or narrow halo_mass_accretion_alpha) and recompute "
+                            "the profiles, then rerun paint_full() — already-painted snapshots are cached "
+                            "and will be skipped."
+                        )
                     return TemporalCube.read(file_path=cube._file_path, parameters=self.parameters)
 
         return None
@@ -474,6 +500,12 @@ class PaintingCoordinator:
         redshift snapshots.  Snapshots whose ``CoevalCube_z{z:.3f}.h5`` file
         already exists are skipped unless ``force_recompute=True`` was passed
         to the constructor, allowing interrupted runs to resume automatically.
+
+        A snapshot whose halo catalog falls outside the precomputed profile
+        mass/accretion-alpha coverage (:class:`HaloProfileCoverageError`) is
+        logged as a warning and skipped rather than aborting the whole run —
+        the other snapshots still get painted, and a summary of what was
+        skipped (and why) is logged once painting finishes.
 
         Args:
             radiation_profiles (RadiationProfiles): Precomputed profiles.
@@ -494,6 +526,7 @@ class PaintingCoordinator:
             f"Using {self.parameters.simulation.cores} processes on a single node."
         )
 
+        skipped = []
         with tqdm(active_indices, **TQDM_KWARGS) as pbar:
             for loop_index in pbar:
                 z = self.loader.redshifts[loop_index]
@@ -510,10 +543,23 @@ class PaintingCoordinator:
                     else:
                         self.logger.info(f"Found painted output for z={zgrid:.3f} — skipping (set force_recompute=True to repaint).")
                         continue
-                grid_data = self.paint_single(loop_index, radiation_profiles)
+                try:
+                    grid_data = self.paint_single(loop_index, radiation_profiles)
+                except HaloProfileCoverageError as exc:
+                    self.logger.warning(f"Skipping z={zgrid:.3f} — {exc}")
+                    skipped.append(zgrid)
+                    continue
                 cube.append(grid_data, loop_index)
 
-        self.logger.info(f"Painting of {len(active_indices)} snapshots done.")
+        self.logger.info(f"Painting of {len(active_indices) - len(skipped)} snapshots done.")
+        if skipped:
+            self.logger.warning(
+                f"Skipped {len(skipped)}/{len(active_indices)} snapshot(s) due to halo/profile "
+                f"mass-coverage gaps: z={', '.join(f'{z:.3f}' for z in skipped)}. Increase "
+                "solver.halo_mass_bin_max (or narrow halo_mass_accretion_alpha) and recompute "
+                "the profiles, then rerun paint_full() — already-painted snapshots are cached "
+                "and will be skipped."
+            )
         return TemporalCube.read(file_path=cube._file_path, parameters=self.parameters)
 
 
