@@ -224,3 +224,11 @@ def test_parameters_silent_when_neither_mentions_21cmfast(params, caplog):
     """Default Parameters() -- density_source='2LPT', halo_source='CHMF' --
     must not trigger the py21cmfast mismatch warning."""
     assert not any('disagree about py21cmfast' in r.message for r in caplog.records)
+
+
+def test_halo_sim_chain_halos_defaults_to_true(params):
+    assert params.halo_sim.chain_halos is True
+
+
+def test_halo_sim_chain_halos_can_be_disabled():
+    assert HaloSimParameters(chain_halos=False).chain_halos is False

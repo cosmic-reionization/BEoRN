@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+import json
 import time
 import h5py
 import logging
@@ -35,6 +36,14 @@ class Py21cmFastLoader(BaseLoader):
     ``densities_z*.h5``) is identical either way, so :meth:`load_halo_catalog`/
     :meth:`load_density_field` need no version awareness at all.
 
+    For py21cmfast v4, :attr:`~beorn.structs.HaloSimParameters.chain_halos`
+    (default ``True``) makes :meth:`_generate_v4` build halo catalogs as a
+    single descendant-consistent progenitor chain (Davies, Mesinger & Murray
+    2025) instead of independent per-redshift draws — see
+    :meth:`_generate_v4` for the resulting requirements around a fixed
+    redshift list and :attr:`py21cmfast_cache_direc` for how mid-chain
+    progress survives an interrupted job.
+
     Args:
         parameters (Parameters): Simulation and cosmology parameters.
         file_root (Path, optional): Directory containing pre-generated
@@ -45,17 +54,50 @@ class Py21cmFastLoader(BaseLoader):
             HII_DIM stays Ncell). A larger factor resolves lower halo masses
             at the cost of more memory and compute time. ``None`` (default)
             reads ``parameters.cosmo_sim.field_oversample``.
+        py21cmfast_cache_direc (Path, str, bool, or None, optional): Where to
+            keep py21cmfast's own native per-redshift cache (``OutputCache``)
+            during chained (v4, :attr:`~beorn.structs.HaloSimParameters.chain_halos`
+            ``=True``) generation. This is what lets a chained run resume
+            from where it left off if a job is interrupted (e.g. hits its
+            time limit) instead of restarting the whole chain from the
+            lowest redshift — ``descendant_halos`` must be an actual
+            py21cmfast ``HaloCatalog`` object, which can only be recovered
+            from this native cache, not from BEoRN's own
+            ``haloes_z*.h5``/``densities_z*.h5`` files. ``True`` (default)
+            resolves to ``file_root / '_py21cmfast_cache'``. ``False`` or
+            ``None`` disables it entirely (no resumability if interrupted;
+            every chained run starts from the lowest redshift). A
+            ``Path``/``str`` uses that location directly. This is purely
+            loader plumbing, not physics — unlike :attr:`chain_halos`, it has
+            no equivalent in :class:`~beorn.structs.Parameters` and is not
+            shared with any other loader. Ignored when ``chain_halos`` is
+            ``False``, and unused by py21cmfast v3 (no chaining concept
+            there). A log message is emitted once generation finishes,
+            naming the directory, its size, and confirming it is then safe
+            to delete.
     """
 
-    def __init__(self, parameters: Parameters, file_root: "Path | str" = None, field_oversample: int | None = None):
+    def __init__(
+        self, parameters: Parameters, file_root: "Path | str" = None,
+        field_oversample: int | None = None,
+        py21cmfast_cache_direc: "Path | str | bool | None" = True,
+    ):
         super().__init__(parameters)
         self.file_root = Path(file_root) if file_root is not None else None
         self.field_oversample = (
             field_oversample if field_oversample is not None
             else parameters.cosmo_sim.field_oversample
         )
+        self.py21cmfast_cache_direc = py21cmfast_cache_direc
         if self.file_root is not None and self.file_root.is_dir():
             self._ensure_parameters_yaml(self.file_root)
+
+    def _resolve_py21cmfast_cache_direc(self, file_root: Path) -> "Path | None":
+        """Resolve :attr:`py21cmfast_cache_direc` to a concrete path, or ``None`` if disabled."""
+        setting = self.py21cmfast_cache_direc
+        if not setting:
+            return None
+        return file_root / '_py21cmfast_cache' if setting is True else Path(setting)
 
     @property
     def redshifts(self) -> np.ndarray:
@@ -152,6 +194,12 @@ class Py21cmFastLoader(BaseLoader):
                 f"cosmo_params.yaml not found in {directory} — written from current parameters."
             )
 
+    def _chain_manifest_path(self, file_root: Path) -> Path:
+        """Path to the small JSON file recording the redshift list a chained
+        (v4, :attr:`~beorn.structs.HaloSimParameters.chain_halos` ``=True``)
+        generation was built against."""
+        return file_root / 'chain_redshifts.json'
+
     def generate(self, handler: Handler) -> None:
         """Run py21cmfast to generate halo catalogs and density fields.
 
@@ -162,7 +210,11 @@ class Py21cmFastLoader(BaseLoader):
 
         - Changing astrophysical parameters reuses the same directory.
         - Adding or removing redshifts only generates the missing snapshots;
-          existing ones are left untouched.
+          existing ones are left untouched -- *except* under py21cmfast v4
+          with :attr:`~beorn.structs.HaloSimParameters.chain_halos` ``=True``,
+          where every snapshot's catalog is chained to its neighbors, so any
+          change to the redshift list invalidates the whole chain (see
+          :meth:`_generate_v4`).
         - Changing cosmology or grid/seed creates a new directory.
 
         Sets ``self.file_root`` so that :meth:`load_halo_catalog` and
@@ -176,11 +228,51 @@ class Py21cmFastLoader(BaseLoader):
         """
         file_root = handler.file_root / self.input_tag
 
+        try:
+            import py21cmfast as p21c
+        except ImportError:
+            raise ImportError(
+                'Generating data with py21cmfast requires additional dependencies. '
+                'Install beorn with the extra package set: `pip install beorn[extra]` '
+                'or see https://github.com/21cmfast/21cmFAST/.'
+            )
+
+        major = _py21cmfast_major_version(p21c.__version__)
+        chained = major == 4 and self.parameters.halo_sim.chain_halos
+
         all_redshifts = list(self.redshifts)
         present = [z for z in all_redshifts
                    if (file_root / f'haloes_z{z:.3f}.h5').exists() and
                       (file_root / f'densities_z{z:.3f}.h5').exists()]
         missing = [z for z in all_redshifts if z not in present]
+
+        current_chain = sorted((float(z) for z in all_redshifts), reverse=True)
+        manifest_path = self._chain_manifest_path(file_root)
+        if chained and manifest_path.exists():
+            previous_chain = json.loads(manifest_path.read_text())
+            if previous_chain != current_chain:
+                logger.warning(
+                    f"halo_sim.chain_halos=True, but the requested redshift list for "
+                    f"{file_root} has changed since it was last generated "
+                    f"({len(previous_chain)} -> {len(current_chain)} redshifts). "
+                    "Chained halo catalogs are only self-consistent for the exact "
+                    "ordered redshift list they were built against, so the ENTIRE "
+                    "chain is being regenerated from scratch (existing haloes_z*.h5/"
+                    "densities_z*.h5 in this directory will be overwritten). To avoid "
+                    "this cost, fix the full redshift list up front."
+                )
+                missing = list(all_redshifts)
+                present = []
+
+        if chained:
+            # Written up front (recording the *intended* full chain), not
+            # after a successful run -- so if this attempt is itself
+            # interrupted (e.g. a job hitting its time limit) before ever
+            # completing, the next call still recognizes the redshift list
+            # as unchanged and can resume from py21cmfast's native cache
+            # instead of tripping the "list changed" warning above.
+            file_root.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(json.dumps(current_chain))
 
         logger.info(self._simulation_info(file_root))
 
@@ -200,16 +292,6 @@ class Py21cmFastLoader(BaseLoader):
             f'z = {", ".join(f"{z:.3f}" for z in missing)}'
         )
 
-        try:
-            import py21cmfast as p21c
-        except ImportError:
-            raise ImportError(
-                'Generating data with py21cmfast requires additional dependencies. '
-                'Install beorn with the extra package set: `pip install beorn[extra]` '
-                'or see https://github.com/21cmfast/21cmFAST/.'
-            )
-
-        major = _py21cmfast_major_version(p21c.__version__)
         if major == 3:
             logger.info(
                 f'Using py21cmfast v{p21c.__version__} (v3 API: DexM halo finder, '
@@ -221,7 +303,7 @@ class Py21cmFastLoader(BaseLoader):
             self._generate_v3(p21c, file_root, missing)
         elif major == 4:
             logger.info(f'Using py21cmfast v{p21c.__version__} (v4 API).')
-            self._generate_v4(p21c, file_root, missing)
+            self._generate_v4(p21c, file_root, missing, chained=chained, resume=bool(present))
         else:
             raise RuntimeError(
                 f'Unsupported py21cmfast version {p21c.__version__}; '
@@ -329,7 +411,10 @@ class Py21cmFastLoader(BaseLoader):
             f'py21cmfast v3 generation done in {time.process_time() - start_time:.1f}s.'
         )
 
-    def _generate_v4(self, p21c, file_root: Path, missing: list) -> None:
+    def _generate_v4(
+        self, p21c, file_root: Path, missing: list,
+        chained: bool = True, resume: bool = False,
+    ) -> None:
         """Generate ``missing`` snapshots using the py21cmfast v4 API.
 
         Uses ``SOURCE_MODEL='CHMF-SAMPLER'`` so halos are sampled from the
@@ -339,6 +424,29 @@ class Py21cmFastLoader(BaseLoader):
         :meth:`_generate_v3` (``PerturbHaloField``/``PerturbedField`` groups
         with ``halo_masses``/``halo_coords``/``density`` datasets) so
         :meth:`load_halo_catalog`/:meth:`load_density_field` stay unchanged.
+
+        Args:
+            chained: When ``True`` (the ``halo_sim.chain_halos`` default,
+                for py21cmfast v4), every redshift in ``self.redshifts`` --
+                not just ``missing`` -- is walked ascending (lowest z
+                first), threading each computed ``HaloCatalog`` in as
+                ``descendant_halos`` for the next: a single mass-conserving
+                progenitor chain (Davies, Mesinger & Murray 2025), mirroring
+                py21cmfast's own internal driver
+                (``drivers.coeval.evolve_halos``, which takes a descending
+                redshift list and processes it reversed for exactly this
+                reason). ``False`` keeps every redshift an independent draw
+                (``descendant_halos=None`` throughout), matching v3's
+                behavior and requiring no particular ordering.
+            resume: Only meaningful when ``chained``. ``True`` means
+                ``missing`` is a subset of ``self.redshifts`` from an
+                earlier, *incomplete* run against this exact same redshift
+                list -- safe to let py21cmfast's own native cache
+                (``py21cmfast_cache_direc``) supply already-computed
+                catalogs instead of recomputing them. ``False`` means a
+                first-ever run or a forced full regeneration (the redshift
+                list changed since last time), so any pre-existing native
+                cache entries must not be trusted/reused.
         """
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
@@ -384,27 +492,73 @@ class Py21cmFastLoader(BaseLoader):
             random_seed=cosmo_sim.IC_seed,
         )
 
+        # Native py21cmfast caching (OutputCache) is only meaningful for chained
+        # generation -- it's what lets determine_halo_catalog return an actual
+        # HaloCatalog object (rather than recomputing it) for use as
+        # descendant_halos on resume. Independent-draw mode has no equivalent
+        # need, so it always computes fresh, matching pre-chaining behavior.
+        if chained:
+            cache_direc = self._resolve_py21cmfast_cache_direc(file_root)
+            cache = p21c.OutputCache(direc=cache_direc) if cache_direc is not None else None
+            write_native = cache is not None
+            # Only trust a pre-existing cache entry when resuming an
+            # interrupted run against the SAME redshift list -- a forced full
+            # regeneration (list changed) must not silently reuse a catalog
+            # that was chained against different neighbors.
+            regenerate_native = not (cache is not None and resume)
+        else:
+            cache_direc = None
+            cache = None
+            write_native = False
+            regenerate_native = True
+
         logger.info('Computing initial conditions...')
         ic_start = time.process_time()
-        ics = p21c.compute_initial_conditions(inputs=inputs)
+        ics = p21c.compute_initial_conditions(
+            inputs=inputs, cache=cache, write=write_native, regenerate=regenerate_native,
+        )
         logger.info(f'Initial conditions done in {time.process_time() - ic_start:.1f}s.')
 
-        with tqdm(missing, desc='py21cmfast snapshots', unit='snapshot') as pbar:
+        missing_set = set(missing)
+        if chained:
+            # Walk every requested redshift -- not just `missing` -- ascending
+            # (lowest z first), so each catalog can be threaded in as the next
+            # one's descendant_halos. Mirrors py21cmfast's own internal driver
+            # (drivers.coeval.evolve_halos), which takes a descending redshift
+            # list and processes it reversed for the same reason.
+            iter_order = sorted((float(z) for z in self.redshifts), reverse=True)[::-1]
+            desc = 'py21cmfast snapshots (chained)'
+        else:
+            iter_order = list(missing)
+            desc = 'py21cmfast snapshots'
+
+        halos_desc = None
+        with tqdm(iter_order, desc=desc, unit='snapshot') as pbar:
             for redshift in pbar:
                 pbar.set_postfix(z=f"{redshift:.3f}", refresh=False)
-                halo_fname = f'haloes_z{redshift:.3f}.h5'
-                field_fname = f'densities_z{redshift:.3f}.h5'
-
                 z_start = time.process_time()
+
                 perturbed_field = p21c.perturb_field(
                     redshift=redshift, inputs=inputs, initial_conditions=ics,
+                    cache=cache, write=write_native, regenerate=regenerate_native,
                 )
-                # descendant_halos left None: generates the initial stochastic
-                # halos directly at this redshift, matching _generate_v3's
-                # per-snapshot-independent behavior (no merger-tree chaining).
+                # descendant_halos is None on the first (lowest-z) step and
+                # whenever chained=False (halo_sim.chain_halos=False keeps
+                # every redshift an independent stochastic draw, matching
+                # v3's behavior -- BEoRN's own CHMFSampler reads the same
+                # switch and has no chaining mode of its own yet, tracked in
+                # issue #42).
                 halo_catalog = p21c.determine_halo_catalog(
                     redshift=redshift, inputs=inputs, initial_conditions=ics,
+                    descendant_halos=halos_desc,
+                    cache=cache, write=write_native, regenerate=regenerate_native,
                 )
+                if chained:
+                    halos_desc = halo_catalog
+
+                if redshift not in missing_set:
+                    continue  # already have this snapshot's own output file
+
                 # previous_spin_temp/previous_ionize_box default to None
                 # safely because USE_MINI_HALOS=False above.
                 perturbed_halo = p21c.perturb_halo_catalog(
@@ -419,6 +573,8 @@ class Py21cmFastLoader(BaseLoader):
                 halo_coords = np.asarray(perturbed_halo.get('halo_coords'))
                 density = np.asarray(perturbed_field.get('density'))
 
+                halo_fname = f'haloes_z{redshift:.3f}.h5'
+                field_fname = f'densities_z{redshift:.3f}.h5'
                 with h5py.File(file_root / halo_fname, 'w') as f:
                     g = f.create_group('PerturbHaloField')
                     g.create_dataset('halo_masses', data=halo_masses)
@@ -432,8 +588,20 @@ class Py21cmFastLoader(BaseLoader):
                 )
 
         logger.info(
-            f'py21cmfast v4 generation done in {time.process_time() - start_time:.1f}s.'
+            f'py21cmfast v4{" chained" if chained else ""} generation done in '
+            f'{time.process_time() - start_time:.1f}s.'
         )
+
+        if chained and cache_direc is not None and cache_direc.exists():
+            cache_files = [f for f in cache_direc.rglob('*') if f.is_file()]
+            size_mb = sum(f.stat().st_size for f in cache_files) / 1e6
+            logger.info(
+                f"py21cmfast's native per-redshift cache is at {cache_direc} "
+                f"({len(cache_files)} files, {size_mb:.1f} MB). It exists only to "
+                "let a chained run resume after an interruption (e.g. a job hitting "
+                "its time limit); now that generation has completed, it is safe to "
+                "delete."
+            )
 
     def load_halo_catalog(self, redshift_index: int) -> HaloCatalog:
         self._require_file_root()

@@ -590,6 +590,24 @@ class HaloSimParameters:
     :attr:`CosmoSimParameters.density_source` for the cross-check against a
     mismatched ``density_source``."""
 
+    chain_halos: bool = True
+    """Whether halo catalogs across snapshots are built as a single
+    mass-conserving progenitor/descendant chain (each redshift's catalog
+    generated as the direct progenitor of the next-lower redshift's, per
+    Davies, Mesinger & Murray 2025) rather than as independent per-redshift
+    stochastic draws. ``True`` (default) matches the physical picture that
+    paper describes. Currently only read by
+    :class:`~beorn.load_input_data.Py21cmFastLoader`'s py21cmfast v4 code
+    path (v3 has no chaining concept, and BEoRN's own
+    :class:`~beorn.lpt.chmf.CHMFSampler` doesn't implement chaining yet —
+    tracked as a follow-up in issue #42; this field is already the switch it
+    will read once that lands, so both generators share one on/off knob).
+    Chained generation requires the *entire* ordered redshift list to stay
+    fixed between runs that reuse the same cache directory — adding,
+    removing, or reordering redshifts invalidates the whole chain and forces
+    a full regeneration (see :class:`~beorn.load_input_data.Py21cmFastLoader`
+    for how this is detected and warned about)."""
+
     hmf_model: Literal['PS', 'ST'] = 'ST'
     """Only meaningful when :attr:`halo_source` is ``'CHMF'``. ``'PS'`` —
     pure EPS conditional sampling (volume average = Press-Schechter).
