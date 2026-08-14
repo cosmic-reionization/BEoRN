@@ -50,7 +50,12 @@ class RadiationProfileSolver:
         """
         Args:
             parameters: Parameters dataclass
-            redshifts: array of redshifts at which to compute the profiles, in decreasing order
+            redshifts: array of redshifts at which to compute the profiles, in decreasing order.
+                If not already in decreasing order, it is sorted (a warning is logged) --
+                :meth:`rho_heat` integrates over scale factor and requires it, since it
+                prepends ``solver.z_decoupling`` (the earliest, highest-z point) and relies
+                on the resulting scale-factor array increasing monotonically end to end;
+                an out-of-order input desyncs ``t_span``/``t_eval`` and ``solve_ivp`` raises.
         """
 
         # self.z_initial = parameters.solver.Z  # starting redshift
@@ -64,6 +69,15 @@ class RadiationProfileSolver:
         Nr = 200
         self.r_grid = np.logspace(np.log10(rmin), np.log10(rmax), Nr) ##cMpc/h
         self.parameters = parameters
+
+        redshifts = np.asarray(redshifts, dtype=float)
+        if redshifts.size > 1 and not np.all(np.diff(redshifts) <= 0):
+            logger.warning(
+                f"RadiationProfileSolver requires redshifts in decreasing order, but got "
+                f"z={redshifts[0]:.3f}→{redshifts[-1]:.3f} "
+                f"({redshifts.size} points). Sorting descending."
+            )
+            redshifts = np.sort(redshifts)[::-1]
         self.z_bins = redshifts
 
 

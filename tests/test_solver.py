@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from types import SimpleNamespace
 from pathlib import Path
@@ -60,6 +61,38 @@ def test_build_f_st_grid():
         solver.f_st_grid,
         np.array([0.01, 0.02, 0.03]),
     )
+
+
+def test_solver_sorts_ascending_redshifts_descending_and_warns(caplog):
+    params = make_parameters()
+    ascending = np.array([12.0, 13.0, 15.0])
+
+    with caplog.at_level(logging.WARNING):
+        solver = RadiationProfileSolver(params, ascending)
+
+    np.testing.assert_array_equal(solver.z_bins, np.array([15.0, 13.0, 12.0]))
+    assert any('decreasing order' in r.message for r in caplog.records)
+
+
+def test_solver_leaves_already_descending_redshifts_untouched_and_silent(caplog):
+    params = make_parameters()
+    descending = np.array([15.0, 13.0, 12.0])
+
+    with caplog.at_level(logging.WARNING):
+        solver = RadiationProfileSolver(params, descending)
+
+    np.testing.assert_array_equal(solver.z_bins, descending)
+    assert not any('decreasing order' in r.message for r in caplog.records)
+
+
+def test_solver_single_redshift_is_not_treated_as_out_of_order(caplog):
+    params = make_parameters()
+
+    with caplog.at_level(logging.WARNING):
+        solver = RadiationProfileSolver(params, np.array([15.0]))
+
+    np.testing.assert_array_equal(solver.z_bins, np.array([15.0]))
+    assert not any('decreasing order' in r.message for r in caplog.records)
 
 
 def test_build_f_st_grid_invalid_range_raises():
