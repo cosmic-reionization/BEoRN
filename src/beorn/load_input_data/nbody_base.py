@@ -101,21 +101,6 @@ class NBodyLoader(BaseLoader):
         self.halo_finder = halo_finder
         self.n_particles = n_particles
 
-        # ── Resolution degradation ────────────────────────────────────────────
-        degrade_resolution = self.parameters.simulation.degrade_resolution
-        if not isinstance(degrade_resolution, int) or degrade_resolution < 1:
-            raise ValueError(
-                f"parameters.simulation.degrade_resolution must be an integer >= 1, "
-                f"got {degrade_resolution!r}."
-            )
-        self._degrade_factor = degrade_resolution
-        if degrade_resolution > 1:
-            logger.info(
-                f"Resolution degradation enabled: density grids will be "
-                f"block-averaged by factor {degrade_resolution} "
-                f"(e.g. N³ → (N/{degrade_resolution})³)."
-            )
-
         yml_path = Path(catalog_yml) if catalog_yml is not None else None
 
         # ── Resolve snapshot list ─────────────────────────────────────────────
@@ -151,15 +136,9 @@ class NBodyLoader(BaseLoader):
         # ── Auto-set Ncell from the first density file ────────────────────────
         if self.density_paths:
             native_n = self._peek_grid_size(self.density_paths[0])
-            effective_n = native_n // self._degrade_factor
-            self.parameters.simulation.Ncell = effective_n
-            if self._degrade_factor > 1:
-                logger.info(
-                    f"Auto-set Ncell={effective_n} "
-                    f"(native {native_n}³ ÷ {self._degrade_factor})."
-                )
-            else:
-                logger.info(f"Auto-set Ncell={effective_n} from density file.")
+            self._apply_degrade_resolution(native_n)
+            if self._degrade_factor <= 1:
+                logger.info(f"Auto-set Ncell={self.parameters.simulation.Ncell} from density file.")
 
     # ── Abstract interface for subclasses ─────────────────────────────────────
 

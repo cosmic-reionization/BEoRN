@@ -44,6 +44,21 @@ class Py21cmFastLoader(BaseLoader):
     redshift list and :attr:`py21cmfast_cache_direc` for how mid-chain
     progress survives an interrupted job.
 
+    ``parameters.simulation.degrade_resolution`` (default 1, see
+    :meth:`~beorn.load_input_data.base.BaseLoader._apply_degrade_resolution`)
+    is supported: ``parameters.simulation.Ncell`` as passed to the
+    constructor is treated as the *native* resolution py21cmfast
+    generates/reads data at (unaffected by ``degrade_resolution`` — so
+    ``input_tag`` and the on-disk directory stay the same across different
+    ``degrade_resolution`` values, and no py21cmfast regeneration is
+    triggered by changing it), while everything downstream of this loader
+    (painting, FFTs) sees the reduced ``parameters.simulation.Ncell``.
+    :meth:`load_density_field` block-averages the density grid down to that
+    reduced size; :meth:`load_halo_catalog`'s halo positions need no
+    adjustment (still real physical Mpc/h positions, correctly derived from
+    the native grid) — painting at fewer, larger cells is what makes this
+    faster, not fewer halos.
+
     Args:
         parameters (Parameters): Simulation and cosmology parameters.
         file_root (Path, optional): Directory containing pre-generated
@@ -83,6 +98,14 @@ class Py21cmFastLoader(BaseLoader):
         py21cmfast_cache_direc: "Path | str | bool | None" = True,
     ):
         super().__init__(parameters)
+        # parameters.simulation.Ncell as given here IS the native resolution
+        # py21cmfast will generate/read data at -- _apply_degrade_resolution
+        # reduces parameters.simulation.Ncell in place for everything
+        # downstream (painting/FFT grids), while self._native_ncell keeps the
+        # true native size for input_tag/py21cmfast-generation/halo-coordinate
+        # scaling below, all of which must stay tied to the actual on-disk
+        # grid regardless of degrade_resolution.
+        self._apply_degrade_resolution(parameters.simulation.Ncell)
         self.file_root = Path(file_root) if file_root is not None else None
         self.field_oversample = (
             field_oversample if field_oversample is not None
@@ -120,22 +143,31 @@ class Py21cmFastLoader(BaseLoader):
 
             handler = Handler(output_dir, input_tag=loader.input_tag)
         """
-        sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
-        dim = sim.Ncell * self.field_oversample
+        dim = self._native_ncell * self.field_oversample
         cosmo_hash = hashlib.md5(str(to_dict(self.parameters.cosmology)).encode()).hexdigest()[:8]
-        return f"py21cmfast_N{sim.Ncell}_D{dim}_L{self.parameters.Lbox_hunits:.0f}_seed{cosmo_sim.IC_seed}_{cosmo_hash}"
+        # Native Ncell, not the (possibly degrade_resolution-reduced)
+        # parameters.simulation.Ncell -- the on-disk py21cmfast data is keyed
+        # on the actual grid it was generated at, so different
+        # degrade_resolution settings share the same cached data.
+        return f"py21cmfast_N{self._native_ncell}_D{dim}_L{self.parameters.Lbox_hunits:.0f}_seed{cosmo_sim.IC_seed}_{cosmo_hash}"
 
     def _simulation_info(self, file_root: Path) -> str:
         """Return a formatted multi-line summary of the py21cmfast setup (no redshift list)."""
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
         cosmo = self.parameters.cosmology
-        dim = sim.Ncell * self.field_oversample
+        dim = self._native_ncell * self.field_oversample
+        degrade_line = (
+            f'  Painting grid    : {sim.Ncell}³ '
+            f'(native {self._native_ncell}³ ÷ degrade_resolution={self._degrade_factor})\n'
+            if self._degrade_factor > 1 else ''
+        )
         return (
             f'py21cmfast setup:\n'
             f'  Output directory : {file_root}\n'
-            f'  Grid             : HII_DIM={sim.Ncell}, DIM={dim} (factor {self.field_oversample}x)\n'
+            f'  Grid             : HII_DIM={self._native_ncell}, DIM={dim} (factor {self.field_oversample}x)\n'
+            + degrade_line +
             f'  Box size         : {self.parameters.Lbox_hunits:.1f} Mpc/h ({self.parameters.Lbox_hunits / cosmo.h0:.1f} Mpc)\n'
             f'  Threads          : {sim.cores}\n'
             f'  Random seed      : {cosmo_sim.IC_seed}\n'
@@ -169,7 +201,7 @@ class Py21cmFastLoader(BaseLoader):
                 "ns": cosmo.ns,
             },
             "simulation": {
-                "Ncell": sim.Ncell,
+                "Ncell": self._native_ncell,
                 "Lbox": self.parameters.Lbox_hunits,
                 "cores": sim.cores,
             },
@@ -320,14 +352,14 @@ class Py21cmFastLoader(BaseLoader):
         sim = self.parameters.simulation
         cosmo_sim = self.parameters.cosmo_sim
         cosmo = self.parameters.cosmology
-        dim = sim.Ncell * self.field_oversample
+        dim = self._native_ncell * self.field_oversample
 
         start_time = time.process_time()
         file_root.mkdir(parents=True, exist_ok=True)
         self._ensure_parameters_yaml(file_root)
 
         user_params = p21c.UserParams(
-            HII_DIM=sim.Ncell,
+            HII_DIM=self._native_ncell,
             DIM=dim,
             BOX_LEN=self.parameters.Lbox_hunits / cosmo.h0,
             USE_INTERPOLATION_TABLES=True,
@@ -452,7 +484,7 @@ class Py21cmFastLoader(BaseLoader):
         cosmo_sim = self.parameters.cosmo_sim
         cosmo = self.parameters.cosmology
         halo_sim = self.parameters.halo_sim
-        dim = sim.Ncell * self.field_oversample
+        dim = self._native_ncell * self.field_oversample
 
         start_time = time.process_time()
         file_root.mkdir(parents=True, exist_ok=True)
@@ -467,7 +499,7 @@ class Py21cmFastLoader(BaseLoader):
                 POWER_INDEX=cosmo.ns,
             ),
             simulation_options=p21c.SimulationOptions(
-                HII_DIM=sim.Ncell,
+                HII_DIM=self._native_ncell,
                 DIM=dim,
                 BOX_LEN=self.parameters.Lbox_hunits / cosmo.h0,
                 N_THREADS=sim.cores,
@@ -618,7 +650,12 @@ class Py21cmFastLoader(BaseLoader):
             m = np.asarray(haloes['halo_masses'])
             positions = np.asarray(haloes['halo_coords'])
 
-        scaling = float(self.parameters.Lbox_hunits / self.parameters.simulation.Ncell)
+        # halo_coords are indices into the NATIVE grid py21cmfast actually
+        # generated at, regardless of any degrade_resolution reduction
+        # applied to parameters.simulation.Ncell below -- must use
+        # self._native_ncell here, not the (possibly reduced) Ncell, or
+        # every halo's physical position would be scaled wrong.
+        scaling = float(self.parameters.Lbox_hunits / self._native_ncell)
         return HaloCatalog(
             masses=m * self.parameters.cosmology.h0,
             positions=positions * scaling,
@@ -633,7 +670,8 @@ class Py21cmFastLoader(BaseLoader):
         path = self.file_root / f'densities_z{redshift:.3f}.h5'
 
         with h5py.File(path, 'r') as f:
-            return f['PerturbedField']['density'][:]
+            delta = f['PerturbedField']['density'][:]
+        return self._coarsen_density_field(delta)
 
     def load_rsd_fields(self, redshift_index: int):
         raise NotImplementedError("RSD fields are not yet implemented for Py21cmFastLoader.")

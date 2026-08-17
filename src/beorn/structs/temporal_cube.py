@@ -114,7 +114,8 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
 
     .. code-block:: text
 
-        igm_data_{input_tag}_{beorn_hash}/
+        igm_data_{input_tag}_{beorn_hash}/            # degrade_resolution=1
+        igm_data_{input_tag}_P{Ncell}_{beorn_hash}/   # degrade_resolution!=1
             CoevalCube_z7.000.h5
             CoevalCube_z7.500.h5
             ...
@@ -144,14 +145,36 @@ class TemporalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMix
 
     @classmethod
     def get_file_path(cls, directory: Path, parameters: Parameters, input_tag: str = None, **kwargs) -> Path:
-        """Return the output **directory** path ``igm_data_{input_tag}_{beorn_hash}``.
+        """Return the output **directory** path ``igm_data_{input_tag}_{beorn_hash}``
+        (or ``igm_data_{input_tag}_P{Ncell}_{beorn_hash}`` when
+        ``parameters.simulation.degrade_resolution != 1``).
+
+        The extra ``P{Ncell}`` segment only appears under degradation -- the
+        common (``degrade_resolution=1``) case keeps the plain, existing
+        naming. ``Ncell`` is ``parameters.simulation.Ncell`` as-is: the grid
+        resolution painting actually ran at, already reduced by the loader
+        before this is called. This differs from the *native* resolution
+        embedded in ``input_tag``, which always reflects the underlying input
+        data rather than the painting grid, precisely so that
+        ``degrade_resolution`` doesn't force new input-data generation.
+        ``beorn_hash`` already encodes ``simulation`` (hence ``Ncell``), so two
+        different painting resolutions of the same astro model can never
+        collide on directory name even without this segment -- it's included
+        purely for legibility.
 
         Args:
             input_tag (str, optional): Human-readable identifier for the upstream
                 input data (e.g. ``'py21cmfast_N128_D384_L100_seed12345_9b1f5a85'``).
         """
         beorn_hash = parameters.beorn_hash()
-        dir_name = f"igm_data_{input_tag}_{beorn_hash}" if input_tag else f"igm_data_{beorn_hash}"
+        if parameters.simulation.degrade_resolution != 1:
+            ncell_part = f"_P{parameters.simulation.Ncell}"
+        else:
+            ncell_part = ""
+        dir_name = (
+            f"igm_data_{input_tag}{ncell_part}_{beorn_hash}" if input_tag
+            else f"igm_data{ncell_part}_{beorn_hash}"
+        )
         return directory / dir_name
 
     def snapshot_path(self, z: float) -> Path:

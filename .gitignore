@@ -179,6 +179,7 @@ dist
 *.egg
 .DS_Store
 .vscode
+.claude
 
 # Stochastic f_st workflow — tracked in its own separate git repo
 fst_stochastic/
