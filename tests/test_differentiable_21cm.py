@@ -515,6 +515,90 @@ def test_rho_heat_diff_gradient_jax():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Lyman-alpha coupling (issue #59, Phase B) — rho_alpha_profile_diff
+# ─────────────────────────────────────────────────────────────────────────────
+
+from beorn.precomputation.differentiable import rho_alpha_profile_diff  # noqa: E402
+
+_LYAL_PARAM_DEFAULTS = dict(
+    _XRAY_PARAM_DEFAULTS,
+    n_lyman_alpha_photons=9690.0, lyman_alpha_power_law=0.3,
+)
+
+
+def _lyal_params():
+    p = _xray_params()
+    p.source.n_lyman_alpha_photons = _LYAL_PARAM_DEFAULTS['n_lyman_alpha_photons']
+    p.source.lyman_alpha_power_law = _LYAL_PARAM_DEFAULTS['lyman_alpha_power_law']
+    return p
+
+
+def _reference_rho_alpha(p, z_bins, r_grid, Mh_center, alpha_center):
+    from beorn.precomputation.helpers import rho_alpha_profile
+    from beorn.precomputation.massaccretion import mass_accretion
+
+    Mh, dMh_dt = mass_accretion(p, z_bins, np.array([Mh_center]), np.array([alpha_center]))
+    return rho_alpha_profile(p, z_bins, r_grid, Mh, dMh_dt)[:, 0, 0, :]
+
+
+def test_rho_alpha_profile_diff_matches_production():
+    z_bins = np.linspace(20.0, 6.0, 12)
+    r_lyal = np.logspace(-5, 2, 60, base=10)
+    Mh_center, alpha_center = 1e10, 0.79
+    p = _lyal_params()
+    rho_alpha_ref = _reference_rho_alpha(p, z_bins, r_lyal, Mh_center, alpha_center)
+
+    d = _LYAL_PARAM_DEFAULTS
+    out = rho_alpha_profile_diff(
+        z_bins, r_lyal, Mh_center, alpha_center, d['Om'], d['Ob'], d['h0'],
+        d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'], d['g4'],
+        d['halo_mass_min'], d['n_lyman_alpha_photons'], d['lyman_alpha_power_law'],
+        d['z_source_start'],
+    )
+    assert out.shape == rho_alpha_ref.shape
+    nonzero = rho_alpha_ref != 0
+    assert nonzero.any()
+    # atol floors the radial tail, where the fixed-node lookback quadrature
+    # (n_zprime) vs production's adaptive dz grid disagree most but the
+    # absolute values are physically negligible (see rho_xray_diff's test).
+    atol = 1e-9 * np.abs(rho_alpha_ref[nonzero]).max()
+    np.testing.assert_allclose(np.asarray(out)[nonzero], rho_alpha_ref[nonzero],
+                               rtol=0.15, atol=atol)
+
+
+@pytest.mark.parametrize('pname', ['n_lyman_alpha_photons', 'lyman_alpha_power_law', 'f_st'])
+def test_rho_alpha_profile_diff_gradient_jax_and_torch(pname):
+    """d(sum of rho_alpha at z=6)/dθ, jax vs finite differences, torch vs jax."""
+    z_bins = np.linspace(20.0, 6.0, 12)
+    r_lyal = np.logspace(-5, 2, 60, base=10)
+    d = dict(_LYAL_PARAM_DEFAULTS)
+    x0 = d.pop(pname)
+
+    def S(val, backend):
+        kw = dict(d)
+        kw[pname] = val
+        out = rho_alpha_profile_diff(
+            z_bins, r_lyal, 1e10, 0.79, kw['Om'], kw['Ob'], kw['h0'],
+            kw['f_st'], kw['Mp'], kw['g1'], kw['g2'], kw['Mt'], kw['g3'],
+            kw['g4'], kw['halo_mass_min'], kw['n_lyman_alpha_photons'],
+            kw['lyman_alpha_power_law'], kw['z_source_start'], backend=backend,
+        )
+        return out[..., -1].sum()
+
+    g_jax = jax.grad(lambda v: S(v, 'jax'))(x0)
+    h = 1e-4 * x0
+    fd = (S(x0 + h, 'numpy') - S(x0 - h, 'numpy')) / (2 * h)
+    assert np.isfinite(float(g_jax)) and float(g_jax) != 0.0
+    assert float(g_jax) == pytest.approx(float(fd), rel=5e-2)
+
+    if not _TORCH:
+        pytest.skip('torch not installed')
+    xt = torch.tensor(x0, dtype=torch.float64, requires_grad=True)
+    S(xt, 'torch').backward()
+    assert float(xt.grad) == pytest.approx(float(g_jax), rel=1e-6)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Phase 2 exit test — dΔ²₂₁/dθ, one astro + one cosmology parameter
 # ─────────────────────────────────────────────────────────────────────────────
 

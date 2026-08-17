@@ -42,6 +42,15 @@ and its radial/optical-depth geometry is evaluated at static (non-
 differentiated) cosmology — see its docstring's "Scope for this phase" for
 the precise, deliberate list of what does and doesn't carry gradients.
 
+Lyman-alpha coupling (issue #59, Phase B) — :func:`eps_lyal_diff` (port of
+:func:`.couplings.eps_lyal`) and :func:`rho_alpha_profile_diff` (port of
+:func:`.helpers.rho_alpha_profile`) unblock gradients through the Lyman-α
+channel the same way; it sums the same fixed set of Lyman-series
+recombination transitions production does, each with its own fixed-size
+lookback-time quadrature, under the identical scope-for-this-phase
+restrictions as :func:`rho_xray_diff` (static cosmology/flat ΛCDM, always
+``z_source_start``, fixed node counts).
+
 All functions are numpy/jax/torch backend-generic and complement (never
 replace) the solve_ivp defaults. As with :mod:`.astro_differentiable`,
 ``backend='numpy'`` is not differentiable (plain NumPy has no autodiff) — it
@@ -72,6 +81,8 @@ __all__ = [
     'eps_xray_diff',
     'rho_xray_diff',
     'rho_heat_diff',
+    'eps_lyal_diff',
+    'rho_alpha_profile_diff',
 ]
 
 
@@ -705,3 +716,196 @@ def rho_heat_diff(z_bins, rho_xray, Om, h0, z_decoupling, backend='numpy'):
     gamma = 2.0 * rho_xray_full / (3.0 * kb_eV_per_K * a_b * Hz_b) * km_per_Mpc
     y = heat_ode_solution(a_nodes, gamma, backend=backend)
     return y[..., 1:]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Lyman-alpha coupling (issue #59, Phase B) — real per-bin rho_alpha
+# ──────────────────────────────────────────────────────────────────────────────
+
+_REC_FRAC_CACHE = None
+
+
+def _rec_frac():
+    """Load & cache ``input_data/recfrac.dat`` (static recombination-fraction
+    table) — the same file :func:`.helpers.rho_alpha_profile` reads."""
+    global _REC_FRAC_CACHE
+    if _REC_FRAC_CACHE is None:
+        import importlib.util
+        from pathlib import Path
+        path_to_file = (Path(importlib.util.find_spec('beorn').origin).parent
+                        / 'input_data' / 'recfrac.dat')
+        _REC_FRAC_CACHE = np.genfromtxt(path_to_file, usecols=(0, 1),
+                                        comments='#', dtype=float, names='n, f')
+    return _REC_FRAC_CACHE
+
+
+def eps_lyal_diff(nu_, n_lyman_alpha_photons, lyman_alpha_power_law, h0,
+                  backend='numpy'):
+    """Lyman-α SED ε_α(ν) — differentiable counterpart of
+    :func:`.couplings.eps_lyal` (power law, BEoRN paper Eq. 8).
+
+    Differentiable w.r.t. ``n_lyman_alpha_photons``, ``lyman_alpha_power_law``
+    and ``h0`` when ``backend='jax'``/``'torch'``.
+
+    Args:
+        nu_: Photon frequency [Hz] — a static numpy grid (the usual case
+            inside :func:`rho_alpha_profile_diff`) or a backend array
+            carrying gradients.
+        n_lyman_alpha_photons, lyman_alpha_power_law, h0: SED
+            shape/normalisation parameters (scalars; may carry gradients).
+        backend: 'numpy' (default, not differentiable), 'jax' or 'torch'.
+
+    Returns:
+        ε_α(ν) [photons/yr/Hz/SFR], same shape as ``nu_``.
+    """
+    from ..constants import nu_al, nu_LL
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, n_lyman_alpha_photons, lyman_alpha_power_law, h0)
+    nu_ = (as_const(np.asarray(nu_, dtype=float), name, xp, device)
+          if isinstance(nu_, np.ndarray) else as_array(nu_, name, xp, device))
+    N_al = as_array(n_lyman_alpha_photons, name, xp, device)
+    alS = as_array(lyman_alpha_power_law, name, xp, device)
+    h0 = as_array(h0, name, xp, device)
+
+    Anorm = (1.0 - alS) / (nu_LL ** (1.0 - alS) - nu_al ** (1.0 - alS))
+    return Anorm * nu_ ** (-alS) * N_al / (m_p_in_Msun * h0)
+
+
+def rho_alpha_profile_diff(z_bins, r_grid, Mh_center, alpha_center, Om, Ob, h0,
+                           f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min,
+                           n_lyman_alpha_photons, lyman_alpha_power_law,
+                           z_source_start, backend='numpy', n_zprime=64,
+                           rectrunc=23):
+    """Lyman-alpha coupling profile ρ_alpha(r, z) — differentiable
+    counterpart of :func:`.helpers.rho_alpha_profile`, for one
+    ``(Mh_center, alpha_center)`` mass-accretion bin (see
+    :func:`mass_accretion_diff`; broadcasts over leading batch axes the same
+    way as :func:`rho_xray_diff`).
+
+    Gradients flow to the star-formation-efficiency shape parameters
+    (``f_st``, ``Mp``, ``g1``, ``g2``, ``Mt``, ``g3``, ``g4``), the
+    mass-accretion track (``Mh_center``, ``alpha_center``) and the Lyman-α
+    SED shape (``n_lyman_alpha_photons``, ``lyman_alpha_power_law``) when
+    ``backend='jax'``/``'torch'``.
+
+    Sums the same ``rectrunc - 2`` Lyman-series recombination transitions
+    production does (``n = 2 .. rectrunc - 1``, weighted by
+    ``input_data/recfrac.dat``'s tabulated, non-differentiated recombination
+    fractions); each transition gets its own fixed-size (``n_zprime``)
+    lookback-time quadrature. See :func:`rho_xray_diff`'s "Scope for this
+    phase" docstring section, which applies here identically: ``Om``/``Ob``/
+    ``h0`` are static floats (flat ΛCDM geometry), the source lifetime is
+    always ``z_source_start``, and quadrature node counts are fixed rather
+    than production's data-dependent ones.
+
+    Args:
+        z_bins: Static, decreasing redshift grid (numpy), shape (n_z,).
+        r_grid: Static *physical* radial grid (pMpc/h) (numpy), shape
+            (n_r,) — matches :meth:`.solver.RadiationProfileSolver.solve`'s
+            ``r_lyal``, not the comoving grid :func:`rho_xray_diff` uses.
+        Mh_center, alpha_center: Mass-accretion-track bin center — see
+            :func:`mass_accretion_diff`.
+        Om, Ob, h0: Cosmology (Python floats — static, see
+            :func:`rho_xray_diff`'s Scope).
+        f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min: Star-formation-efficiency
+            shape — see :func:`~beorn.astro_differentiable.f_star_halo_diff`.
+        n_lyman_alpha_photons, lyman_alpha_power_law: Lyman-α SED shape —
+            see :func:`eps_lyal_diff`.
+        z_source_start: Source lifetime cutoff, static.
+        backend: 'numpy' (default, not differentiable), 'jax' or 'torch'.
+        n_zprime: Number of lookback-time quadrature nodes per transition
+            per redshift (static).
+        rectrunc: Number of Lyman-series transitions to sum (``n = 2 ..
+            rectrunc - 1``), matching production's default of 23.
+
+    Returns:
+        rho_alpha on ``(r_grid, z_bins)`` [pcm⁻².s⁻¹.Hz⁻¹], shape
+        ``(..., n_r, n_z)`` — see :func:`rho_xray_diff`'s Returns note on
+        axis-order convention.
+    """
+    import types
+
+    from ..constants import nu_LL
+    from ..cosmo import comoving_distance
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, Mh_center, alpha_center, f_st, Mp, Mt,
+                       n_lyman_alpha_photons, lyman_alpha_power_law)
+
+    z_np = np.asarray(z_bins, dtype=float)
+    r_np = np.asarray(r_grid, dtype=float)
+    Om_f, Ob_f, h0_f = float(Om), float(Ob), float(h0)
+    z_star = float(z_source_start)
+
+    rec = _rec_frac()
+    nu_n = nu_LL * (1.0 - 1.0 / rec['n'] ** 2)
+    nu_n = np.where(nu_n == 0, np.inf, nu_n)
+
+    # ---- mass-accretion track (differentiable), same construction as
+    # rho_xray_diff's M_star_dot --------------------------------------------
+    Mh = mass_accretion_diff(z_np, Mh_center, alpha_center, backend=backend)
+    dMh_dt = mass_accretion_derivative_diff(Mh, alpha_center, Om, h0, z_np,
+                                            backend=backend)
+    fstar = f_star_halo_diff(Mh, f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min,
+                             backend=backend)
+    Ob_b = as_array(Ob, name, xp, device)
+    Om_b = as_array(Om, name, xp, device)
+    M_star_dot = (Ob_b / Om_b) * fstar * dMh_dt                # (..., n_z)
+    batch_shape = tuple(M_star_dot.shape[:-1])
+
+    anchor = xp.zeros_like(M_star_dot[..., :1])
+    M_star_dot_aug = (xp.cat([anchor, M_star_dot], dim=-1) if name == 'torch'
+                      else xp.concatenate([anchor, M_star_dot], axis=-1))
+    x_nodes_star = np.concatenate(([z_star], z_np))
+
+    def _zeros(shape):
+        if name == 'torch':
+            return xp.zeros(shape, dtype=M_star_dot.dtype, device=M_star_dot.device)
+        return xp.zeros(shape)
+
+    fake_params = types.SimpleNamespace(
+        cosmology=types.SimpleNamespace(Om=Om_f, Ob=Ob_f, h0=h0_f, w0=-1.0, wa=0.0),
+    )
+
+    n_transitions = rectrunc - 2
+    rho_slices = []
+    for i, z in enumerate(z_np):
+        if z > z_star:
+            rho_slices.append(_zeros(batch_shape + (r_np.size,)))
+            continue
+
+        flux = _zeros(batch_shape + (r_np.size,))
+        r_query = r_np * (1.0 + z)
+        for k in range(n_transitions):
+            n_k = float(rec['n'][k + 2])
+            z_max_k = min((1.0 - (n_k + 1.0) ** -2) / (1.0 - n_k ** -2) * (1.0 + z) - 1.0,
+                         z_star)
+            if z_max_k <= z:
+                continue
+
+            z_prime = np.logspace(np.log(z), np.log(z_max_k), n_zprime, base=np.e)
+            rcom_prime = comoving_distance(z_prime, fake_params) * h0_f
+            nu_prime = nu_n[k + 2] * (1.0 + z_prime) / (1.0 + z)
+
+            W_z = as_const(_linear_interp_weights(x_nodes_star, z_prime, mode='extrapolate'),
+                           name, xp, device)
+            M_star_dot_zprime = xp.einsum('qn,...n->...q', W_z, M_star_dot_aug)  # (..., n_zprime)
+
+            eps_al = eps_lyal_diff(nu_prime, n_lyman_alpha_photons,
+                                   lyman_alpha_power_law, h0, backend=backend)
+            eps_al = (eps_al.reshape((1,) * len(batch_shape) + (n_zprime,))
+                     * M_star_dot_zprime)                                       # (..., n_zprime)
+
+            W_r = as_const(_linear_interp_weights(rcom_prime, r_query, mode='zero'),
+                           name, xp, device)                                    # (n_r, n_zprime)
+            flux_k = xp.einsum('rq,...q->...r', W_r, eps_al) * float(rec['f'][k + 2])
+            flux = flux + flux_k
+
+        prefac_r_np = (1.0 / (4.0 * np.pi * r_np ** 2) * (h0_f / cm_per_Mpc) ** 2
+                      / sec_per_year)
+        prefac_r = as_const(prefac_r_np.reshape((1,) * len(batch_shape) + (r_np.size,)),
+                            name, xp, device)
+        rho_slices.append(flux * prefac_r)
+
+    return xp.stack(rho_slices, dim=-1) if name == 'torch' else xp.stack(rho_slices, axis=-1)
