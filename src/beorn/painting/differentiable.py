@@ -22,6 +22,17 @@ painting in :mod:`.coordinator` / :mod:`.helpers`:
 
 The CPU production path in the coordinator is unchanged; this module is the
 opt-in gpu/diff mode.
+
+:func:`paint_fields_population_diff` (issue #59, Phase D) generalizes
+:func:`paint_fields_diff` from one global bubble/profile to a real
+Fourier-accumulation loop over mass bins, mirroring
+:meth:`.coordinator.PaintingCoordinator.paint_single_mass_bin`/
+:meth:`~.coordinator.PaintingCoordinator.paint_full`'s own algorithm: each
+bin contributes ``FFT(halo_mesh_bin) × kernel_bin`` to a running Fourier-space
+sum, and only the sum is inverse-transformed — one inverse FFT per field
+regardless of how many mass bins there are, the same O(n_bins) saving the
+production coordinator gets from returning Fourier-space contributions from
+``paint_single_mass_bin``.
 """
 from __future__ import annotations
 
@@ -34,6 +45,7 @@ __all__ = [
     'profile_kernel_fourier',
     'spreading_excess_diff',
     'paint_fields_diff',
+    'paint_fields_population_diff',
 ]
 
 
@@ -282,5 +294,115 @@ def paint_fields_diff(
     if prof_temp is not None:
         kern = profile_kernel_fourier(k, r_temp, prof_temp, backend=backend)
         grid_temp = _irfftn(fa * kern, shape, name, xp) / V_cell
+
+    return grid_xHII, grid_xal, grid_temp
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Full per-bin Fourier-accumulation painting (issue #59, Phase D)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def paint_fields_population_diff(
+    halo_mesh_bins,
+    z,
+    L,
+    R_bubble_bins=None,
+    r_alpha=None, prof_alpha_bins=None,
+    r_temp=None, prof_temp_bins=None,
+    backend='numpy',
+    xHII_floor=0.0,
+    spread_iter=0,
+    R_diffuse=None,
+):
+    """Paint (xHII, x_al kernel field, ΔT) from a *stack of per-mass-bin*
+    halo meshes — the real, per-bin generalisation of :func:`paint_fields_diff`.
+
+    Each mass bin gets its own R_bubble/profile (e.g. one row of
+    :func:`beorn.precomputation.differentiable.bubble_radius_diff`'s output
+    for a whole mass grid) and contributes ``FFT(mesh_bin) × kernel_bin`` to
+    a running Fourier-space sum; only the accumulated sum is
+    inverse-transformed, so this is **exactly 3 inverse FFTs total**,
+    independent of ``n_bins`` — mirroring
+    :meth:`.coordinator.PaintingCoordinator.paint_single_mass_bin`'s own
+    algorithmic saving (see the module docstring). ``n_bins=1`` reduces to
+    :func:`paint_fields_diff` exactly (same kernels, same accumulation, just
+    one term).
+
+    All radii comoving Mpc/h (pass ``radial_grid*(1+z)``, matching
+    :func:`paint_fields_diff`); the x_al field is the raw kernel field —
+    apply the ``1.81e11/(1+z)`` scaling and ``S_alpha`` outside, as the
+    coordinator does.
+
+    Args:
+        halo_mesh_bins: Per-bin halo-count (or λ-intensity) grids, shape
+            ``(n_bins, N, N, N)`` (backend array) — e.g.
+            :func:`beorn.lpt.chmf.halo_field_diff`'s ``n_b_bins`` output
+            (``return_bins=True``).
+        z:          Redshift (static float).
+        L:          Box size (Mpc/h).
+        R_bubble_bins: Comoving bubble radius per bin (Mpc/h), shape
+            ``(n_bins,)``; may carry gradients. ``None`` → skip xHII.
+        r_alpha, prof_alpha_bins: Comoving nodes (shared across bins), shape
+            ``(n_r,)``, and per-bin Lyman-α profile values, shape
+            ``(n_bins, n_r)``. ``None`` → skip.
+        r_temp, prof_temp_bins:   Same, for the ΔT profile.
+        backend:    'numpy' (default), 'jax' or 'torch'.
+        xHII_floor, spread_iter, R_diffuse: Forwarded to
+            :func:`spreading_excess_diff`/the same post-processing
+            :func:`paint_fields_diff` applies — done once, on the
+            accumulated field, not per bin.
+
+    Returns:
+        (Grid_xHII, Grid_xal_kernel, Grid_dT) — backend arrays or None for
+        skipped fields.
+    """
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, halo_mesh_bins, R_bubble_bins,
+                       prof_alpha_bins, prof_temp_bins)
+    halo_mesh_bins = as_array(halo_mesh_bins, name, xp, device)
+    n_bins = halo_mesh_bins.shape[0]
+    N = halo_mesh_bins.shape[1]
+    V_cell = (float(L) / N) ** 3
+    shape = (N, N, N)
+    k = _k_mag_rfft(N, L, name, xp, device)
+
+    fa_xHII_sum = fa_xal_sum = fa_temp_sum = None
+    for b in range(n_bins):
+        fa = _rfftn(halo_mesh_bins[b], name, xp)
+
+        if R_bubble_bins is not None:
+            contrib = fa * bubble_kernel_fourier(k, R_bubble_bins[b], backend=backend)
+            fa_xHII_sum = contrib if fa_xHII_sum is None else fa_xHII_sum + contrib
+
+        if prof_alpha_bins is not None:
+            contrib = fa * profile_kernel_fourier(k, r_alpha, prof_alpha_bins[b],
+                                                   backend=backend)
+            fa_xal_sum = contrib if fa_xal_sum is None else fa_xal_sum + contrib
+
+        if prof_temp_bins is not None:
+            contrib = fa * profile_kernel_fourier(k, r_temp, prof_temp_bins[b],
+                                                   backend=backend)
+            fa_temp_sum = contrib if fa_temp_sum is None else fa_temp_sum + contrib
+
+    grid_xHII = None
+    if fa_xHII_sum is not None:
+        grid_xHII = _irfftn(fa_xHII_sum, shape, name, xp) / V_cell
+        if spread_iter > 0:
+            grid_xHII = spreading_excess_diff(grid_xHII, L, R_diffuse=R_diffuse,
+                                              n_iter=spread_iter, backend=backend)
+        else:
+            over = xp.where(grid_xHII > 1.0, grid_xHII - 1.0,
+                            xp.zeros_like(grid_xHII))
+            grid_xHII = grid_xHII - over
+        floor = xp.zeros_like(grid_xHII) + xHII_floor
+        grid_xHII = xp.where(grid_xHII > floor, grid_xHII, floor)
+
+    grid_xal = None
+    if fa_xal_sum is not None:
+        grid_xal = _irfftn(fa_xal_sum, shape, name, xp) / V_cell
+
+    grid_temp = None
+    if fa_temp_sum is not None:
+        grid_temp = _irfftn(fa_temp_sum, shape, name, xp) / V_cell
 
     return grid_xHII, grid_xal, grid_temp

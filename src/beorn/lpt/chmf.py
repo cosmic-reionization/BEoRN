@@ -1250,6 +1250,37 @@ def conditional_dndlnm_diff(
     return result
 
 
+def chmf_mass_bins(M_env, M_min, M_max=None, n_mass_bins=40):
+    """Static, log-spaced CHMF mass-bin centres/widths — pulled out of
+    :func:`halo_field_diff` (issue #59, Phase D) so callers that need
+    per-bin radiation profiles can build the identical mass grid *before*
+    the density-field-dependent :func:`halo_field_diff` call itself:
+    ``M_centers`` depends only on ``M_env``/``M_min``/``M_max``/
+    ``n_mass_bins``, never on ``z`` or the conditioning field, so it's safe
+    to compute once, outside any per-redshift loop, and reuse across every
+    snapshot.
+
+    Args:
+        M_env: Environmental mass in M_sun (scalar).
+        M_min: Minimum halo mass in M_sun.
+        M_max: Maximum halo mass in M_sun (default: 0.999 M_env).
+        n_mass_bins: Number of log-spaced mass bins.
+
+    Returns:
+        (M_centers, dln_M) — geometric-mean bin centres and log-widths,
+        both numpy arrays of shape (n_mass_bins,), M_sun.
+    """
+    M_hi = 0.999 * M_env if M_max is None else min(M_max, 0.999 * M_env)
+    if M_hi <= M_min:
+        raise ValueError(
+            f"M_env = {M_env:.2e} Msun leaves no mass range above "
+            f"M_min = {M_min:.2e} Msun.")
+    M_edges = np.logspace(np.log10(M_min), np.log10(M_hi), n_mass_bins + 1)
+    M_centers = np.sqrt(M_edges[:-1] * M_edges[1:])
+    dln_M = np.diff(np.log(M_edges))
+    return M_centers, dln_M
+
+
 def halo_field_diff(
     delta_env,
     M_env,
@@ -1268,6 +1299,7 @@ def halo_field_diff(
     n_nodes=512,
     hmf_model='PS',
     chmf_recipe='BarkanaLoeb2004',
+    return_bins=False,
 ):
     """Differentiable halo field via expected-number painting (issue #42, G6).
 
@@ -1314,10 +1346,17 @@ def halo_field_diff(
                     :func:`conditional_dndlnm_diff`.
         chmf_recipe: Only meaningful when ``hmf_model='ST'`` — see
                     :func:`conditional_dndlnm_diff`.
+        return_bins: If ``True``, also return the per-bin, *unweighted*
+            halo-count fields ``n_b`` (issue #59, Phase D — each mass bin
+            needs its own kernel, so painting can't work from the combined,
+            already-weighted-and-summed ``field`` alone).
 
     Returns:
-        (field, M_centers) — the weighted halo field (backend array, shape of
-        ``delta_env``) and the static bin-centre masses (numpy, M_sun).
+        ``(field, M_centers)`` — the weighted halo field (backend array,
+        shape of ``delta_env``) and the static bin-centre masses (numpy,
+        M_sun). If ``return_bins=True``, a third element ``n_b_bins``
+        (backend array, shape ``(n_mass_bins,) + delta_env.shape``, *not*
+        multiplied by ``w_bins``) is appended.
     """
     from ..cosmo.differentiable import get_backend, device_of, as_array, as_const
 
@@ -1325,14 +1364,7 @@ def halo_field_diff(
     device = device_of(name, xp, delta_env, Om, Ob, h0, ns, sigma_8)
     delta_env = as_array(delta_env, name, xp, device)
 
-    M_hi = 0.999 * M_env if M_max is None else min(M_max, 0.999 * M_env)
-    if M_hi <= M_min:
-        raise ValueError(
-            f"M_env = {M_env:.2e} Msun leaves no mass range above "
-            f"M_min = {M_min:.2e} Msun.")
-    M_edges = np.logspace(np.log10(M_min), np.log10(M_hi), n_mass_bins + 1)
-    M_centers = np.sqrt(M_edges[:-1] * M_edges[1:])
-    dln_M = np.diff(np.log(M_edges))
+    M_centers, dln_M = chmf_mass_bins(M_env, M_min, M_max, n_mass_bins)
 
     if isinstance(weights, str):
         if weights == 'counts':
@@ -1357,6 +1389,7 @@ def halo_field_diff(
                 f"eps must have shape {expected}; got {tuple(eps.shape)}")
 
     field = xp.zeros_like(delta_env)
+    n_b_bins = [] if return_bins else None
     for i_M, M in enumerate(M_centers):
         lam = conditional_dndlnm_diff(
             float(M), delta_env, M_env, z, Om, Ob, h0, ns, sigma_8,
@@ -1375,5 +1408,11 @@ def halo_field_diff(
                                  xp.zeros_like(lam)) * eps_b
 
         field = field + float(w_bins[i_M]) * n_b
+        if return_bins:
+            n_b_bins.append(n_b)
 
+    if return_bins:
+        n_b_stack = (xp.stack(n_b_bins, dim=0) if name == 'torch'
+                    else xp.stack(n_b_bins, axis=0))
+        return field, M_centers, n_b_stack
     return field, M_centers

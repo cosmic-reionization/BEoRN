@@ -34,7 +34,7 @@ from .lpt import (
     ThirdOrderLPT,
 )
 from .backends import LPTBackend, NumpyBackend, TorchBackend, JaxBackend, get_backend
-from .chmf import CHMF, CHMFSampler, conditional_dndlnm_diff, halo_field_diff
+from .chmf import CHMF, CHMFSampler, conditional_dndlnm_diff, halo_field_diff, chmf_mass_bins
 from .excursion_set import ExcursionSetFinder
 from .excursion_set_diff import excursion_set_field_diff
 from .differentiable import (
@@ -74,6 +74,7 @@ __all__ = [
     'CHMFSampler',
     'conditional_dndlnm_diff',
     'halo_field_diff',
+    'chmf_mass_bins',
     'ExcursionSetFinder',
     'excursion_set_field_diff',
     # differentiable LPT pipeline (numpy/jax/torch, device-resident)

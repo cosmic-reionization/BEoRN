@@ -686,6 +686,228 @@ def test_ngam_dot_ion_population_diff_gradient_jax_and_torch(pname):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Full per-bin differentiable twin (issue #59, Phase D)
+#
+# chmf_mass_bins/halo_field_diff(return_bins=True)/paint_fields_population_diff
+# are the new building blocks; paint_snapshot_population_diff/
+# dtb_global_signal_population_diff assemble them (plus the already-tested
+# Phase A/B/C radiation-profile builders) into the true differentiable twin of
+# paint_snapshot_diff/dtb_global_signal_diff — real per-bin X-ray heating and
+# Lyman-alpha coupling instead of a toy profile/proxy.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from beorn.lpt.chmf import chmf_mass_bins, halo_field_diff  # noqa: E402
+from beorn.painting.differentiable import paint_fields_population_diff  # noqa: E402
+from beorn.cosmo.differentiable import dTb_factor as dTb_factor_diff  # noqa: E402
+from beorn.differentiable_pipeline import (  # noqa: E402
+    paint_snapshot_population_diff, dtb_global_signal_population_diff,
+)
+
+
+def test_chmf_mass_bins_matches_halo_field_diff_grid():
+    """halo_field_diff bins its expected halo counts onto exactly the grid
+    chmf_mass_bins hands out standalone -- the extraction changed nothing."""
+    M_env, M_min, n_mass_bins = 1e10, 1e9, 8
+    M_centers, dln_M = chmf_mass_bins(M_env, M_min, n_mass_bins=n_mass_bins)
+    assert M_centers.shape == (n_mass_bins,)
+    assert dln_M.shape == (n_mass_bins,)
+
+    rng = np.random.default_rng(0)
+    delta_env = rng.standard_normal((6, 6, 6)) * 0.1
+    _, M_centers_from_call = halo_field_diff(
+        delta_env, M_env, 10.0, 0.315, 0.049, 0.673, 0.965, 0.811,
+        cell_volume=1.0, M_min=M_min, n_mass_bins=n_mass_bins)
+    np.testing.assert_allclose(M_centers_from_call, M_centers, rtol=1e-14)
+
+
+def test_halo_field_diff_return_bins_reconstructs_combined_field():
+    """The per-bin n_b_bins, weighted by w_bins and summed, must reconstruct
+    the ordinary (return_bins=False) combined field exactly -- both paths
+    run through the same loop in halo_field_diff, so this is a regression
+    check on the return_bins plumbing, not the physics."""
+    M_env, M_min, n_mass_bins = 1e10, 1e9, 6
+    rng = np.random.default_rng(1)
+    delta_env = rng.standard_normal((5, 5, 5)) * 0.1
+
+    for weights in ('counts', 'mass'):
+        field, M_centers = halo_field_diff(
+            delta_env, M_env, 9.0, 0.315, 0.049, 0.673, 0.965, 0.811,
+            cell_volume=2.0, M_min=M_min, n_mass_bins=n_mass_bins,
+            weights=weights)
+        field3, M_centers3, n_b_bins = halo_field_diff(
+            delta_env, M_env, 9.0, 0.315, 0.049, 0.673, 0.965, 0.811,
+            cell_volume=2.0, M_min=M_min, n_mass_bins=n_mass_bins,
+            weights=weights, return_bins=True)
+
+        np.testing.assert_allclose(field3, field, rtol=1e-14)
+        np.testing.assert_allclose(M_centers3, M_centers, rtol=1e-14)
+        assert n_b_bins.shape == (n_mass_bins,) + delta_env.shape
+
+        w_bins = np.ones(n_mass_bins) if weights == 'counts' else M_centers
+        reconstructed = np.tensordot(w_bins, np.asarray(n_b_bins), axes=1)
+        np.testing.assert_allclose(reconstructed, np.asarray(field), rtol=1e-12)
+
+
+def test_paint_fields_population_diff_n_bins_1_matches_paint_fields_diff():
+    """A single bin must reduce exactly to paint_fields_diff's output -- same
+    kernels, same accumulation, just one term in the Fourier sum."""
+    N, L, z = 16, 50.0, 9.0
+    rng = np.random.default_rng(2)
+    halo_mesh = rng.random((N, N, N))
+    R_bubble = 5.0
+    r_alpha = np.logspace(-2, 1.5, 40)
+    prof_alpha = np.exp(-r_alpha / 2.0)
+    r_temp = np.linspace(1e-3, 20.0, 50)
+    prof_temp = 50.0 * np.exp(-r_temp / 4.0)
+
+    ref = paint_fields_diff(halo_mesh, z, L, R_bubble=R_bubble,
+                            r_alpha=r_alpha, prof_alpha=prof_alpha,
+                            r_temp=r_temp, prof_temp=prof_temp,
+                            xHII_floor=1e-4, spread_iter=4)
+    out = paint_fields_population_diff(
+        halo_mesh[None, ...], z, L, R_bubble_bins=np.array([R_bubble]),
+        r_alpha=r_alpha, prof_alpha_bins=prof_alpha[None, ...],
+        r_temp=r_temp, prof_temp_bins=prof_temp[None, ...],
+        xHII_floor=1e-4, spread_iter=4)
+
+    for a, b in zip(out, ref):
+        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-12)
+
+
+def test_dTb_factor_diff_matches_production():
+    from beorn.cosmo import dTb_factor as dTb_factor_ref
+    p = Parameters()
+    p.cosmology.Om, p.cosmology.Ob, p.cosmology.h0 = 0.315, 0.049, 0.673
+    ref = dTb_factor_ref(p)
+    out = dTb_factor_diff(p.cosmology.Om, p.cosmology.Ob, p.cosmology.h0)
+    assert float(out) == pytest.approx(ref, rel=1e-14)
+
+
+_POP_PARAM_DEFAULTS = dict(_LYAL_PARAM_DEFAULTS, ns=0.97, sigma_8=0.82)
+
+_N_POP, _L_POP = 8, 60.0
+
+
+def _pop_history(z_grid, dk, backend, d=None, n_mass_bins=4):
+    d = dict(_POP_PARAM_DEFAULTS) if d is None else d
+    return dtb_global_signal_population_diff(
+        z_grid, dk, _L_POP, _N_POP, d['Om'], d['Ob'], d['h0'], d['ns'],
+        d['sigma_8'], d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'],
+        d['Mt'], d['g3'], d['g4'], d['halo_mass_min'], d['f0_esc'],
+        d['Mp_esc'], d['pl_esc'], d['xray_normalisation'], d['alS_xray'],
+        d['energy_min_sed_xray'], d['energy_max_sed_xray'],
+        d['energy_cutoff_min_xray'], d['energy_cutoff_max_xray'],
+        d['HI_frac'], d['n_lyman_alpha_photons'], d['lyman_alpha_power_law'],
+        d['z_source_start'], d['z_decoupling'], n_mass_bins=n_mass_bins,
+        backend=backend)
+
+
+@pytest.fixture(scope='module')
+def pop_noise():
+    return np.random.default_rng(4).standard_normal((_N_POP,) * 3)
+
+
+def test_dtb_global_signal_population_diff_matches_paint_snapshot_population_diff_per_snapshot(pop_noise):
+    """The driver's own Ngam/R_bubble/rho_xray/rho_heat/rho_alpha solve-once
+    -over-z-then-index plumbing must reproduce a direct
+    paint_snapshot_population_diff call at every grid point."""
+    dk = lpt_ics(pop_noise, _L_POP, 0.315, 0.049, 0.673, 0.965, 0.811,
+                backend='numpy')
+    d = _POP_PARAM_DEFAULTS
+    n_mass_bins = 4
+    z_grid = np.array([12.0, 9.0])
+
+    dTb_hist, xHII_hist, Tk_hist = _pop_history(z_grid, dk, 'numpy',
+                                                n_mass_bins=n_mass_bins)
+
+    M_centers, _ = chmf_mass_bins(1e10, 1e9, n_mass_bins=n_mass_bins)
+    xe = np.full(z_grid.size, 2e-4)
+    Ngam_bins = ngam_dot_ion_diff(
+        z_grid, M_centers[:, None], 0.79, d['Om'], d['Ob'], d['h0'],
+        d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'],
+        d['g4'], d['halo_mass_min'], d['f0_esc'], d['Mp_esc'], d['pl_esc'])
+    R_bubble_bins = bubble_radius_diff(z_grid, Ngam_bins, d['Om'], d['Ob'], d['h0'])
+    # must match dtb_global_signal_population_diff's own defaults exactly --
+    # a different quadrature resolution gives a slightly different profile.
+    r_grid_cell = np.logspace(-2, np.log10(600.0), 200)
+    r_lyal = np.logspace(-5, 2, 1000, base=10)
+    rho_xray_bins = rho_xray_diff(
+        z_grid, r_grid_cell, M_centers[:, None], 0.79, d['Om'], d['Ob'], d['h0'],
+        d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'], d['g4'],
+        d['halo_mass_min'], d['xray_normalisation'], d['alS_xray'],
+        d['energy_min_sed_xray'], d['energy_max_sed_xray'],
+        d['energy_cutoff_min_xray'], d['energy_cutoff_max_xray'], d['HI_frac'],
+        xe, d['z_source_start'])
+    rho_heat_bins = rho_heat_diff(z_grid, rho_xray_bins, d['Om'], d['h0'], d['z_decoupling'])
+    rho_alpha_bins = rho_alpha_profile_diff(
+        z_grid, r_lyal, M_centers[:, None], 0.79, d['Om'], d['Ob'], d['h0'],
+        d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'], d['g4'],
+        d['halo_mass_min'], d['n_lyman_alpha_photons'], d['lyman_alpha_power_law'],
+        d['z_source_start'])
+
+    for i, z in enumerate(z_grid):
+        _, dTb_direct, xhii_direct, Tk_direct = paint_snapshot_population_diff(
+            float(z), dk, _L_POP, _N_POP, d['Om'], d['Ob'], d['h0'], d['ns'],
+            d['sigma_8'], R_bubble_bins[:, i], rho_heat_bins[:, :, i],
+            r_grid_cell, rho_alpha_bins[:, :, i], r_lyal, d['z_decoupling'],
+            n_mass_bins=n_mass_bins)
+
+        assert float(dTb_hist[i]) == pytest.approx(float(np.mean(dTb_direct)), rel=1e-10)
+        assert float(xHII_hist[i]) == pytest.approx(float(np.mean(xhii_direct)), rel=1e-10)
+        assert float(Tk_hist[i]) == pytest.approx(float(np.mean(Tk_direct)), rel=1e-10)
+
+
+def test_dtb_global_signal_population_diff_finite_all_backends(pop_noise):
+    """Regression guard for the two real bugs found while wiring this up:
+    a float32 overflow (inf/inf -> NaN) in the collisional-coupling rho_b
+    formula (fixed by assembling its constant chain from scalars before
+    multiplying delta_b), and (separately) jax's float32 default overflowing
+    xray_normalisation ~1e39-1e40 unless jax_enable_x64 is set (this test
+    file sets it globally at import time)."""
+    z_grid = np.array([12.0, 9.0])
+
+    for backend in (['numpy', 'jax', 'torch'] if _TORCH else ['numpy', 'jax']):
+        dk = lpt_ics(pop_noise, _L_POP, 0.315, 0.049, 0.673, 0.965, 0.811,
+                    backend=backend)
+        dTb_hist, xHII_hist, Tk_hist = _pop_history(z_grid, dk, backend)
+        for hist in (dTb_hist, xHII_hist, Tk_hist):
+            vals = np.asarray(hist.detach() if backend == 'torch' else hist)
+            assert np.all(np.isfinite(vals)), backend
+        xhii = np.asarray(xHII_hist.detach() if backend == 'torch' else xHII_hist)
+        assert np.all(xhii >= 0.0) and np.all(xhii <= 1.0)
+
+
+@pytest.mark.parametrize('pname', ['Nion', 'xray_normalisation', 'n_lyman_alpha_photons'])
+def test_dtb_global_signal_population_diff_gradient_jax_and_torch(pop_noise, pname):
+    """d(sum of the dTb history)/dtheta, jax vs finite differences, torch vs
+    jax -- one representative parameter per channel (ionization, X-ray
+    heating, Lyman-alpha coupling)."""
+    z_grid = np.array([12.0, 9.0])
+    d = dict(_POP_PARAM_DEFAULTS)
+    x0 = d.pop(pname)
+
+    def S(val, backend):
+        kw = dict(d)
+        kw[pname] = val
+        dk = lpt_ics(pop_noise, _L_POP, kw['Om'], kw['Ob'], kw['h0'],
+                    kw['ns'], kw['sigma_8'], backend=backend)
+        dTb_hist, _, _ = _pop_history(z_grid, dk, backend, d=kw)
+        return dTb_hist.sum()
+
+    g_jax = jax.grad(lambda v: S(v, 'jax'))(x0)
+    h = 1e-4 * x0
+    fd = (S(x0 + h, 'numpy') - S(x0 - h, 'numpy')) / (2 * h)
+    assert np.isfinite(float(g_jax))
+    assert float(g_jax) == pytest.approx(float(fd), rel=5e-2)
+
+    if not _TORCH:
+        pytest.skip('torch not installed')
+    xt = torch.tensor(x0, dtype=torch.float64, requires_grad=True)
+    S(xt, 'torch').backward()
+    assert float(xt.grad) == pytest.approx(float(g_jax), rel=1e-6)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Phase 2 exit test — dΔ²₂₁/dθ, one astro + one cosmology parameter
 # ─────────────────────────────────────────────────────────────────────────────
 

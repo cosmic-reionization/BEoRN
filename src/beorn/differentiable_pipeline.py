@@ -19,15 +19,28 @@ HMF as the weight), not one hand-picked representative halo — see
 :func:`~beorn.precomputation.differentiable.ngam_dot_ion_population_diff`'s
 docstring for exactly what that does and doesn't average over.
 
-Real Ly-alpha (:func:`beorn.precomputation.helpers.rho_alpha_profile`) and
-X-ray heating (:meth:`beorn.precomputation.solver.RadiationProfileSolver.rho_xray`)
-source terms are **not** implemented here — both channels still use the same
-toy proxies as the issue #42 exit test (a fixed radial heating profile, a
-Ly-alpha coupling proportional to the halo mesh); differentiable ports of
-both now exist (:func:`beorn.precomputation.differentiable.rho_xray_diff`/
-:func:`~beorn.precomputation.differentiable.rho_alpha_profile_diff`, issue #59
-Phases A/B) but aren't wired into this driver yet — that's Phase D. Only the
-ionization channel is real astro-parameter physics end to end.
+:func:`paint_snapshot_diff`/:func:`dtb_global_signal_diff` above stay the
+*interim* single-global-bubble chain: real Ly-alpha
+(:func:`beorn.precomputation.helpers.rho_alpha_profile`) and X-ray heating
+(:meth:`beorn.precomputation.solver.RadiationProfileSolver.rho_xray`) source
+terms are **not** used there — both channels still use the same toy proxies
+as the issue #42 exit test (a fixed radial heating profile, a Ly-alpha
+coupling proportional to the halo mesh).
+
+:func:`paint_snapshot_population_diff`/:func:`dtb_global_signal_population_diff`
+(issue #59, Phase D) are the **true differentiable twin**: every mass bin
+gets its own bubble radius (:func:`~beorn.precomputation.differentiable.bubble_radius_diff`),
+X-ray heating profile (:func:`~beorn.precomputation.differentiable.rho_xray_diff`/
+:func:`~beorn.precomputation.differentiable.rho_heat_diff`, Phase A) and
+Lyman-alpha profile (:func:`~beorn.precomputation.differentiable.rho_alpha_profile_diff`,
+Phase B), Fourier-accumulated by
+:func:`~beorn.painting.differentiable.paint_fields_population_diff` instead
+of one hand-picked representative halo painted with a toy heating/coupling
+proxy — unifying Phases A-C into the real ``paint_full`` per-bin
+architecture. The interim functions above are kept, unchanged, for the
+existing issue #42 exit test and anything else that only needs the
+ionization channel.
+
 ``backend='numpy'`` is the default and is **not** differentiable (plain
 NumPy has no autodiff); use ``backend='jax'``/``'torch'`` for gradients.
 """
@@ -35,15 +48,21 @@ from __future__ import annotations
 
 import numpy as np
 
-from .cosmo.differentiable import get_backend
-from .constants import rhoc0
+from .cosmo.differentiable import get_backend, dTb_factor
+from .constants import rhoc0, Tcmb0, M_sun, cm_per_Mpc, m_H
 from .lpt import lpt_density, lpt_linear_density
-from .lpt.chmf import halo_field_diff
-from .precomputation.differentiable import ngam_dot_ion_population_diff, bubble_radius_diff
-from .painting.differentiable import paint_fields_diff
+from .lpt.chmf import halo_field_diff, chmf_mass_bins
+from .precomputation.differentiable import (
+    ngam_dot_ion_diff, ngam_dot_ion_population_diff, bubble_radius_diff,
+    rho_xray_diff, rho_heat_diff, rho_alpha_profile_diff,
+)
+from .painting.differentiable import paint_fields_diff, paint_fields_population_diff
 from .couplings import x_coll_diff, s_alpha_diff, dtb_diff
 
-__all__ = ['paint_snapshot_diff', 'dtb_global_signal_diff']
+__all__ = [
+    'paint_snapshot_diff', 'dtb_global_signal_diff',
+    'paint_snapshot_population_diff', 'dtb_global_signal_population_diff',
+]
 
 _DEFAULT_R_NODES = np.linspace(1e-3, 20.0, 60)
 
@@ -207,6 +226,253 @@ def dtb_global_signal_diff(
             r_temp=r_temp, prof_temp=prof_temp, xHII_floor=xHII_floor,
             spread_iter=spread_iter, xal_coupling=xal_coupling,
             backend=backend,
+        )
+        dTb_hist.append(xp.mean(dTb))
+        xHII_hist.append(xp.mean(xhii))
+        Tk_hist.append(xp.mean(Tk))
+
+    return xp.stack(dTb_hist), xp.stack(xHII_hist), xp.stack(Tk_hist)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Full per-bin differentiable twin (issue #59, Phase D)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def paint_snapshot_population_diff(
+    z, dk, L, N, Om, Ob, h0, ns, sigma_8,
+    R_bubble_bins, prof_temp_bins, r_temp,
+    prof_alpha_bins, r_alpha,
+    z_decoupling,
+    M_env=1e10, cell_volume=None, M_min=1e9, n_mass_bins=8,
+    eps_halo=None, xHII_floor=1e-4, spread_iter=4, backend='numpy',
+):
+    """One redshift snapshot of the full per-bin differentiable 21-cm chain
+    (issue #59, Phase D) — the real-physics counterpart of
+    :func:`paint_snapshot_diff`.
+
+    Density → EPS halo field, decomposed **per mass bin**
+    (:func:`beorn.lpt.chmf.halo_field_diff` with ``return_bins=True``) →
+    per-bin Fourier-accumulated painting
+    (:func:`beorn.painting.differentiable.paint_fields_population_diff`,
+    using each bin's own ``R_bubble``/X-ray-heating/Lyman-α profile, solved
+    once over the whole redshift grid by
+    :func:`dtb_global_signal_population_diff` and indexed in here) →
+    couplings → dTb, with every constant/scaling the interim
+    :func:`paint_snapshot_diff` used a toy value for computed for real:
+    the adiabatic baseline (:func:`~beorn.cosmo.background.T_adiab_fluctu`'s
+    formula), the collisional-coupling baryon density
+    (:func:`~beorn.structs.derived_quantities.GridDerivedPropertiesMixin.coef`'s
+    formula), the ``S_alpha``/4π normalisation production applies after
+    painting, and the cosmology-dependent ``dTb_factor``
+    (:func:`~beorn.cosmo.differentiable.dTb_factor`) instead of a fixed 27.0.
+
+    Args:
+        z: Redshift (static float).
+        dk: LPT initial-conditions Fourier field.
+        L, N: Box size (Mpc/h) and cells per side.
+        Om, Ob, h0, ns, sigma_8: Cosmology (may carry gradients).
+        R_bubble_bins: Comoving bubble radius per mass bin (Mpc/h), shape
+            (n_mass_bins,) — one z-slice of
+            :func:`~beorn.precomputation.differentiable.bubble_radius_diff`'s
+            output; may carry gradients.
+        prof_temp_bins: X-ray heating/temperature profile per mass bin on
+            ``r_temp``, shape (n_mass_bins, n_r) — one z-slice of
+            :func:`~beorn.precomputation.differentiable.rho_heat_diff`'s
+            output; may carry gradients.
+        r_temp: Comoving radial nodes (Mpc/h) for ``prof_temp_bins`` — the
+            solver's ``r_grid_cell``.
+        prof_alpha_bins: Lyman-α profile per mass bin on ``r_alpha``, shape
+            (n_mass_bins, n_r_lyal) — one z-slice of
+            :func:`~beorn.precomputation.differentiable.rho_alpha_profile_diff`'s
+            output; may carry gradients.
+        r_alpha: Comoving *physical* radial nodes (Mpc/h) for
+            ``prof_alpha_bins`` — the solver's ``r_lyal`` (see
+            :func:`~beorn.precomputation.differentiable.rho_alpha_profile_diff`'s
+            docstring on why this grid differs from ``r_temp``'s).
+        z_decoupling: Redshift where the gas adiabatically decouples from
+            the CMB (``parameters.solver.z_decoupling``) — sets the
+            adiabatic-cooling baseline.
+        M_env, cell_volume, M_min, n_mass_bins, eps_halo: Forwarded to
+            :func:`beorn.lpt.chmf.halo_field_diff` — ``n_mass_bins`` and
+            ``M_min``/``M_env`` must match whatever was used to build
+            ``R_bubble_bins``/``prof_temp_bins``/``prof_alpha_bins``'s mass
+            grid (:func:`beorn.lpt.chmf.chmf_mass_bins`) — mismatched grids
+            silently pair the wrong bin with the wrong profile.
+        xHII_floor, spread_iter: Forwarded to
+            :func:`~beorn.painting.differentiable.paint_fields_population_diff`.
+        backend: 'numpy' (default, not differentiable), 'jax' or 'torch'.
+
+    Returns:
+        (delta_b, dTb, xHII, Tk) — each a backend array of shape (N, N, N).
+    """
+    name, xp = get_backend(backend)
+    cell = float(L) / N
+    if cell_volume is None:
+        cell_volume = cell ** 3
+    R_cell = (3.0 / (4.0 * np.pi)) ** (1.0 / 3.0) * cell
+
+    delta_b = lpt_density(dk, L, z, Om, backend=backend)
+    dlin = lpt_linear_density(dk, L, z, Om, backend=backend, R_tophat=R_cell)
+
+    _, _, n_b_bins = halo_field_diff(
+        dlin, M_env, z, Om, Ob, h0, ns, sigma_8, cell_volume=cell_volume,
+        M_min=M_min, n_mass_bins=n_mass_bins, weights='counts', eps=eps_halo,
+        backend=backend, return_bins=True,
+    )
+
+    grid_xhii, grid_xal, grid_temp = paint_fields_population_diff(
+        n_b_bins, z, L, R_bubble_bins=R_bubble_bins,
+        r_alpha=r_alpha, prof_alpha_bins=prof_alpha_bins,
+        r_temp=r_temp, prof_temp_bins=prof_temp_bins,
+        backend=backend, xHII_floor=xHII_floor, spread_iter=spread_iter,
+    )
+
+    # T_adiab_fluctu(z, z_decoupling, delta_b) -- beorn.cosmo.background's
+    # formula, ported inline (2-line closed form, not worth a new module fn).
+    T_adiab = Tcmb0 * (1.0 + z) ** 2 / (1.0 + z_decoupling)
+    Tk = T_adiab * (1.0 + delta_b) ** (2.0 / 3.0) + grid_temp
+
+    # coef/rho_b -- beorn.structs.derived_quantities.GridDerivedPropertiesMixin.coef's
+    # formula, ported inline for the same reason. ``coef`` is assembled from
+    # scalars *before* touching ``delta_b`` (matching production's own
+    # scalar-then-array structure) -- delta_b is float32 (from lpt_density's
+    # particle-mesh painting), and the constant chain here spans ~1e-44
+    # (M_sun/cm_per_Mpc**3) to ~1e30 (M_sun): folding a float32 array into
+    # that chain overflows intermediate float32 terms to inf, and inf/inf
+    # gives NaN. Computed as plain scalars this chain stays in float64/Python
+    # float precision throughout, and only the final, moderate (~1e-4-1e-3)
+    # coefficient ever multiplies the array.
+    coef = rhoc0 * h0 ** 2 * Ob * (1.0 + z) ** 3 * M_sun / cm_per_Mpc ** 3 / m_H
+    rho_b = (1.0 + delta_b) * coef
+    x_alpha = (1.81e11 / (1.0 + z)) * grid_xal
+    xtot = (x_alpha * s_alpha_diff(z, Tk, 1.0 - grid_xhii, backend=backend)
+           / (4.0 * np.pi)
+           + x_coll_diff(z, Tk, 1.0 - grid_xhii, rho_b, backend=backend))
+
+    factor = dTb_factor(Om, Ob, h0, backend=backend)
+    dTb = dtb_diff(z, Tk, xtot, delta_b, grid_xhii, factor=factor, backend=backend)
+
+    return delta_b, dTb, grid_xhii, Tk
+
+
+def dtb_global_signal_population_diff(
+    z_grid, dk, L, N, Om, Ob, h0, ns, sigma_8,
+    Nion, f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min,
+    f0_esc, Mp_esc, pl_esc,
+    xray_normalisation, alS_xray, energy_min_sed_xray, energy_max_sed_xray,
+    energy_cutoff_min_xray, energy_cutoff_max_xray, HI_frac,
+    n_lyman_alpha_photons, lyman_alpha_power_law,
+    z_source_start, z_decoupling,
+    alpha_center=0.79, M_env=1e10, cell_volume=None, M_min=1e9,
+    n_mass_bins=8, eps_halo=None, r_grid_cell=None, r_lyal=None,
+    xHII_floor=1e-4, spread_iter=4, backend='numpy',
+):
+    """Full per-bin differentiable global dTb(z)/xHII(z)/Tk(z) history —
+    the true differentiable twin (issue #59, Phase D) of
+    :func:`dtb_global_signal_diff`.
+
+    Every mass bin (:func:`beorn.lpt.chmf.chmf_mass_bins`, the same static
+    grid :func:`beorn.lpt.chmf.halo_field_diff` bins its expected halo
+    counts into) gets its own ``Ngam_dot(z)``/``R_bubble(z)``
+    (:func:`~beorn.precomputation.differentiable.ngam_dot_ion_diff`/
+    :func:`~beorn.precomputation.differentiable.bubble_radius_diff`),
+    X-ray heating profile
+    (:func:`~beorn.precomputation.differentiable.rho_xray_diff`/
+    :func:`~beorn.precomputation.differentiable.rho_heat_diff`) and
+    Lyman-α profile
+    (:func:`~beorn.precomputation.differentiable.rho_alpha_profile_diff`) —
+    all solved **once** over the whole ``z_grid`` (batched over the mass
+    axis, the same "solved once, indexed per snapshot" architecture
+    :func:`dtb_global_signal_diff` already uses for its single global
+    ``Ngam_dot``/``R_bubble``) and then painted per snapshot by
+    :func:`paint_snapshot_population_diff`.
+
+    Scope: ``alpha_center`` stays one representative accretion-rate exponent
+    for every mass bin, for exactly the reason
+    :func:`~beorn.precomputation.differentiable.ngam_dot_ion_population_diff`
+    documents (no accretion-rate-scatter analogue for a smooth analytic/CHMF
+    halo field). ``xe`` (the free-electron-fraction history feeding
+    :func:`~beorn.precomputation.differentiable.rho_xray_diff`) is fixed at
+    the ``fXh='constant'`` default (2e-4) — see
+    :meth:`~beorn.precomputation.solver.RadiationProfileSolver.solve`.
+
+    Args:
+        z_grid: Static, decreasing redshift grid (numpy), shape (n_z,).
+        dk: LPT initial-conditions Fourier field.
+        L, N: Box size (Mpc/h) and cells per side.
+        Om, Ob, h0, ns, sigma_8: Cosmology (may carry gradients).
+        Nion, f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min, f0_esc, Mp_esc, pl_esc:
+            Star-formation/escape-fraction astro parameters — see
+            :func:`~beorn.precomputation.differentiable.ngam_dot_ion_diff`.
+        xray_normalisation, alS_xray, energy_min_sed_xray, energy_max_sed_xray,
+        energy_cutoff_min_xray, energy_cutoff_max_xray, HI_frac:
+            X-ray SED parameters — see
+            :func:`~beorn.precomputation.differentiable.rho_xray_diff`.
+        n_lyman_alpha_photons, lyman_alpha_power_law: Lyman-α SED
+            parameters — see
+            :func:`~beorn.precomputation.differentiable.rho_alpha_profile_diff`.
+        z_source_start, z_decoupling: Source lifetime / decoupling redshift
+            — see :func:`~beorn.precomputation.differentiable.rho_xray_diff`/
+            :func:`paint_snapshot_population_diff`.
+        alpha_center: Representative accretion-rate exponent — see Scope
+            above.
+        M_env, cell_volume, M_min, n_mass_bins, eps_halo: Forwarded to
+            :func:`beorn.lpt.chmf.halo_field_diff` at every redshift.
+        r_grid_cell, r_lyal: Radial quadrature grids — ``None`` → the
+            solver's own defaults (``np.logspace(-2, log10(600), 200)``
+            comoving Mpc/h; ``np.logspace(-5, 2, 1000)`` physical Mpc/h).
+        xHII_floor, spread_iter: Forwarded to
+            :func:`paint_snapshot_population_diff` at every redshift.
+        backend: 'numpy' (default, not differentiable), 'jax' or 'torch'.
+
+    Returns:
+        (dTb_mean, xHII_mean, Tk_mean) — each a backend array of shape
+        (n_z,), in ``z_grid``'s order.
+    """
+    name, xp = get_backend(backend)
+
+    if r_grid_cell is None:
+        r_grid_cell = np.logspace(-2, np.log10(600.0), 200)
+    if r_lyal is None:
+        r_lyal = np.logspace(-5, 2, 1000, base=10)
+
+    z_np = np.asarray(z_grid, dtype=float)
+    xe = np.full(z_np.size, 2e-4)
+
+    M_centers, _ = chmf_mass_bins(M_env, M_min, n_mass_bins=n_mass_bins)
+
+    Ngam_bins = ngam_dot_ion_diff(
+        z_np, M_centers[:, None], alpha_center, Om, Ob, h0, Nion, f_st, Mp,
+        g1, g2, Mt, g3, g4, halo_mass_min, f0_esc, Mp_esc, pl_esc,
+        backend=backend,
+    )  # (n_mass_bins, n_z)
+    R_bubble_bins = bubble_radius_diff(z_np, Ngam_bins, Om, Ob, h0, backend=backend)
+
+    rho_xray_bins = rho_xray_diff(
+        z_np, r_grid_cell, M_centers[:, None], alpha_center, Om, Ob, h0,
+        f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min, xray_normalisation,
+        alS_xray, energy_min_sed_xray, energy_max_sed_xray,
+        energy_cutoff_min_xray, energy_cutoff_max_xray, HI_frac, xe,
+        z_source_start, backend=backend,
+    )  # (n_mass_bins, n_r, n_z)
+    rho_heat_bins = rho_heat_diff(z_np, rho_xray_bins, Om, h0, z_decoupling,
+                                  backend=backend)  # (n_mass_bins, n_r, n_z)
+
+    rho_alpha_bins = rho_alpha_profile_diff(
+        z_np, r_lyal, M_centers[:, None], alpha_center, Om, Ob, h0, f_st,
+        Mp, g1, g2, Mt, g3, g4, halo_mass_min, n_lyman_alpha_photons,
+        lyman_alpha_power_law, z_source_start, backend=backend,
+    )  # (n_mass_bins, n_r_lyal, n_z)
+
+    dTb_hist, xHII_hist, Tk_hist = [], [], []
+    for i, z in enumerate(z_np):
+        _, dTb, xhii, Tk = paint_snapshot_population_diff(
+            float(z), dk, L, N, Om, Ob, h0, ns, sigma_8,
+            R_bubble_bins[:, i], rho_heat_bins[:, :, i], r_grid_cell,
+            rho_alpha_bins[:, :, i], r_lyal, z_decoupling,
+            M_env=M_env, cell_volume=cell_volume, M_min=M_min,
+            n_mass_bins=n_mass_bins, eps_halo=eps_halo,
+            xHII_floor=xHII_floor, spread_iter=spread_iter, backend=backend,
         )
         dTb_hist.append(xp.mean(dTb))
         xHII_hist.append(xp.mean(xhii))

@@ -191,3 +191,25 @@ def hubble_per_yr(z, Om, h0, backend='numpy'):
     device = device_of(name, xp, z, Om, h0)
     h0 = as_array(h0, name, xp, device)
     return h0 * 100.0 * sec_per_year / km_per_Mpc * hubble_E(z, Om, backend=backend)
+
+
+def dTb_factor(Om, Ob, h0, backend='numpy'):
+    """Constant prefactor in the dTb formula — differentiable counterpart of
+    :func:`.background.dTb_factor` (identical algebra).
+
+    Differentiable w.r.t. ``Om``, ``Ob``, ``h0`` when ``backend='jax'``/
+    ``'torch'`` — this is the gradient path from dTb back to cosmology that
+    was missing entirely while callers hand-supplied a fixed value (e.g. the
+    issue #42 exit test's ``factor=27.0``, only exactly right at one fiducial
+    cosmology).
+
+    Args:
+        Om, Ob, h0: Cosmology (may carry gradients).
+        backend: 'numpy' (default, not differentiable), 'jax' or 'torch'.
+    """
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, Om, Ob, h0)
+    Om = as_array(Om, name, xp, device)
+    Ob = as_array(Ob, name, xp, device)
+    h0 = as_array(h0, name, xp, device)
+    return 27.0 * Ob * h0 ** 2 / 0.023 * xp.sqrt(0.15 / Om / h0 ** 2 / 10.0)
