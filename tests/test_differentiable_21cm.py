@@ -24,6 +24,7 @@ from beorn.precomputation.differentiable import (
     linear_ode_solution, heat_ode_solution, bubble_radius_diff,
     sample_fst_reparam, interp_profiles_fst,
     mass_accretion_diff, mass_accretion_derivative_diff, ngam_dot_ion_diff,
+    ngam_dot_ion_population_diff,
 )
 from beorn.astro_differentiable import f_star_halo_diff, f_esc_diff
 from beorn.differentiable_pipeline import paint_snapshot_diff, dtb_global_signal_diff
@@ -599,6 +600,92 @@ def test_rho_alpha_profile_diff_gradient_jax_and_torch(pname):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Real ionizing budget (issue #59, Phase C) — ngam_dot_ion_population_diff
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_ngam_dot_ion_population_diff_is_bounded_by_per_halo_extremes():
+    """A weighted mean over the mass grid must lie within the per-halo range
+    at every z -- a reference-free structural check independent of exactly
+    how the HMF weights are computed."""
+    z_bins = np.linspace(20.0, 6.0, 12)
+    mass_bins = np.logspace(8, 13, 60)
+    d = _ASTRO_PARAM_DEFAULTS
+
+    Ngam_pop = ngam_dot_ion_population_diff(
+        z_bins, mass_bins, 0.79, d['Om'], d['Ob'], d['h0'], 0.97, 0.82,
+        d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'],
+        d['g4'], d['halo_mass_min'], d['f0_esc'], d['Mp_esc'], d['pl_esc'])
+    Ngam_halo = ngam_dot_ion_diff(
+        z_bins, mass_bins[:, None], 0.79, d['Om'], d['Ob'], d['h0'],
+        d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'],
+        d['g4'], d['halo_mass_min'], d['f0_esc'], d['Mp_esc'], d['pl_esc'])
+
+    assert np.all(np.isfinite(Ngam_pop))
+    assert np.all(Ngam_pop >= Ngam_halo.min(axis=0) - 1e-30)
+    assert np.all(Ngam_pop <= Ngam_halo.max(axis=0) + 1e-30)
+
+
+def test_ngam_dot_ion_population_diff_matches_manual_hmf_weighted_mean():
+    """Cross-check the exact formula against an independently-written
+    np.trapz weighted mean (bypassing trapz_static), not just structure."""
+    from beorn.mass_function.differentiable import dndlnm
+
+    z_bins = np.linspace(20.0, 6.0, 8)
+    mass_bins = np.logspace(8, 13, 40)
+    d = _ASTRO_PARAM_DEFAULTS
+
+    out = ngam_dot_ion_population_diff(
+        z_bins, mass_bins, 0.79, d['Om'], d['Ob'], d['h0'], 0.97, 0.82,
+        d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'],
+        d['g4'], d['halo_mass_min'], d['f0_esc'], d['Mp_esc'], d['pl_esc'])
+
+    Ngam_halo = ngam_dot_ion_diff(
+        z_bins, mass_bins[:, None], 0.79, d['Om'], d['Ob'], d['h0'],
+        d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'],
+        d['g4'], d['halo_mass_min'], d['f0_esc'], d['Mp_esc'], d['pl_esc'])
+    lnM = np.log(mass_bins)
+    ref = np.empty(z_bins.size)
+    for i, z in enumerate(z_bins):
+        weight = dndlnm(mass_bins, float(z), d['Om'], d['Ob'], d['h0'], 0.97, 0.82)
+        ref[i] = np.trapezoid(weight * Ngam_halo[:, i], lnM) / np.trapezoid(weight, lnM)
+
+    np.testing.assert_allclose(np.asarray(out), ref, rtol=1e-10)
+
+
+@pytest.mark.parametrize('pname', ['Nion', 'f_st', 'sigma_8'])
+def test_ngam_dot_ion_population_diff_gradient_jax_and_torch(pname):
+    """d(Ngam_dot(z=6))/dθ, jax vs finite differences, torch vs jax --
+    sigma_8 is a genuinely new gradient path (ngam_dot_ion_diff has no
+    cosmology-power-spectrum dependence at all; this is HMF-only)."""
+    z_bins = np.linspace(20.0, 6.0, 12)
+    mass_bins = np.logspace(8, 13, 40)
+    d = dict(_ASTRO_PARAM_DEFAULTS, ns=0.97, sigma_8=0.82)
+    x0 = d.pop(pname)
+
+    def S(val, backend):
+        kw = dict(d)
+        kw[pname] = val
+        out = ngam_dot_ion_population_diff(
+            z_bins, mass_bins, 0.79, kw['Om'], kw['Ob'], kw['h0'], kw['ns'],
+            kw['sigma_8'], kw['Nion'], kw['f_st'], kw['Mp'], kw['g1'],
+            kw['g2'], kw['Mt'], kw['g3'], kw['g4'], kw['halo_mass_min'],
+            kw['f0_esc'], kw['Mp_esc'], kw['pl_esc'], backend=backend)
+        return out[-1]
+
+    g_jax = jax.grad(lambda v: S(v, 'jax'))(x0)
+    h = 1e-4 * x0
+    fd = (S(x0 + h, 'numpy') - S(x0 - h, 'numpy')) / (2 * h)
+    assert np.isfinite(float(g_jax)) and float(g_jax) != 0.0
+    assert float(g_jax) == pytest.approx(float(fd), rel=5e-3)
+
+    if not _TORCH:
+        pytest.skip('torch not installed')
+    xt = torch.tensor(x0, dtype=torch.float64, requires_grad=True)
+    S(xt, 'torch').backward()
+    assert float(xt.grad) == pytest.approx(float(g_jax), rel=1e-6)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Phase 2 exit test — dΔ²₂₁/dθ, one astro + one cosmology parameter
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -699,10 +786,12 @@ def test_dtb_global_signal_diff_matches_paint_snapshot_diff_per_snapshot(chain_i
     z_grid = np.array([12.0, 9.0])
     dTb_hist, xHII_hist, Tk_hist = _history(z_grid, dk, 'jax')
 
-    Ngam = ngam_dot_ion_diff(z_grid, 1e10, 0.79, d['Om'], d['Ob'], d['h0'],
-                             d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'],
-                             d['Mt'], d['g3'], d['g4'], d['halo_mass_min'],
-                             d['f0_esc'], d['Mp_esc'], d['pl_esc'], backend='jax')
+    mass_bins = np.logspace(np.log10(d['halo_mass_min']), 13.0, 50)
+    Ngam = ngam_dot_ion_population_diff(
+        z_grid, mass_bins, 0.79, d['Om'], d['Ob'], d['h0'], d['ns'],
+        d['sigma_8'], d['Nion'], d['f_st'], d['Mp'], d['g1'], d['g2'],
+        d['Mt'], d['g3'], d['g4'], d['halo_mass_min'], d['f0_esc'],
+        d['Mp_esc'], d['pl_esc'], backend='jax')
     R_b = bubble_radius_diff(z_grid, Ngam, d['Om'], d['Ob'], d['h0'], backend='jax')
 
     for i, z in enumerate(z_grid):

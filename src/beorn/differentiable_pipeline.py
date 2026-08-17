@@ -10,19 +10,26 @@ codebase (production's ``PaintingCoordinator.paint_simple_loop``, every
 existing test): issue #42's own stated policy is to extend the existing
 pattern, not invent a new one.
 
-``Ngam_dot(z)``/``R_bubble(z)`` (:func:`beorn.precomputation.differentiable.ngam_dot_ion_diff`/
-:func:`~beorn.precomputation.differentiable.bubble_radius_diff`, issue #42
-G12 follow-up) are solved **once** over the whole redshift grid and indexed
-per snapshot — not re-solved every iteration.
+``Ngam_dot(z)``/``R_bubble(z)`` (:func:`beorn.precomputation.differentiable.ngam_dot_ion_population_diff`/
+:func:`~beorn.precomputation.differentiable.bubble_radius_diff`, issue #59
+Phase C) are solved **once** over the whole redshift grid and indexed per
+snapshot — not re-solved every iteration. ``Ngam_dot(z)`` is an
+abundance-weighted mean over a static halo-mass grid (the differentiable
+HMF as the weight), not one hand-picked representative halo — see
+:func:`~beorn.precomputation.differentiable.ngam_dot_ion_population_diff`'s
+docstring for exactly what that does and doesn't average over.
 
 Real Ly-alpha (:func:`beorn.precomputation.helpers.rho_alpha_profile`) and
 X-ray heating (:meth:`beorn.precomputation.solver.RadiationProfileSolver.rho_xray`)
 source terms are **not** implemented here — both channels still use the same
 toy proxies as the issue #42 exit test (a fixed radial heating profile, a
-Ly-alpha coupling proportional to the halo mesh). Only the ionization
-channel is real astro-parameter physics end to end. ``backend='numpy'`` is
-the default and is **not** differentiable (plain NumPy has no autodiff); use
-``backend='jax'``/``'torch'`` for gradients.
+Ly-alpha coupling proportional to the halo mesh); differentiable ports of
+both now exist (:func:`beorn.precomputation.differentiable.rho_xray_diff`/
+:func:`~beorn.precomputation.differentiable.rho_alpha_profile_diff`, issue #59
+Phases A/B) but aren't wired into this driver yet — that's Phase D. Only the
+ionization channel is real astro-parameter physics end to end.
+``backend='numpy'`` is the default and is **not** differentiable (plain
+NumPy has no autodiff); use ``backend='jax'``/``'torch'`` for gradients.
 """
 from __future__ import annotations
 
@@ -32,7 +39,7 @@ from .cosmo.differentiable import get_backend
 from .constants import rhoc0
 from .lpt import lpt_density, lpt_linear_density
 from .lpt.chmf import halo_field_diff
-from .precomputation.differentiable import ngam_dot_ion_diff, bubble_radius_diff
+from .precomputation.differentiable import ngam_dot_ion_population_diff, bubble_radius_diff
 from .painting.differentiable import paint_fields_diff
 from .couplings import x_coll_diff, s_alpha_diff, dtb_diff
 
@@ -124,7 +131,7 @@ def dtb_global_signal_diff(
     z_grid, dk, L, N, Om, Ob, h0, ns, sigma_8,
     Nion, f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min,
     f0_esc, Mp_esc, pl_esc,
-    Mh_center=1e10, alpha_center=0.79,
+    Mh_center=1e10, alpha_center=0.79, ngam_mass_bins=None,
     cell_volume=None, M_min=1e9, n_mass_bins=8, weights='counts',
     eps_halo=None, r_temp=None, prof_temp=None, xHII_floor=1e-4,
     spread_iter=4, xal_coupling=1e-2, backend='numpy',
@@ -135,10 +142,12 @@ def dtb_global_signal_diff(
     :meth:`beorn.structs.temporal_cube.TemporalCube.global_mean`: loops
     :func:`paint_snapshot_diff` over ``z_grid`` and reduces each snapshot to
     its spatial mean. Gradients reach every cosmology parameter and every
-    astro parameter :func:`beorn.precomputation.differentiable.ngam_dot_ion_diff`
+    astro parameter
+    :func:`beorn.precomputation.differentiable.ngam_dot_ion_population_diff`
     reaches (``Nion``, ``f_st``, ``Mp``, ``g1``, ``g2``, ``Mt``, ``g3``,
-    ``g4``, ``f0_esc``, ``Mp_esc``, ``pl_esc``) through the ionization
-    channel, when ``backend='jax'``/``'torch'``.
+    ``g4``, ``f0_esc``, ``Mp_esc``, ``pl_esc``, plus ``ns``/``sigma_8``
+    through the HMF weight) through the ionization channel, when
+    ``backend='jax'``/``'torch'``.
 
     The same fixed ``dk`` and the same ``eps_halo`` shot-noise realization
     are reused at every redshift — the pragmatic first pass; independent
@@ -155,11 +164,19 @@ def dtb_global_signal_diff(
         Om, Ob, h0, ns, sigma_8: Cosmology (may carry gradients).
         Nion, f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min, f0_esc, Mp_esc, pl_esc:
             Astro parameters — see
-            :func:`beorn.precomputation.differentiable.ngam_dot_ion_diff`
+            :func:`beorn.precomputation.differentiable.ngam_dot_ion_population_diff`
             (may carry gradients).
-        Mh_center, alpha_center: Representative (mass, accretion-rate) bin
-            for the Ngam_dot(z) builder and the EPS halo field — see
-            :func:`~beorn.precomputation.differentiable.ngam_dot_ion_diff`.
+        Mh_center: Representative EPS environment mass for the halo *field*
+            (painting) only — unrelated to the ionizing-budget calculation
+            below, see :func:`paint_snapshot_diff`.
+        alpha_center: Representative accretion-rate exponent used for every
+            mass bin in the ionizing-budget calculation — see
+            :func:`~beorn.precomputation.differentiable.ngam_dot_ion_population_diff`.
+        ngam_mass_bins: Static halo-mass quadrature grid for the ionizing
+            budget, Msun/h — ``None`` → ``np.logspace(np.log10(halo_mass_min),
+            13.0, 50)`` (the star-forming range up to a generous bright-end
+            cutoff). See
+            :func:`~beorn.precomputation.differentiable.ngam_dot_ion_population_diff`.
         cell_volume, M_min, n_mass_bins, weights, eps_halo, r_temp, prof_temp,
             xHII_floor, spread_iter, xal_coupling: Forwarded to
             :func:`paint_snapshot_diff` at every redshift.
@@ -171,10 +188,14 @@ def dtb_global_signal_diff(
     """
     name, xp = get_backend(backend)
 
-    Ngam = ngam_dot_ion_diff(z_grid, Mh_center, alpha_center, Om, Ob, h0,
-                             Nion, f_st, Mp, g1, g2, Mt, g3, g4,
-                             halo_mass_min, f0_esc, Mp_esc, pl_esc,
-                             backend=backend)
+    if ngam_mass_bins is None:
+        ngam_mass_bins = np.logspace(np.log10(halo_mass_min), 13.0, 50)
+
+    Ngam = ngam_dot_ion_population_diff(
+        z_grid, ngam_mass_bins, alpha_center, Om, Ob, h0, ns, sigma_8, Nion,
+        f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min, f0_esc, Mp_esc, pl_esc,
+        backend=backend,
+    )
     R_b = bubble_radius_diff(z_grid, Ngam, Om, Ob, h0, backend=backend)
 
     dTb_hist, xHII_hist, Tk_hist = [], [], []

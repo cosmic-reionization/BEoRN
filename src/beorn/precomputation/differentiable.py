@@ -51,6 +51,20 @@ lookback-time quadrature, under the identical scope-for-this-phase
 restrictions as :func:`rho_xray_diff` (static cosmology/flat ΛCDM, always
 ``z_source_start``, fixed node counts).
 
+Real ionizing budget (issue #59, Phase C) — :func:`ngam_dot_ion_population_diff`
+replaces the single hand-picked ``(Mh_center, alpha_center)`` halo
+:func:`ngam_dot_ion_diff` was fed with (the failure mode that motivated this
+issue: a population *median* mass tracks the resolution floor, not a
+star-forming halo) with an abundance-weighted mean over a static mass grid,
+using the differentiable HMF (:func:`~beorn.mass_function.differentiable.dndlnm`,
+issue #42 G5) as the weight. The accretion-rate exponent stays a single
+representative ``alpha_center`` for every mass bin — production's per-halo
+scatter in accretion history has no analogue for a smooth analytic HMF; this
+is a deliberate, documented scope cut (see the function's docstring), not
+the harder problem Phase D's full per-bin painting solves. The result is a
+drop-in replacement for :func:`ngam_dot_ion_diff`'s output in
+:func:`bubble_radius_diff` — this phase does not touch painting.
+
 All functions are numpy/jax/torch backend-generic and complement (never
 replace) the solve_ivp defaults. As with :mod:`.astro_differentiable`,
 ``backend='numpy'`` is not differentiable (plain NumPy has no autodiff) — it
@@ -83,6 +97,7 @@ __all__ = [
     'rho_heat_diff',
     'eps_lyal_diff',
     'rho_alpha_profile_diff',
+    'ngam_dot_ion_population_diff',
 ]
 
 
@@ -909,3 +924,102 @@ def rho_alpha_profile_diff(z_bins, r_grid, Mh_center, alpha_center, Om, Ob, h0,
         rho_slices.append(flux * prefac_r)
 
     return xp.stack(rho_slices, dim=-1) if name == 'torch' else xp.stack(rho_slices, axis=-1)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Real ionizing budget (issue #59, Phase C) — abundance-weighted Ngam_dot(z)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def ngam_dot_ion_population_diff(z_bins, mass_bins, alpha_center, Om, Ob, h0,
+                                 ns, sigma_8, Nion, f_st, Mp, g1, g2, Mt, g3,
+                                 g4, halo_mass_min, f0_esc, Mp_esc, pl_esc,
+                                 backend='numpy', p=0.3, q=0.707, A=None,
+                                 delta_c=1.686, n_k=1000, n_nodes=512):
+    """Abundance-weighted ionizing photon rate Ngam_dot(z) — differentiable
+    counterpart of the *population* :func:`.helpers.Ngdot_ion` should have
+    been fed, replacing :func:`ngam_dot_ion_diff`'s single hand-picked
+    ``(Mh_center, alpha_center)`` halo with a proper mean over the halo mass
+    function.
+
+    Motivation (see the issue): calibrating a single representative halo
+    from a catalog's *median* mass collapses to the resolution floor
+    (abundant low-mass halos dominate the median, not the star-forming
+    range) and silently gives an ionizing budget wrong by orders of
+    magnitude. This computes instead
+
+        Ngam_dot(z) = [∫ dlnM (dn/dlnM)(M, z) · Ngam_dot_halo(M, z; α)]
+                      / [∫ dlnM (dn/dlnM)(M, z)]
+
+    on the static ``mass_bins`` grid — the abundance-weighted *mean*
+    per-halo photon rate, not a total/volume density (the units
+    :func:`bubble_radius_diff` expects, matching :func:`ngam_dot_ion_diff`'s
+    contract exactly — this is a drop-in replacement for its output).
+    ``Ngam_dot_halo`` reuses :func:`ngam_dot_ion_diff` itself (broadcasting
+    it over the mass grid as the batch dimension), so this is strictly
+    additive: every parameter gradient :func:`ngam_dot_ion_diff` already
+    supports still flows, plus new gradients to the cosmology/power-spectrum
+    parameters (``Om``, ``Ob``, ``h0``, ``ns``, ``sigma_8``) through the HMF
+    weight.
+
+    Scope for this phase (documented, not silently assumed):
+
+    - ``alpha_center`` stays a single representative accretion-rate
+      exponent for every mass bin — production resolves the accretion-rate
+      *scatter* at fixed mass from each halo's own N-body growth history,
+      which has no analogue for a smooth analytic HMF. Averaging over a
+      second, accretion-rate axis is future work, not attempted here.
+    - ``mass_bins`` is a static (non-differentiated) quadrature grid, same
+      convention as ``n_zprime`` in :func:`rho_xray_diff`.
+    - this produces one population-level Ngam_dot(z) feeding one global
+      :func:`bubble_radius_diff` call — it does not paint a differently
+      sized bubble per mass bin (that is Phase D's job).
+
+    Args:
+        z_bins: Static, decreasing redshift grid (numpy), shape (n_z,).
+        mass_bins: Static halo-mass quadrature grid, Msun/h (numpy),
+            shape (n_mass,) — e.g. log-spaced from ``halo_mass_min`` up to
+            some bright-end cutoff.
+        alpha_center: Representative accretion-rate exponent — see
+            :func:`mass_accretion_diff`.
+        Om, Ob, h0, ns, sigma_8: Cosmology (may carry gradients) — ``ns``/
+            ``sigma_8`` are new here (the HMF weight; :func:`ngam_dot_ion_diff`
+            doesn't need them).
+        Nion, f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min, f0_esc, Mp_esc, pl_esc:
+            Astro parameters — see :func:`ngam_dot_ion_diff`.
+        backend: 'numpy' (default, not differentiable), 'jax' or 'torch'.
+        p, q, A, delta_c, n_k, n_nodes: Forwarded to
+            :func:`~beorn.mass_function.differentiable.dndlnm`.
+
+    Returns:
+        Ngam_dot on ``z_bins`` [s⁻¹], shape (n_z,) — same contract as
+        :func:`ngam_dot_ion_diff`'s output.
+    """
+    from ..mass_function.differentiable import dndlnm
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, alpha_center, Om, Ob, h0, ns, sigma_8, Nion)
+
+    z_np = np.asarray(z_bins, dtype=float)
+    mass_np = np.asarray(mass_bins, dtype=float)
+    log_mass_np = np.log(mass_np)
+
+    # Per-halo photon rate for every mass bin at once: mass_bins as the
+    # batch dimension (trailing singleton axis broadcasts against z_bins),
+    # reusing ngam_dot_ion_diff exactly rather than re-deriving its physics.
+    Ngam_halo = ngam_dot_ion_diff(
+        z_np, mass_np[:, None], alpha_center, Om, Ob, h0, Nion, f_st, Mp,
+        g1, g2, Mt, g3, g4, halo_mass_min, f0_esc, Mp_esc, pl_esc,
+        backend=backend,
+    )  # (n_mass, n_z)
+
+    dn_dlnm_cols = [
+        dndlnm(mass_np, float(z), Om, Ob, h0, ns, sigma_8, p=p, q=q, A=A,
+              delta_c=delta_c, backend=backend, n_k=n_k, n_nodes=n_nodes)
+        for z in z_np
+    ]  # each (n_mass,)
+    dn_dlnm = (xp.stack(dn_dlnm_cols, dim=-1) if name == 'torch'
+              else xp.stack(dn_dlnm_cols, axis=-1))  # (n_mass, n_z)
+
+    numer = trapz_static(dn_dlnm * Ngam_halo, log_mass_np, name, xp, axis=0)  # (n_z,)
+    denom = trapz_static(dn_dlnm, log_mass_np, name, xp, axis=0)             # (n_z,)
+    return numer / denom
