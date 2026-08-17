@@ -353,6 +353,168 @@ def test_ngam_dot_ion_diff_gradient_jax_and_torch(pname):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# X-ray heating (issue #59, Phase A) — rho_xray_diff / rho_heat_diff
+# ─────────────────────────────────────────────────────────────────────────────
+
+from beorn.precomputation.differentiable import rho_xray_diff, rho_heat_diff  # noqa: E402
+
+_XRAY_PARAM_DEFAULTS = dict(
+    _ASTRO_PARAM_DEFAULTS,
+    xray_normalisation=3.4e40, alS_xray=1.2,
+    energy_min_sed_xray=500.0, energy_max_sed_xray=2000.0,
+    energy_cutoff_min_xray=500.0, energy_cutoff_max_xray=2000.0,
+    HI_frac=1 - 0.08, z_source_start=35.0, z_decoupling=135.0,
+)
+
+
+def _xray_params():
+    p = _astro_params()
+    d = _XRAY_PARAM_DEFAULTS
+    p.source.xray_normalisation = d['xray_normalisation']
+    p.source.alS_xray = d['alS_xray']
+    p.source.energy_min_sed_xray = d['energy_min_sed_xray']
+    p.source.energy_max_sed_xray = d['energy_max_sed_xray']
+    p.source.energy_cutoff_min_xray = d['energy_cutoff_min_xray']
+    p.source.energy_cutoff_max_xray = d['energy_cutoff_max_xray']
+    p.solver.HI_frac = d['HI_frac']
+    p.solver.z_source_start = d['z_source_start']
+    p.solver.z_decoupling = d['z_decoupling']
+    # A single (mass, alpha) bin, centered exactly on (Mh_center, alpha_center)
+    # below, so RadiationProfileSolver.rho_xray/rho_heat compute the same
+    # single-bin physics rho_xray_diff/rho_heat_diff do.
+    p.solver.halo_mass_nbin = 2
+    p.solver.halo_mass_bin_min = 1e9
+    p.solver.halo_mass_bin_max = 1e11
+    p.solver.halo_mass_accretion_alpha = np.array([0.5, 0.9])
+    return p
+
+
+def _reference_rho_xray_rho_heat(p, z_bins, Mh_center, alpha_center):
+    """Build RadiationProfileSolver's rho_xray/rho_heat for one hand-picked bin."""
+    from beorn.precomputation.solver import RadiationProfileSolver
+    from beorn.precomputation.massaccretion import mass_accretion
+
+    solver = RadiationProfileSolver(p, z_bins)
+    Mh, dMh_dt = mass_accretion(p, z_bins, np.array([Mh_center]), np.array([alpha_center]))
+    solver.halo_mass_evolution = Mh
+    solver.halo_mass_derivative = dMh_dt
+    xe = np.full(z_bins.size, 2e-4)
+    rho_xray_ref = solver.rho_xray(solver.r_grid, xe)[:, 0, 0, :]
+    rho_heat_ref = solver.rho_heat(rho_xray_ref[:, None, None, :])[:, 0, 0, :]
+    return solver.r_grid, xe, rho_xray_ref, rho_heat_ref
+
+
+def test_rho_xray_diff_matches_production():
+    z_bins = np.linspace(20.0, 6.0, 12)
+    Mh_center, alpha_center = 1e10, 0.79
+    p = _xray_params()
+    rr, xe, rho_xray_ref, _ = _reference_rho_xray_rho_heat(p, z_bins, Mh_center, alpha_center)
+
+    d = _XRAY_PARAM_DEFAULTS
+    out = rho_xray_diff(
+        z_bins, rr, Mh_center, alpha_center, d['Om'], d['Ob'], d['h0'],
+        d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'], d['g4'],
+        d['halo_mass_min'], d['xray_normalisation'], d['alS_xray'],
+        d['energy_min_sed_xray'], d['energy_max_sed_xray'],
+        d['energy_cutoff_min_xray'], d['energy_cutoff_max_xray'],
+        d['HI_frac'], xe, d['z_source_start'],
+    )
+    assert out.shape == rho_xray_ref.shape
+    nonzero = rho_xray_ref != 0
+    assert nonzero.any()
+    # atol floors comparisons deep in the profile's radial tail, where the
+    # fixed-node lookback quadrature (n_zprime) vs production's adaptive
+    # dz_prime=0.1 grid disagree most but the absolute values are physically
+    # negligible (~1e-19 of the profile's peak).
+    atol = 1e-9 * np.abs(rho_xray_ref[nonzero]).max()
+    np.testing.assert_allclose(np.asarray(out)[nonzero], rho_xray_ref[nonzero],
+                               rtol=0.15, atol=atol)
+
+
+def test_rho_heat_diff_matches_production():
+    z_bins = np.linspace(20.0, 6.0, 12)
+    Mh_center, alpha_center = 1e10, 0.79
+    p = _xray_params()
+    rr, xe, rho_xray_ref, rho_heat_ref = _reference_rho_xray_rho_heat(
+        p, z_bins, Mh_center, alpha_center)
+
+    d = _XRAY_PARAM_DEFAULTS
+    heat = rho_heat_diff(z_bins, rho_xray_ref, d['Om'], d['h0'], d['z_decoupling'])
+    assert heat.shape == rho_heat_ref.shape
+    nonzero = rho_heat_ref != 0
+    assert nonzero.any()
+    # atol floors comparisons near z_decoupling, where solve_ivp's reference
+    # value is dominated by integration noise around zero (~1e-15) rather
+    # than a real, physically meaningful heating rate.
+    atol = 1e-3 * np.abs(rho_heat_ref[nonzero]).max()
+    np.testing.assert_allclose(np.asarray(heat)[nonzero], rho_heat_ref[nonzero],
+                               rtol=0.1, atol=atol)
+
+
+@pytest.mark.parametrize('pname', ['xray_normalisation', 'alS_xray', 'f_st'])
+def test_rho_xray_diff_gradient_jax_and_torch(pname):
+    """d(sum of rho_xray at z=6)/dθ, jax vs finite differences, torch vs jax."""
+    z_bins = np.linspace(20.0, 6.0, 12)
+    rr = np.logspace(-2, np.log10(600), 40)
+    xe = np.full(z_bins.size, 2e-4)
+    d = dict(_XRAY_PARAM_DEFAULTS)
+    x0 = d.pop(pname)
+
+    def S(val, backend):
+        kw = dict(d)
+        kw[pname] = val
+        out = rho_xray_diff(
+            z_bins, rr, 1e10, 0.79, kw['Om'], kw['Ob'], kw['h0'],
+            kw['f_st'], kw['Mp'], kw['g1'], kw['g2'], kw['Mt'], kw['g3'],
+            kw['g4'], kw['halo_mass_min'], kw['xray_normalisation'],
+            kw['alS_xray'], kw['energy_min_sed_xray'], kw['energy_max_sed_xray'],
+            kw['energy_cutoff_min_xray'], kw['energy_cutoff_max_xray'],
+            kw['HI_frac'], xe, kw['z_source_start'], backend=backend,
+        )
+        return out[..., -1].sum()
+
+    g_jax = jax.grad(lambda v: S(v, 'jax'))(x0)
+    h = 1e-4 * x0
+    fd = (S(x0 + h, 'numpy') - S(x0 - h, 'numpy')) / (2 * h)
+    assert np.isfinite(float(g_jax)) and float(g_jax) != 0.0
+    assert float(g_jax) == pytest.approx(float(fd), rel=5e-2)
+
+    if not _TORCH:
+        pytest.skip('torch not installed')
+    xt = torch.tensor(x0, dtype=torch.float64, requires_grad=True)
+    S(xt, 'torch').backward()
+    assert float(xt.grad) == pytest.approx(float(g_jax), rel=1e-6)
+
+
+def test_rho_heat_diff_gradient_jax():
+    """d(rho_heat at z=6)/d(xray_normalisation), jax vs finite differences."""
+    z_bins = np.linspace(20.0, 6.0, 12)
+    rr = np.logspace(-2, np.log10(600), 40)
+    xe = np.full(z_bins.size, 2e-4)
+    d = dict(_XRAY_PARAM_DEFAULTS)
+
+    def S(xray_normalisation, backend):
+        rho_x = rho_xray_diff(
+            z_bins, rr, 1e10, 0.79, d['Om'], d['Ob'], d['h0'],
+            d['f_st'], d['Mp'], d['g1'], d['g2'], d['Mt'], d['g3'], d['g4'],
+            d['halo_mass_min'], xray_normalisation, d['alS_xray'],
+            d['energy_min_sed_xray'], d['energy_max_sed_xray'],
+            d['energy_cutoff_min_xray'], d['energy_cutoff_max_xray'],
+            d['HI_frac'], xe, d['z_source_start'], backend=backend,
+        )
+        rho_h = rho_heat_diff(z_bins, rho_x, d['Om'], d['h0'], d['z_decoupling'],
+                              backend=backend)
+        return rho_h[..., -1].sum()
+
+    x0 = d['xray_normalisation']
+    g_jax = jax.grad(lambda v: S(v, 'jax'))(x0)
+    h = 1e-4 * x0
+    fd = (S(x0 + h, 'numpy') - S(x0 - h, 'numpy')) / (2 * h)
+    assert np.isfinite(float(g_jax)) and float(g_jax) != 0.0
+    assert float(g_jax) == pytest.approx(float(fd), rel=5e-2)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Phase 2 exit test — dΔ²₂₁/dθ, one astro + one cosmology parameter
 # ─────────────────────────────────────────────────────────────────────────────
 

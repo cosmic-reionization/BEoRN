@@ -30,6 +30,18 @@ so gradients flow from R_bubble(z) back to ``Nion``, the star-formation
 efficiency shape (``f_st``, ``g1-g4``, ``Mp``, ``Mt``) and the escape
 fraction shape (``f0_esc``, ``Mp_esc``, ``pl_esc``).
 
+X-ray heating (issue #59, Phase A) — :func:`eps_xray_diff` (port of
+:func:`.astro.eps_xray`) and :func:`rho_xray_diff` (port of
+:meth:`.solver.RadiationProfileSolver.rho_xray`) unblock gradients through
+the X-ray channel, which was previously a fixed toy proxy; :func:`rho_heat_diff`
+is a thin wrapper applying :func:`heat_ode_solution` to ``rho_xray_diff``'s
+output, following :meth:`~.solver.RadiationProfileSolver.rho_heat`'s exact
+prefactor construction. ``rho_xray_diff``'s data-dependent, per-redshift
+lookback window is replaced by a fixed-size quadrature grid (``n_zprime``)
+and its radial/optical-depth geometry is evaluated at static (non-
+differentiated) cosmology — see its docstring's "Scope for this phase" for
+the precise, deliberate list of what does and doesn't carry gradients.
+
 All functions are numpy/jax/torch backend-generic and complement (never
 replace) the solve_ivp defaults. As with :mod:`.astro_differentiable`,
 ``backend='numpy'`` is not differentiable (plain NumPy has no autodiff) — it
@@ -42,7 +54,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..cosmo.differentiable import (
-    get_backend, device_of, as_array, as_const, hubble_E, hubble_per_yr,
+    get_backend, device_of, as_array, as_const, trapz_static, hubble_E, hubble_per_yr,
 )
 from ..constants import rhoc0, m_p_in_Msun, km_per_Mpc, cm_per_Mpc, sec_per_year, m_H, M_sun
 from ..astro_differentiable import f_star_halo_diff, f_esc_diff
@@ -57,6 +69,9 @@ __all__ = [
     'mass_accretion_diff',
     'mass_accretion_derivative_diff',
     'ngam_dot_ion_diff',
+    'eps_xray_diff',
+    'rho_xray_diff',
+    'rho_heat_diff',
 ]
 
 
@@ -380,3 +395,313 @@ def ngam_dot_ion_diff(z_bins, Mh_center, alpha_center, Om, Ob, h0, Nion,
     Nion = as_array(Nion, name, xp, device)
 
     return dMh_dt / h0 * fstar * Ob / Om * fesc * Nion / sec_per_year / m_H * M_sun
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# X-ray heating (issue #59, Phase A) — real per-bin rho_xray/rho_heat
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _linear_interp_weights(x_nodes, x_query, mode='extrapolate'):
+    """Static linear-interpolation weight matrix: ``y_query ≈ W @ y_nodes``.
+
+    ``x_nodes``/``x_query`` are plain numpy arrays (never carry gradients);
+    the returned ``(n_query, n_nodes)`` matrix contracts against the
+    *values* at the nodes, which may carry gradients — this is how
+    interpolation from a differentiable-valued, but node-position-static,
+    function is done throughout this module (a fixed-node counterpart of
+    ``scipy.interpolate.interp1d``).
+
+    ``mode='extrapolate'`` continues the boundary segment's slope past the
+    ends (matches ``interp1d``'s default ``fill_value='extrapolate'``);
+    ``mode='zero'`` zeroes out-of-range queries (matches
+    ``fill_value=0.0, bounds_error=False``).
+    """
+    x_nodes = np.asarray(x_nodes, dtype=float)
+    x_query = np.asarray(x_query, dtype=float)
+    order = np.argsort(x_nodes)
+    xs = x_nodes[order]
+    n = xs.size
+    idx = np.clip(np.searchsorted(xs, x_query, side='right') - 1, 0, n - 2)
+    x0, x1 = xs[idx], xs[idx + 1]
+    w = (x_query - x0) / (x1 - x0)
+    W = np.zeros((x_query.size, n))
+    rows = np.arange(x_query.size)
+    W[rows, order[idx]] += (1.0 - w)
+    W[rows, order[idx + 1]] += w
+    if mode == 'zero':
+        out_of_range = (x_query < xs[0]) | (x_query > xs[-1])
+        W[out_of_range, :] = 0.0
+    return W
+
+
+def eps_xray_diff(nu_, xray_normalisation, alS_xray, energy_min_sed_xray,
+                  energy_max_sed_xray, h0, backend='numpy'):
+    """X-ray SED ε_X(ν) — differentiable counterpart of :func:`.astro.eps_xray`
+    (power law, arXiv:1406.4120 Eq. 2).
+
+    Differentiable w.r.t. ``xray_normalisation`` (i.e. ``log10_Lx``),
+    ``alS_xray``, ``energy_min_sed_xray``, ``energy_max_sed_xray`` and ``h0``
+    when ``backend='jax'``/``'torch'``.
+
+    Args:
+        nu_: Photon frequency [Hz] — a static numpy grid (the usual case
+            inside :func:`rho_xray_diff`) or a backend array carrying
+            gradients.
+        xray_normalisation, alS_xray, energy_min_sed_xray, energy_max_sed_xray, h0:
+            SED shape/normalisation parameters (scalars; may carry
+            gradients).
+        backend: 'numpy' (default, not differentiable), 'jax' or 'torch'.
+
+    Returns:
+        ε_X(ν) [photons/Hz/s/SFR], same shape as ``nu_``.
+    """
+    from ..constants import h_eV_sec, eV_per_erg
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, xray_normalisation, alS_xray,
+                       energy_min_sed_xray, energy_max_sed_xray, h0)
+    nu_ = (as_const(np.asarray(nu_, dtype=float), name, xp, device)
+          if isinstance(nu_, np.ndarray) else as_array(nu_, name, xp, device))
+    xray_normalisation = as_array(xray_normalisation, name, xp, device)
+    alS_xray = as_array(alS_xray, name, xp, device)
+    energy_min_sed_xray = as_array(energy_min_sed_xray, name, xp, device)
+    energy_max_sed_xray = as_array(energy_max_sed_xray, name, xp, device)
+    h0 = as_array(h0, name, xp, device)
+
+    norm_xray = (1.0 - alS_xray) / (
+        (energy_max_sed_xray / h_eV_sec) ** (1.0 - alS_xray)
+        - (energy_min_sed_xray / h_eV_sec) ** (1.0 - alS_xray)
+    )
+    return (xray_normalisation / h0 * eV_per_erg * norm_xray
+            * nu_ ** (-alS_xray) / (nu_ * h_eV_sec))
+
+
+def rho_xray_diff(z_bins, rr, Mh_center, alpha_center, Om, Ob, h0,
+                  f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min,
+                  xray_normalisation, alS_xray, energy_min_sed_xray,
+                  energy_max_sed_xray, energy_cutoff_min_xray,
+                  energy_cutoff_max_xray, HI_frac, xe, z_source_start,
+                  backend='numpy', n_nu=50, n_zprime=64):
+    """X-ray energy-deposition profile ρ_xray(r, z) — differentiable
+    counterpart of :meth:`.solver.RadiationProfileSolver.rho_xray`, for one
+    ``(Mh_center, alpha_center)`` mass-accretion bin (see
+    :func:`mass_accretion_diff`; broadcasts over leading batch axes the same
+    way).
+
+    Gradients flow to the star-formation-efficiency shape parameters
+    (``f_st``, ``Mp``, ``g1``, ``g2``, ``Mt``, ``g3``, ``g4``), the
+    mass-accretion track (``Mh_center``, ``alpha_center``) and the X-ray SED
+    shape (``xray_normalisation`` i.e. ``log10_Lx``, ``alS_xray``,
+    ``energy_min_sed_xray``, ``energy_max_sed_xray``) when
+    ``backend='jax'``/``'torch'``.
+
+    Scope for this phase (documented, not silently assumed):
+
+    - ``Om``, ``Ob``, ``h0`` are treated as **static** Python floats for the
+      radial geometry (comoving distances, Hubble rate, optical depth) — the
+      exit test targets X-ray/Lyα source parameters, not cosmology, and
+      threading gradients through the dynamic (node-position) radial
+      interpolation below would need a materially more complex primitive.
+    - that geometry assumes flat ΛCDM (``w0=-1, wa=0``), the same
+      pre-existing limitation :func:`bubble_radius_diff` already has via
+      :func:`~beorn.cosmo.differentiable.hubble_E`.
+    - the source lifetime is always ``z_source_start`` (i.e. the
+      ``t_source_age=None`` default of
+      :meth:`~.solver.RadiationProfileSolver._z_star_at`) — the variable,
+      data-dependent lookback window ``source_age`` implies isn't
+      jit-friendly and is out of scope here.
+    - ``energy_cutoff_min_xray``/``energy_cutoff_max_xray`` (the frequency
+      *integration range*) are static configuration, not differentiated —
+      unlike ``energy_min_sed_xray``/``energy_max_sed_xray`` (the SED's own
+      normalisation bounds inside :func:`eps_xray_diff`), which do carry
+      gradients.
+    - the lookback-time quadrature uses a fixed ``n_zprime`` node count
+      (rather than production's data-dependent ``N_prime_i``) — the same
+      fixed-node-quadrature trick :func:`~beorn.mass_function.differentiable.sigma2_M`
+      already uses for σ²(M) — changing the discretisation slightly but
+      keeping every traced shape static.
+
+    Args:
+        z_bins: Static, decreasing redshift grid (numpy), shape (n_z,).
+        rr: Static radial grid (comoving cMpc/h) (numpy), shape (n_r,).
+        Mh_center, alpha_center: Mass-accretion-track bin center — see
+            :func:`mass_accretion_diff`.
+        Om, Ob, h0: Cosmology (Python floats — see Scope above).
+        f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min: Star-formation-efficiency
+            shape — see :func:`~beorn.astro_differentiable.f_star_halo_diff`.
+        xray_normalisation, alS_xray, energy_min_sed_xray, energy_max_sed_xray:
+            X-ray SED shape — see :func:`eps_xray_diff`.
+        energy_cutoff_min_xray, energy_cutoff_max_xray: Frequency
+            integration bounds, eV (Python floats, static).
+        HI_frac: Hydrogen fraction by number (Python float, static).
+        xe: Free-electron-fraction history on ``z_bins`` (numpy, static),
+            shape (n_z,).
+        z_source_start: Source lifetime cutoff, static (see Scope above).
+        backend: 'numpy' (default, not differentiable), 'jax' or 'torch'.
+        n_nu: Number of frequency-integration nodes (static).
+        n_zprime: Number of lookback-time quadrature nodes per redshift
+            (static — see Scope above).
+
+    Returns:
+        rho_xray on ``(rr, z_bins)``, shape ``(..., n_r, n_z)`` — note this
+        differs from :meth:`.solver.RadiationProfileSolver.rho_xray`'s
+        ``(n_r, mass_bins, alpha_bins, n_z)`` axis order: batch dims come
+        first here, matching this module's convention elsewhere (e.g.
+        :func:`bubble_radius_diff`).
+    """
+    import types
+
+    from ..constants import h_eV_sec, E_HI, E_HeI
+    from ..cross_sections import sigma_HI, sigma_HeI
+    from ..astro import f_Xh
+    from ..cosmo import comoving_distance
+    from .helpers import cum_optical_depth
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, Mh_center, alpha_center, f_st, Mp, Mt,
+                       xray_normalisation, alS_xray)
+
+    z_np = np.asarray(z_bins, dtype=float)
+    rr_np = np.asarray(rr, dtype=float)
+    xe_np = np.asarray(xe, dtype=float)
+    Om_f, Ob_f, h0_f = float(Om), float(Ob), float(h0)
+    HI_frac_f = float(HI_frac)
+    z_star = float(z_source_start)
+
+    # ---- mass-accretion track (differentiable) ---------------------------
+    Mh = mass_accretion_diff(z_np, Mh_center, alpha_center, backend=backend)
+    dMh_dt = mass_accretion_derivative_diff(Mh, alpha_center, Om, h0, z_np,
+                                            backend=backend)
+    fstar = f_star_halo_diff(Mh, f_st, Mp, g1, g2, Mt, g3, g4, halo_mass_min,
+                             backend=backend)
+    Ob_b = as_array(Ob, name, xp, device)
+    Om_b = as_array(Om, name, xp, device)
+    M_star_dot = (Ob_b / Om_b) * fstar * dMh_dt                # (..., n_z)
+    batch_shape = tuple(M_star_dot.shape[:-1])
+
+    anchor = xp.zeros_like(M_star_dot[..., :1])
+    M_star_dot_aug = (xp.cat([anchor, M_star_dot], dim=-1) if name == 'torch'
+                      else xp.concatenate([anchor, M_star_dot], axis=-1))
+    x_nodes_star = np.concatenate(([z_star], z_np))  # matches augmentation order
+
+    def _zeros(shape):
+        if name == 'torch':
+            return xp.zeros(shape, dtype=M_star_dot.dtype, device=M_star_dot.device)
+        return xp.zeros(shape)
+
+    # ---- static frequency grid & prefactor (energy-only, no gradients) --
+    nu_min = float(energy_cutoff_min_xray) / h_eV_sec
+    nu_max = float(energy_cutoff_max_xray) / h_eV_sec
+    nu_np = np.logspace(np.log(nu_min), np.log(nu_max), n_nu, base=np.e)
+
+    f_He_bynumb = 1.0 - HI_frac_f
+    nb0 = rhoc0 * Ob_f / (m_p_in_Msun * h0_f)
+    nH0 = (1.0 - f_He_bynumb) * nb0
+    nHe0 = f_He_bynumb * nb0
+    prefactor_nu_np = (
+        (nH0 / nb0) * sigma_HI(nu_np * h_eV_sec) * (nu_np * h_eV_sec - E_HI)
+        + (nHe0 / nb0) * sigma_HeI(nu_np * h_eV_sec) * (nu_np * h_eV_sec - E_HeI)
+    )
+    prefactor_nu = as_const(prefactor_nu_np, name, xp, device)
+
+    # Reuse the exact production geometry (comoving_distance/cum_optical_depth)
+    # for the static (non-differentiated) radial/optical-depth pieces — a
+    # lightweight stand-in for Parameters exposing only what they read.
+    fake_params = types.SimpleNamespace(
+        cosmology=types.SimpleNamespace(Om=Om_f, Ob=Ob_f, h0=h0_f, w0=-1.0, wa=0.0),
+        solver=types.SimpleNamespace(HI_frac=HI_frac_f),
+    )
+
+    rho_slices = []
+    for i, z in enumerate(z_np):
+        if z > z_star:
+            rho_slices.append(_zeros(batch_shape + (rr_np.size,)))
+            continue
+
+        z_prime = np.logspace(np.log(z), np.log(z_star), n_zprime, base=np.e)
+        rcom_prime = comoving_distance(z_prime, fake_params) * h0_f
+        tau_prime = cum_optical_depth(z_prime, nu_np * h_eV_sec, fake_params)   # (n_nu, n_zprime)
+        nu_prime = nu_np[:, None] * (1.0 + z_prime)[None, :] / (1.0 + z)
+
+        eps_X = eps_xray_diff(nu_prime, xray_normalisation, alS_xray,
+                              energy_min_sed_xray, energy_max_sed_xray, h0,
+                              backend=backend)                                 # (n_nu, n_zprime)
+        atten = as_const(np.exp(-tau_prime), name, xp, device) * eps_X         # (n_nu, n_zprime)
+
+        W_z = as_const(_linear_interp_weights(x_nodes_star, z_prime, mode='extrapolate'),
+                       name, xp, device)                                       # (n_zprime, n_z+1)
+        M_star_dot_zprime = xp.einsum('qn,...n->...q', W_z, M_star_dot_aug)    # (..., n_zprime)
+
+        integral_factors = (
+            atten.reshape((n_nu,) + (1,) * len(batch_shape) + (n_zprime,))
+            * M_star_dot_zprime.reshape((1,) + batch_shape + (n_zprime,))
+        )                                                                      # (n_nu, ..., n_zprime)
+
+        W_r = as_const(_linear_interp_weights(rcom_prime, rr_np, mode='zero'),
+                       name, xp, device)                                       # (n_r, n_zprime)
+        integral_factors_r = xp.einsum('rq,n...q->n...r', W_r, integral_factors)  # (n_nu, ..., n_r)
+
+        integrand = (prefactor_nu.reshape((n_nu,) + (1,) * len(batch_shape) + (1,))
+                    * integral_factors_r)
+        heat = trapz_static(integrand, nu_np, name, xp, axis=0)                # (..., n_r)
+
+        fXh = float(f_Xh(xe_np[i]))
+        prefac_r_np = (fXh / (4.0 * np.pi * (rr_np / (1.0 + z)) ** 2)
+                      / (cm_per_Mpc / h0_f) ** 2)
+        prefac_r = as_const(prefac_r_np.reshape((1,) * len(batch_shape) + (rr_np.size,)),
+                            name, xp, device)
+        rho_slices.append(heat * prefac_r)
+
+    return xp.stack(rho_slices, dim=-1) if name == 'torch' else xp.stack(rho_slices, axis=-1)
+
+
+def rho_heat_diff(z_bins, rho_xray, Om, h0, z_decoupling, backend='numpy'):
+    """Heating-rate integral ρ_heat(r, z) — differentiable counterpart of
+    :meth:`.solver.RadiationProfileSolver.rho_heat`.
+
+    A thin wrapper around :func:`heat_ode_solution`:
+    :meth:`~.solver.RadiationProfileSolver.rho_heat` solves
+    ``dy/da = γ(a) − 2y/a`` via ``solve_ivp`` — exactly the ODE
+    :func:`heat_ode_solution` already solves in closed form (see the module
+    docstring) — so this just builds ``γ(a)`` on the same node grid
+    (``z_decoupling`` prepended, matching production's zero-heating anchor)
+    and calls it. Differentiable w.r.t. ``rho_xray`` (e.g. the output of
+    :func:`rho_xray_diff`) when ``backend='jax'``/``'torch'``.
+
+    ``Om``, ``h0`` are treated as static Python floats, matching
+    :func:`rho_xray_diff`'s scope for this phase.
+
+    Args:
+        z_bins: Static, decreasing redshift grid (numpy), shape (n_z,) —
+            must match the grid ``rho_xray`` was computed on.
+        rho_xray: Output of :func:`rho_xray_diff` (or any backend array with
+            the same ``(..., n_z)`` trailing shape).
+        Om, h0: Cosmology (Python floats — see Scope above).
+        z_decoupling: Redshift anchored as the zero-heating initial
+            condition, static (``parameters.solver.z_decoupling``).
+        backend: 'numpy' (default, not differentiable), 'jax' or 'torch'.
+
+    Returns:
+        rho_heat on ``z_bins``, same shape as ``rho_xray``.
+    """
+    from ..constants import kb_eV_per_K
+
+    name, xp = get_backend(backend)
+    device = device_of(name, xp, rho_xray)
+    rho_xray = as_array(rho_xray, name, xp, device)
+
+    z_np = np.asarray(z_bins, dtype=float)
+    zz = np.insert(z_np, 0, float(z_decoupling))
+    a_nodes = 1.0 / (1.0 + zz)
+
+    anchor = xp.zeros_like(rho_xray[..., :1])
+    rho_xray_full = (xp.cat([anchor, rho_xray], dim=-1) if name == 'torch'
+                     else xp.concatenate([anchor, rho_xray], axis=-1))
+
+    Hz_np = 100.0 * float(h0) * np.sqrt(float(Om) * (1.0 + zz) ** 3 + (1.0 - float(Om)))
+    a_b = as_const(a_nodes, name, xp, device)
+    Hz_b = as_const(Hz_np, name, xp, device)
+
+    gamma = 2.0 * rho_xray_full / (3.0 * kb_eV_per_K * a_b * Hz_b) * km_per_Mpc
+    y = heat_ode_solution(a_nodes, gamma, backend=backend)
+    return y[..., 1:]
