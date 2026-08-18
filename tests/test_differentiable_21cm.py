@@ -171,14 +171,64 @@ def test_spreading_surrogate_conserves_and_bounds():
 
     assert float(np.max(sur)) <= 1.0 + 1e-12
     assert float(np.min(sur)) >= 0.0
-    # photon conservation and the exact algorithm's global mean
-    assert float(np.sum(sur)) == pytest.approx(x.sum(), rel=1e-3)
+    # exact photon conservation (issue #59) and the exact algorithm's global mean
+    assert float(np.sum(sur)) == pytest.approx(x.sum(), rel=1e-9)
     assert float(np.mean(sur)) == pytest.approx(exact.mean(), rel=1e-3)
 
 
 def spreading_excess_fast_ref(p, x):
     from beorn.painting.spread import spreading_excess_fast
     return spreading_excess_fast(p, x)
+
+
+def test_spreading_excess_diff_conserves_through_percolating_overlap():
+    """Regression test for issue #59: the previous version only ever
+    redistributed excess within a small, fixed reach and clamped away
+    whatever it couldn't place there, a loss that grew with the globally
+    over-ionized fraction. The new algorithm renormalizes every iteration
+    to place the excess in full, which conserves exactly regardless of the
+    smoothing/weighting reach (``R_growth``) as long as there is some
+    global capacity (fill < 1) left to receive it -- the renormalization,
+    not the reach, is what guarantees conservation. Exercise a single,
+    densely overlapping cluster (up to ~15-30-fold local overlap) embedded
+    in an otherwise mostly neutral box -- a percolating-overlap regime the
+    old fixed ~8-cell reach could not fully resolve -- with both a fixed
+    and a growing weighting scale."""
+    N, L = 32, 64.0
+    x = np.zeros((N, N, N))
+    zz, yy, xx = np.ogrid[:N, :N, :N]
+    rng = np.random.default_rng(7)
+    center = np.array([N // 2] * 3)
+    for _ in range(30):
+        c = center + rng.integers(-2, 3, size=3)
+        x[(xx - c[0]) ** 2 + (yy - c[1]) ** 2 + (zz - c[2]) ** 2 < 9] += 1.0
+    assert x.max() > 15.0            # deep, many-fold local overlap
+    assert x.sum() / N ** 3 < 0.2    # comfortably below global saturation
+
+    for R_growth in (1.0, 2.0):
+        sur = spreading_excess_diff(x, L, n_iter=8, R_growth=R_growth)
+        assert float(np.max(sur)) <= 1.0 + 1e-9
+        assert float(np.min(sur)) >= 0.0
+        assert float(np.sum(sur)) == pytest.approx(x.sum(), rel=1e-9)
+
+
+def test_spreading_excess_diff_gradient():
+    """Gradient must still flow through the exact-conservation weighting
+    (xp.where/sum/division are new relative to the old plain-diffuse
+    version)."""
+    N, L = 12, 40.0
+    rng = np.random.default_rng(8)
+    base = rng.random((N, N, N)) * 0.3
+
+    def mean_sur(amp):
+        x = base + amp * jnp.ones((N, N, N))
+        return jnp.mean(spreading_excess_diff(x, L, n_iter=4, backend='jax'))
+
+    g = jax.grad(mean_sur)(1.0)
+    h = 1e-4
+    fd = (mean_sur(1.0 + h) - mean_sur(1.0 - h)) / (2 * h)
+    assert np.isfinite(float(g))
+    assert float(g) == pytest.approx(float(fd), rel=5e-3)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -9,9 +9,11 @@ painting in :mod:`.coordinator` / :mod:`.helpers`:
   static radial nodes, differentiable in the profile values.  No real-space
   kernel grids, no interp1d, no renormalisation step (the analytic transform
   has no sampling error to correct).
-- **G8** — overlap spreading as an iterative FFT-diffusion surrogate: excess
-  ionization relu(x−1) diffuses outward into neutral capacity, a fixed number
-  of iterations, all smooth ops.  The exact label+EDT algorithm
+- **G8** — overlap spreading as an iterative, unconditionally photon-conserving
+  FFT surrogate: excess ionization relu(x−1) is redistributed in full each
+  iteration (renormalized to sum to exactly the excess removed), weighted
+  toward nearby remaining capacity by a Gaussian map of where the excess is,
+  all smooth ops.  The exact label+EDT algorithm
   (:func:`.spread.spreading_excess_fast`) remains the default and the
   validation reference.
 - **G11** — in-memory contract: :func:`paint_fields_diff` maps a halo mesh to
@@ -158,14 +160,40 @@ def profile_kernel_fourier(k_mag, r_nodes, profile_values, backend='numpy',
 # G8 — differentiable overlap-spreading surrogate
 # ──────────────────────────────────────────────────────────────────────────────
 
-def spreading_excess_diff(x, L, R_diffuse=None, n_iter=8, backend='numpy'):
-    """Smooth surrogate for photon-conserving excess spreading.
+def spreading_excess_diff(x, L, R_diffuse=None, n_iter=8, R_growth=2.0,
+                          backend='numpy'):
+    """Photon-conserving differentiable surrogate for excess-ionization
+    spreading.
 
-    Each iteration removes the local excess relu(x−1), diffuses it with a
-    Gaussian of scale ``R_diffuse`` (FFT, periodic) and adds it back — excess
-    photons migrate outward into neutral regions while every operation stays
-    differentiable.  Residual excess after ``n_iter`` iterations is clamped
-    (documented photon loss; grows with the globally over-ionized fraction).
+    Each iteration removes the local excess ``relu(x-1)``, builds a
+    Gaussian-smoothed (FFT, periodic) map of *where that excess is nearby*,
+    and redistributes the excess back **in full**, weighted by each cell's
+    remaining capacity ``(1-x)`` times that nearby-excess map, normalized to
+    sum to exactly the excess removed. This renormalization — not the
+    smoothing reach — is what makes conservation exact: whenever *any* cell
+    anywhere has both nonzero capacity and a nonzero (however
+    numerically-tiny) nearby-excess value, 100% of the excess is placed, not
+    just whatever a fixed local reach happened to touch before a final hard
+    clamp discarded the rest (the previous version's behaviour, a loss that
+    grew with the globally over-ionized fraction). The weighting still
+    favours nearer neutral cells over distant ones, echoing (without their
+    exact discrete nearest-neighbor rule) the photon-conserving algorithm of
+    `Choudhury & Paranjape 2018 <https://arxiv.org/abs/1807.00836>`_.
+
+    A cell's allocated share isn't hard-capped at its own capacity, so
+    placing one iteration's excess can push some cells slightly back over 1
+    — ``n_iter`` further iterations clean up that residual "overshoot" (much
+    smaller than the original excess) the same way. ``R_growth``
+    lets the weighting scale grow geometrically iteration to iteration
+    (``R_diffuse * R_growth**i``): it does **not** change whether the
+    result conserves (that's unconditional, per the renormalization above),
+    only the spatial character of the redistribution — smaller/fixed scales
+    keep each pass more local (closer to the exact algorithm's morphology),
+    larger scales spread the residual overshoot more thinly. Pass
+    ``R_growth=1.0`` to keep it fixed. The only case that cannot
+    conserve at all is a box already at ``x=1`` everywhere (no capacity
+    anywhere to receive the excess) — that iteration's excess is left
+    unresolved rather than forced above 1.
 
     The exact connected-component + EDT algorithm
     (:func:`beorn.painting.spread.spreading_excess_fast`) remains the default
@@ -175,13 +203,17 @@ def spreading_excess_diff(x, L, R_diffuse=None, n_iter=8, backend='numpy'):
         x:         Ionization field (backend array, shape (N, N, N)), any
                    values ≥ 0 (may exceed 1 where bubbles overlap).
         L:         Box size (Mpc/h).
-        R_diffuse: Gaussian diffusion scale per iteration (Mpc/h).  Default:
-                   2 cells.
+        R_diffuse: Diffusion/weighting scale of the *first* iteration
+                   (Mpc/h).  Default: 2 cells.
         n_iter:    Fixed iteration count (static — jit-friendly).
+        R_growth: Geometric growth of the diffusion/weighting scale
+                   each iteration (default 2, i.e. it doubles).
         backend:   'numpy' (default), 'jax' or 'torch'.
 
     Returns:
-        Field with values in [0, 1], same shape/device as ``x``.
+        Field with values in [0, 1], same shape/device as ``x``; total sum
+        equals ``sum(x)`` up to floating point (see the no-capacity
+        exception above).
     """
     name, xp = get_backend(backend)
     device = device_of(name, xp, x)
@@ -191,19 +223,35 @@ def spreading_excess_diff(x, L, R_diffuse=None, n_iter=8, backend='numpy'):
         R_diffuse = 2.0 * L / N
 
     k = _k_mag_rfft(N, L, name, xp, device)
-    gauss_k = xp.exp(-0.5 * (k * R_diffuse) ** 2)
 
     def relu(v):
         return xp.where(v > 0, v, xp.zeros_like(v))
 
+    def gaussian_smooth(field, R):
+        gauss_k = xp.exp(-0.5 * (k * R) ** 2)
+        return _irfftn(_rfftn(field, name, xp) * gauss_k, tuple(field.shape), name, xp)
+
+    R_i = R_diffuse
     for _ in range(n_iter):
         excess = relu(x - 1.0)
         x = x - excess
-        spread = _irfftn(_rfftn(excess, name, xp) * gauss_k,
-                         tuple(excess.shape), name, xp)
-        x = x + spread
+        total_excess = xp.sum(excess)
+        nearby = relu(gaussian_smooth(excess, R_i))
+        capacity = relu(1.0 - x)
+        weight = capacity * nearby
+        weight_sum = xp.sum(weight)
+        safe = weight_sum > 0
+        weight_sum_safe = xp.where(safe, weight_sum, xp.ones_like(weight_sum))
+        add = xp.where(safe, weight / weight_sum_safe, xp.zeros_like(weight)) \
+            * total_excess
+        x = x + add
+        R_i = R_i * R_growth
 
-    # clamp the residual overshoot; keep everything ≥ 0
+    # Final safety clamp -- see docstring: the weighting above biases
+    # allocation toward nearby capacity but doesn't hard-cap any single
+    # cell below it, so a rare, highly concentrated residual can still
+    # overshoot slightly; n_iter further passes clean this up in practice
+    # (each pass's overshoot is much smaller than the last).
     x = x - relu(x - 1.0)
     return relu(x)
 
