@@ -285,10 +285,15 @@ def paint_snapshot_population_diff(
             (n_mass_bins, n_r_lyal) — one z-slice of
             :func:`~beorn.precomputation.differentiable.rho_alpha_profile_diff`'s
             output; may carry gradients.
-        r_alpha: Comoving *physical* radial nodes (Mpc/h) for
-            ``prof_alpha_bins`` — the solver's ``r_lyal`` (see
+        r_alpha: Comoving radial nodes (Mpc/h) for ``prof_alpha_bins`` — note
+            this is **not** the same grid ``prof_alpha_bins`` was computed on:
             :func:`~beorn.precomputation.differentiable.rho_alpha_profile_diff`'s
-            docstring on why this grid differs from ``r_temp``'s).
+            ``r_grid`` (the solver's ``r_lyal``) is *physical*, so the caller
+            must pass ``r_lyal * (1 + z)`` here — exactly what
+            :func:`dtb_global_signal_population_diff` does — mirroring
+            :meth:`.coordinator.PaintingCoordinator.paint_single_mass_bin`'s
+            own ``r_lyal * (1 + z)`` conversion before building its
+            Lyman-alpha kernel.
         z_decoupling: Redshift where the gas adiabatically decouples from
             the CMB (``parameters.solver.z_decoupling``) — sets the
             adiabatic-cooling baseline.
@@ -466,10 +471,18 @@ def dtb_global_signal_population_diff(
 
     dTb_hist, xHII_hist, Tk_hist = [], [], []
     for i, z in enumerate(z_np):
+        # rho_alpha_profile_diff (and RadiationProfileSolver.r_lyal, whose
+        # convention it mirrors) is built on a *physical* radial grid; the
+        # painting kernel (like r_temp/prof_temp_bins) needs comoving nodes
+        # -- PaintingCoordinator.paint_single_mass_bin converts with this
+        # same r_lyal * (1 + z) before building its Lyman-alpha kernel.
+        # Missing this left the Lyman-alpha channel starved everywhere except
+        # right next to each halo (~14x too small a comoving extent at z=13).
+        r_alpha = r_lyal * (1.0 + z)
         _, dTb, xhii, Tk = paint_snapshot_population_diff(
             float(z), dk, L, N, Om, Ob, h0, ns, sigma_8,
             R_bubble_bins[:, i], rho_heat_bins[:, :, i], r_grid_cell,
-            rho_alpha_bins[:, :, i], r_lyal, z_decoupling,
+            rho_alpha_bins[:, :, i], r_alpha, z_decoupling,
             M_env=M_env, cell_volume=cell_volume, M_min=M_min,
             n_mass_bins=n_mass_bins, eps_halo=eps_halo,
             xHII_floor=xHII_floor, spread_iter=spread_iter, backend=backend,

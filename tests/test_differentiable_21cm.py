@@ -846,15 +846,49 @@ def test_dtb_global_signal_population_diff_matches_paint_snapshot_population_dif
         d['z_source_start'])
 
     for i, z in enumerate(z_grid):
+        # r_lyal is physical (rho_alpha_profile_diff/RadiationProfileSolver's
+        # own convention) -- the painting kernel needs comoving nodes, same
+        # r_lyal * (1 + z) conversion dtb_global_signal_population_diff itself
+        # applies (and PaintingCoordinator.paint_single_mass_bin mirrors).
+        r_alpha = r_lyal * (1.0 + z)
         _, dTb_direct, xhii_direct, Tk_direct = paint_snapshot_population_diff(
             float(z), dk, _L_POP, _N_POP, d['Om'], d['Ob'], d['h0'], d['ns'],
             d['sigma_8'], R_bubble_bins[:, i], rho_heat_bins[:, :, i],
-            r_grid_cell, rho_alpha_bins[:, :, i], r_lyal, d['z_decoupling'],
+            r_grid_cell, rho_alpha_bins[:, :, i], r_alpha, d['z_decoupling'],
             n_mass_bins=n_mass_bins)
 
         assert float(dTb_hist[i]) == pytest.approx(float(np.mean(dTb_direct)), rel=1e-10)
         assert float(xHII_hist[i]) == pytest.approx(float(np.mean(xhii_direct)), rel=1e-10)
         assert float(Tk_hist[i]) == pytest.approx(float(np.mean(Tk_direct)), rel=1e-10)
+
+
+def test_paint_fields_population_diff_r_alpha_must_be_comoving():
+    """Regression test for a real bug (issue #59): rho_alpha_profile_diff's
+    r_grid (the solver's r_lyal) is physical, but paint_fields_population_diff
+    needs comoving radial nodes -- PaintingCoordinator.paint_single_mass_bin
+    converts with r_lyal * (1 + z) before building its Lyman-alpha kernel.
+    dtb_global_signal_population_diff previously passed r_lyal straight
+    through unconverted, a ~14x-too-small comoving extent at z=13 that
+    starved the Lyman-alpha channel almost everywhere except right next to
+    each halo. Isolates the painted x_al kernel field directly (bypassing
+    the couplings/dTb machinery, where the alpha and collisional channels
+    compete and could mask the effect): painting the same profile on the
+    correct comoving grid vs. the unconverted physical grid must give
+    substantially different fields."""
+    N, L, z = 16, 60.0, 13.0
+    rng = np.random.default_rng(5)
+    halo_mesh = rng.random((2, N, N, N))
+    r_lyal = np.logspace(-5, 2, 200, base=10)
+    prof_alpha = np.exp(-r_lyal / 2.0)[None, :].repeat(2, axis=0)
+
+    _, grid_xal_correct, _ = paint_fields_population_diff(
+        halo_mesh, z, L, r_alpha=r_lyal * (1.0 + z),
+        prof_alpha_bins=prof_alpha)
+    _, grid_xal_buggy, _ = paint_fields_population_diff(
+        halo_mesh, z, L, r_alpha=r_lyal, prof_alpha_bins=prof_alpha)
+
+    assert np.mean(np.abs(np.asarray(grid_xal_correct))) > \
+        2.0 * np.mean(np.abs(np.asarray(grid_xal_buggy)))
 
 
 def test_dtb_global_signal_population_diff_finite_all_backends(pop_noise):
