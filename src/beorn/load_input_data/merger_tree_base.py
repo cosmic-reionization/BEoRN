@@ -156,8 +156,8 @@ class MergerTreeLoader(BaseLoader):
         :meth:`fallback_alpha`).  All alphas are clipped to the paintable
         range defined by ``solver.halo_mass_accretion_alpha``.
 
-        When ``source.alpha_constant`` is set the merger tree is bypassed
-        entirely: every halo receives that value and no tree data is read.
+        When ``source.alpha_constant`` (or ``source.alpha_constant_z``) is set the merger
+        tree is bypassed entirely: every halo receives that value and no tree data is read.
 
         Args:
             redshift_index (int): Index into :attr:`redshifts`.
@@ -166,6 +166,12 @@ class MergerTreeLoader(BaseLoader):
             HaloCatalog: Catalog with positions, masses, and per-halo alphas.
         """
         alpha_constant = getattr(self.parameters.source, "alpha_constant", None)
+        alpha_constant_z = getattr(self.parameters.source, "alpha_constant_z", None)
+        if alpha_constant is None and alpha_constant_z is not None:
+            z_table, alpha_table = alpha_constant_z[0], alpha_constant_z[1]
+            alpha_constant = float(
+                np.interp(self.redshifts[redshift_index], z_table, alpha_table)
+            )
 
         if alpha_constant is not None:
             # Constant-alpha mode: skip the tree read and the progenitor walk.

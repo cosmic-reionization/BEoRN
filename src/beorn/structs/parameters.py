@@ -157,6 +157,18 @@ class SourceParameters:
     cheaper since the multi-GB tree cache is never touched.  The value should lie inside
     ``solver.halo_mass_accretion_alpha``, which still clamps it."""
 
+    alpha_constant_z: "np.ndarray | None" = None
+    """Redshift-dependent constant mass-accretion alpha, as an alternative to
+    ``alpha_constant``.
+
+    Shape ``(2, N)``: row 0 is ascending redshifts, row 1 is the matching alpha value.
+    When set (and ``alpha_constant`` is ``None``), every halo at a given snapshot still
+    receives one shared value — same tree-bypass cost savings as ``alpha_constant`` — but
+    that value is ``np.interp``'d from this table at the snapshot's redshift, rather than
+    fixed for the whole run.  Values outside the table's z-range are flat-extrapolated
+    (``np.interp``'s default).  Not read from parameter yaml files; set directly in Python,
+    like ``solver.halo_mass_accretion_alpha``."""
+
     t_source_age: float = None
     """Maximum source age in Myr.  When set, the X-ray and ionisation integrals
     are limited to a lookback window of this duration rather than integrating

@@ -54,9 +54,10 @@ class TreeCounterLoader(MergerTreeLoader):
         raise AssertionError("load_halo_catalog must not touch the density field")
 
 
-def make_parameters(alpha_constant=None, alpha_grid=(0.4077, 0.5077)):
+def make_parameters(alpha_constant=None, alpha_constant_z=None, alpha_grid=(0.4077, 0.5077)):
     parameters = Parameters()
     parameters.source.alpha_constant = alpha_constant
+    parameters.source.alpha_constant_z = alpha_constant_z
     parameters.source.halo_mass_min = 1e9
     parameters.solver.halo_mass_accretion_alpha = np.array(alpha_grid)
     return parameters
@@ -107,6 +108,62 @@ def test_alpha_constant_is_not_a_paint_only_key():
     base = Parameters()
     other = Parameters()
     other.source.alpha_constant = 0.4577
+    assert base.profiles_hash() != other.profiles_hash()
+    assert base.profiles_fstar_hash() != other.profiles_fstar_hash()
+
+
+# ---------------------------------------------------------------------------
+# source.alpha_constant_z  (fst_stochastic 'alpha_z' case, docs/thesan1_four_cases.md)
+# ---------------------------------------------------------------------------
+
+def test_alpha_constant_z_interpolates_per_snapshot():
+    """Every halo at a snapshot gets np.interp'd alpha for that snapshot's redshift."""
+    table = np.array([[6.0, 7.0, 8.0], [0.40, 0.45, 0.50]])
+    parameters = make_parameters(alpha_constant_z=table, alpha_grid=(0.0, 1.0))
+    loader = TreeCounterLoader(parameters)  # loader.redshifts == [8.0, 7.0, 6.0]
+
+    np.testing.assert_allclose(loader.load_halo_catalog(0).alphas, 0.50)  # z=8.0
+    np.testing.assert_allclose(loader.load_halo_catalog(1).alphas, 0.45)  # z=7.0
+    np.testing.assert_allclose(loader.load_halo_catalog(2).alphas, 0.40)  # z=6.0
+
+
+def test_alpha_constant_z_never_reads_the_merger_tree():
+    table = np.array([[6.0, 7.0, 8.0], [0.40, 0.45, 0.50]])
+    parameters = make_parameters(alpha_constant_z=table, alpha_grid=(0.0, 1.0))
+    loader = TreeCounterLoader(parameters)
+
+    loader.load_halo_catalog(0)
+    loader.load_halo_catalog(1)
+
+    assert loader.tree_reads == 0
+
+
+def test_alpha_constant_z_extrapolates_flat_beyond_table_range():
+    """Redshifts outside the table's coverage clip to the nearest edge value."""
+    table = np.array([[6.0, 7.0], [0.40, 0.45]])
+    parameters = make_parameters(alpha_constant_z=table, alpha_grid=(0.0, 1.0))
+    loader = TreeCounterLoader(parameters)  # z=8.0 (index 0) is above the table's max z=7.0
+
+    np.testing.assert_allclose(loader.load_halo_catalog(0).alphas, 0.45)
+
+
+def test_alpha_constant_takes_precedence_over_alpha_constant_z():
+    table = np.array([[6.0, 7.0, 8.0], [0.40, 0.45, 0.50]])
+    parameters = make_parameters(
+        alpha_constant=0.4577, alpha_constant_z=table, alpha_grid=(0.0, 1.0)
+    )
+    loader = TreeCounterLoader(parameters)
+
+    np.testing.assert_allclose(loader.load_halo_catalog(0).alphas, 0.4577)
+
+
+def test_alpha_constant_z_is_not_a_paint_only_key():
+    """It changes the profiles, so it must invalidate the profile cache."""
+    assert "alpha_constant_z" not in Parameters._PAINT_ONLY_SOURCE_KEYS
+
+    base = Parameters()
+    other = Parameters()
+    other.source.alpha_constant_z = np.array([[6.0, 7.0], [0.40, 0.45]])
     assert base.profiles_hash() != other.profiles_hash()
     assert base.profiles_fstar_hash() != other.profiles_fstar_hash()
 
