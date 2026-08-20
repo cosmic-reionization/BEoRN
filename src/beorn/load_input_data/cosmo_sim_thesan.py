@@ -272,6 +272,11 @@ class ThesanLoader(MergerTreeLoader):
                 "solver.redshifts range."
             )
 
+        # Keep the unfiltered, raw-snapshot-indexed redshifts: merger-tree branches step
+        # through consecutive simulation snapshots regardless of which ones survive the
+        # filtering below, so alpha fitting needs to index by tree_snap_num.
+        self._all_snapshot_redshifts = np.asarray(redshifts)
+
         # Restrict to the solver redshift range
         z_min = min(self.parameters.solver.redshifts)
         z_max = max(self.parameters.solver.redshifts)
@@ -327,6 +332,15 @@ class ThesanLoader(MergerTreeLoader):
         ``redshifts`` array.
         """
         return self._snap_indices
+
+    @property
+    def all_snapshot_redshifts(self) -> np.ndarray:
+        """Redshift of every THESAN snapshot, indexed by raw snapshot number.
+
+        The unfiltered counterpart of :attr:`redshifts`, so it can be indexed
+        directly with the tree cache's ``tree_snap_num`` values.
+        """
+        return self._all_snapshot_redshifts
 
     def _particle_mapping_config(self) -> tuple[str, str]:
         """Return the particle-to-mesh mapping scheme and backend.

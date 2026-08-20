@@ -30,7 +30,6 @@ from abc import abstractmethod
 import numpy as np
 
 from .base import BaseLoader
-from .lookback import get_lookback_range
 from .alpha_fitting import vectorized_alpha_fit
 from ..structs import HaloCatalog, Parameters
 
@@ -134,6 +133,35 @@ class MergerTreeLoader(BaseLoader):
         return [True] * self.redshifts.size
 
     @property
+    def snapshot_numbers(self) -> np.ndarray:
+        """Raw simulation snapshot number backing each entry of :attr:`redshifts`.
+
+        ``redshifts`` may be a filtered subset of the simulation's snapshots (by
+        redshift range, or by which data products are on disk), so a position in
+        that array is **not** interchangeable with the snapshot number stored in
+        the tree cache's ``tree_snap_num``.  Anything that cross-references the two
+        must translate through this property.
+
+        The default assumes the identity mapping, which is correct for loaders that
+        expose every snapshot.  Subclasses that filter must override it.
+        """
+        return np.arange(self.redshifts.size)
+
+    @property
+    def all_snapshot_redshifts(self) -> np.ndarray:
+        """Redshift of *every* simulation snapshot, indexed by raw snapshot number.
+
+        Unlike :attr:`redshifts` this is not filtered, so it can be indexed directly
+        with ``tree_snap_num`` values.  Progenitor branches step through consecutive
+        simulation snapshots regardless of which ones the loader exposes, so fitting
+        an accretion rate needs the unfiltered redshifts.
+
+        The default returns :attr:`redshifts`, correct only when
+        :attr:`snapshot_numbers` is the identity.  Subclasses that filter must override.
+        """
+        return np.asarray(self.redshifts)
+
+    @property
     def input_tag(self) -> str:
         """Short identifier for this dataset, used to namespace output files.
 
@@ -180,7 +208,10 @@ class MergerTreeLoader(BaseLoader):
         else:
             # 1. Fit alpha from merger tree for halos that appear in it
             tree_halo_ids, halo_alphas = self.get_halo_accretion_rate_from_tree(redshift_index)
-            alpha_fb = self.fallback_alpha(halo_alphas)
+            # Halos whose branch is shorter than the lookback window come back as NaN
+            # (step 4 turns them into alpha_fb).  They must not poison the mean/median
+            # that defines alpha_fb itself, so derive it from the well-fitted halos only.
+            alpha_fb = self.fallback_alpha(halo_alphas[np.isfinite(halo_alphas)])
 
             # 2. Load positions/masses from the group catalog
             positions, masses, subhalo_to_group_map = self.get_halo_information_from_catalog(redshift_index)
@@ -242,13 +273,16 @@ class MergerTreeLoader(BaseLoader):
     ) -> tuple[np.ndarray, np.ndarray]:
         """Walk main progenitor branches and fit alpha for each halo.
 
-        Halos not represented in the tree are omitted from the returned
-        arrays; the caller fills the remainder with the fallback value.
+        Halos not represented in the tree are omitted from the returned arrays;
+        the caller fills the remainder with the fallback value.
 
-        When the available lookback window is shorter than
-        ``parameters.source.mass_accretion_lookback`` (early snapshots),
-        the fit is unreliable — a constant near-zero value is returned
-        instead.
+        ``parameters.source.mass_accretion_lookback`` counts **simulation
+        snapshots along the branch**, not entries of :attr:`redshifts`.  A branch
+        steps through consecutive snapshots whether or not the loader exposes
+        them, so the window — and hence the fitted alpha — does not change when
+        the loader's snapshot list is filtered.  Halos whose branch ends before
+        the window is full are returned as ``NaN`` and picked up by
+        :meth:`fallback_alpha` in :meth:`load_halo_catalog`.
 
         Args:
             redshift_index (int): Index into :attr:`redshifts`.
@@ -256,15 +290,15 @@ class MergerTreeLoader(BaseLoader):
         Returns:
             tuple:
             - ``halo_ids``  (K,) int   — subhalo indices for fitted halos
-            - ``alphas``    (K,) float — fitted alpha for each
+            - ``alphas``    (K,) float — fitted alpha, ``NaN`` where the branch
+              was too short to fit
         """
-        redshift_range = get_lookback_range(
-            self.parameters, redshifts=self.redshifts[: redshift_index + 1]
-        )
-        logger.debug(
-            f"Merger tree lookback: z=[{redshift_range[0]:.2f}→{redshift_range[-1]:.2f}] "
-            f"({redshift_range.size} snapshots)"
-        )
+        lookback = self.parameters.source.mass_accretion_lookback
+        # tree_snap_num holds raw simulation snapshot numbers; redshift_index is a
+        # position in the (possibly filtered) redshifts array.  Translate before
+        # comparing the two -- they coincide only when no filtering happened.
+        snap_now = int(self.snapshot_numbers[redshift_index])
+        snapshot_redshifts = np.asarray(self.all_snapshot_redshifts)
 
         cache = self.load_tree_cache()
         if len(cache) == 5:
@@ -273,35 +307,74 @@ class MergerTreeLoader(BaseLoader):
             tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor = cache
             tree_is_central = None
 
-        current_mask = (tree_snap_num == redshift_index) & (tree_mass > 0)
+        current_mask = (tree_snap_num == snap_now) & (tree_mass > 0)
         if tree_is_central is not None:
             current_mask &= tree_is_central
         current_halo_ids = tree_halo_ids[current_mask]
-        n_halos = current_mask.sum()
+        n_halos = int(current_mask.sum())
 
-        if redshift_range.size < self.parameters.source.mass_accretion_lookback:
+        if snap_now + 1 < lookback:
+            # Not enough snapshots exist yet for any branch to fill the window.
             logger.warning(
-                f"Only {redshift_range.size} lookback snapshots available "
-                f"(requested {self.parameters.source.mass_accretion_lookback}); "
-                "returning near-zero fallback alphas for early snapshot."
+                f"Snapshot {snap_now} has only {snap_now + 1} snapshots behind it "
+                f"(lookback {lookback}); returning near-zero fallback alphas."
             )
             return current_halo_ids, np.full(n_halos, 0.04)
 
-        # Assemble mass history matrix by following the main progenitor chain
-        mass_history = np.zeros((n_halos, redshift_range.size))
-        walking_mask = current_mask.copy()
-        for i in range(redshift_range.size):
-            progenitor_indices = tree_main_progenitor[walking_mask]
-            mass_history[:, i] = tree_mass[progenitor_indices]
-            walking_mask = progenitor_indices
+        # Walk the main progenitor branch, recording the mass *and* the snapshot it
+        # came from.  Column 0 is the halo itself, later columns step back in time.
+        mass_history = np.zeros((n_halos, lookback), dtype=np.float64)
+        snap_history = np.full((n_halos, lookback), -1, dtype=np.int64)
 
-        # Replace invalid masses (0 or negative) with 1 so log-space fit is safe
-        mass_history[mass_history <= 0] = 1
+        pointer = np.flatnonzero(current_mask)
+        for step in range(lookback):
+            alive = pointer >= 0
+            if not alive.any():
+                break
+            # Clip the -1 terminators before indexing: a raw -1 would wrap around to
+            # the last entry of the cache and splice an unrelated halo onto the branch.
+            safe = np.where(alive, pointer, 0)
+            mass = np.where(alive, tree_mass[safe], 0.0)
+            # A non-positive mass ends the usable history: the fit works in log space.
+            good = alive & (mass > 0)
+            mass_history[:, step] = np.where(good, mass, 0.0)
+            snap_history[:, step] = np.where(good, tree_snap_num[safe], -1)
+            pointer = np.where(good, tree_main_progenitor[safe], -1)
 
-        halo_alphas = vectorized_alpha_fit(redshift_range, mass_history)
+        # Branches share only a handful of distinct snapshot patterns (main-progenitor
+        # links occasionally skip a snapshot), so group identical patterns and fit each
+        # group in one vectorised call against its own redshift vector.
+        halo_alphas = np.full(n_halos, np.nan, dtype=np.float64)
+        lengths = (snap_history >= 0).sum(axis=1)
+        fittable = lengths == lookback
+        if fittable.any():
+            rows_fittable = np.flatnonzero(fittable)
+            patterns, inverse = np.unique(
+                snap_history[rows_fittable], axis=0, return_inverse=True
+            )
+            inverse = inverse.ravel()
+            # Bucket rows by pattern with one sort rather than rescanning `inverse`
+            # per group, which would be O(n_groups * n_halos).
+            order = np.argsort(inverse, kind="stable")
+            starts = np.concatenate(
+                [[0], np.cumsum(np.bincount(inverse, minlength=patterns.shape[0]))]
+            )
+            for group, pattern in enumerate(patterns):
+                rows = rows_fittable[order[starts[group]:starts[group + 1]]]
+                if rows.size == 0:
+                    continue
+                # Snapshot numbers decrease along a branch and snapshot_redshifts is
+                # descending in the index, so this is ascending in z (now -> past),
+                # which is what vectorized_alpha_fit requires.
+                halo_alphas[rows] = vectorized_alpha_fit(
+                    snapshot_redshifts[pattern], mass_history[rows]
+                )
+
+        n_short = int((~fittable).sum())
         logger.debug(
-            f"Alpha fit: {np.isnan(halo_alphas).sum()} NaN, "
-            f"{np.isinf(halo_alphas).sum()} Inf values"
+            f"Alpha fit at snapshot {snap_now}: {n_halos} halos, {n_short} with a branch "
+            f"shorter than {lookback} snapshots (-> fallback), "
+            f"{int(np.isinf(halo_alphas).sum())} Inf values"
         )
         return current_halo_ids, halo_alphas
 
