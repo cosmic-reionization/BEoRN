@@ -160,12 +160,18 @@ class RadiationProfileSolver:
                 return
 
         # we will compute the profiles for specific values of M and dM/dt. Later on we will assume that the profiles are the same for all halos in a bin around these values
-        # so we need both: the values at the center of the bin and the values at the edges of the bin
+        # halo_mass_bins holds the *mass bin edges* traced back in redshift, and is what the
+        # painter compares a halo's mass against to pick its mass bin.  Its alpha axis must be
+        # the bin CENTRES, not the edges: the painter indexes it and the profiles below with
+        # the same alpha_index (0..n_alpha-1), so an edges-length axis would silently hand it
+        # the bin's lower edge while the profile it applies was built at the centre.  That
+        # mismatch inflates every boundary by exp(half_width*(z_min-z)) and pushes halos into
+        # too-low mass bins.  See fst_stochastic/docs/convergence.md.
         halo_mass_bins, _ = mass_accretion(
             self.parameters,
             self.z_bins,
             self.parameters.solver.halo_mass_bins,
-            self.parameters.solver.halo_mass_accretion_alpha
+            self.parameters.solver.halo_mass_accretion_alpha_bin_centers
         )
         # the halo mass for the bin centers is the one used throughout the profile computation
         halo_mass, halo_mass_derivative = mass_accretion(
@@ -684,11 +690,13 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
                 )
                 return
 
+        # Alpha axis must be the bin CENTRES here, matching the profiles below -- see the
+        # note in RadiationProfileSolver.solve.
         halo_mass_bins, _ = mass_accretion(
             self.parameters,
             self.z_bins,
             self.parameters.solver.halo_mass_bins,
-            self.parameters.solver.halo_mass_accretion_alpha
+            self.parameters.solver.halo_mass_accretion_alpha_bin_centers
         )
 
         halo_mass, halo_mass_derivative = mass_accretion(
