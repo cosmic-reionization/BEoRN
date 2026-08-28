@@ -361,12 +361,23 @@ class ThesanLoader(MergerTreeLoader):
 
     # ── MergerTreeLoader interface ─────────────────────────────────────────
 
-    def load_tree_cache(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def load_tree_cache(self) -> tuple[np.ndarray, ...]:
         """Load the simplified merger tree cache.
 
-        The cache HDF5 file is produced by ``extract_simplified_tree.ipynb``.
-        It must contain four datasets: ``tree_halo_ids``, ``tree_snap_num``,
-        ``tree_mass``, ``tree_main_progenitor``.
+        The cache HDF5 file is produced by ``thesan_tree_postprocessing.py``.  It must
+        contain ``tree_halo_ids``, ``tree_snap_num``, ``tree_mass`` and
+        ``tree_main_progenitor``; a format-v2 cache also carries ``tree_is_central``,
+        which is returned as a fifth array.
+
+        The central mask matters: THESAN's LHaloTree is built on SUBFIND *subhalos*,
+        while the painted catalog is built from *FoF groups*.  Without the mask every
+        subhalo is fitted and the FoF row's alpha is won by the last (least-bound)
+        satellite, whose stripped mass history fits an alpha near zero.  See
+        ``fst_stochastic/docs/central_satellite.md``.
+
+        The satellite entries are deliberately **not** removed from the flat arrays:
+        ``tree_main_progenitor`` stores absolute indices into them, so filtering would
+        invalidate every progenitor pointer.
 
         The arrays are memoized on first use: the file holds ~3.6e8 entries (~6 GB,
         ~30 s to read) and one alpha fit is performed per painted snapshot, so
@@ -386,8 +397,33 @@ class ThesanLoader(MergerTreeLoader):
             tree_snap_num       = f["tree_snap_num"][:]
             tree_mass           = f["tree_mass"][:]
             tree_main_progenitor = f["tree_main_progenitor"][:]
-        self.logger.debug(f"Loaded tree cache: {self.cached_tree} ({tree_halo_ids.size:,} entries)")
-        self._tree_cache_arrays = (tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor)
+            has_central = "tree_is_central" in f
+            tree_is_central = f["tree_is_central"][:] if has_central else None
+            format_version = int(f.attrs.get("format_version", 0))
+
+        if has_central:
+            arrays = (tree_halo_ids, tree_snap_num, tree_mass,
+                      tree_main_progenitor, tree_is_central)
+            self.logger.debug(
+                f"Loaded tree cache: {self.cached_tree} ({tree_halo_ids.size:,} entries, "
+                f"{int(tree_is_central.sum()):,} central)"
+            )
+        else:
+            arrays = (tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor)
+            message = (
+                f"Tree cache {self.cached_tree} has no 'tree_is_central' dataset. Alpha will "
+                "be fitted for satellite subhalos too, and the FoF row's alpha will be won by "
+                "the least-bound satellite in every multi-subhalo group — a large, "
+                "mass-selective bias. See fst_stochastic/docs/central_satellite.md."
+            )
+            if format_version >= 2:
+                raise ValueError(
+                    f"{message} This cache declares format_version={format_version}, which "
+                    "must carry the dataset; rebuild it with thesan_tree_postprocessing.py."
+                )
+            self.logger.warning(message)
+
+        self._tree_cache_arrays = arrays
         return self._tree_cache_arrays
 
     def get_halo_information_from_catalog(

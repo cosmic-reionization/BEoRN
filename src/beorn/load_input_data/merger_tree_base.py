@@ -70,6 +70,9 @@ class MergerTreeLoader(BaseLoader):
 
     def __init__(self, parameters: Parameters):
         super().__init__(parameters)
+        # Whether the tree cache last read supplied a central mask.  Set in
+        # get_halo_accretion_rate_from_tree, consumed by load_halo_catalog.
+        self._tree_cache_is_central_filtered = False
 
     # ── Abstract interface ─────────────────────────────────────────────────
 
@@ -217,15 +220,65 @@ class MergerTreeLoader(BaseLoader):
             positions, masses, subhalo_to_group_map = self.get_halo_information_from_catalog(redshift_index)
             n_groups = masses.size
 
-            # 3. Map tree-derived alphas onto the full group array
+            # 3. Map tree-derived alphas onto the full group array.
+            #
+            # The tree is indexed by subhalo, the catalog by FoF group, so this step is a
+            # projection.  When the cache carries a central mask the roots are already
+            # filtered to FoF centrals, and the projection must be injective: exactly one
+            # alpha per group.  Without the mask several subhalos of one group land on the
+            # same row and NumPy's last-write-wins hands the row to the highest
+            # SubhaloNumber — the least-bound satellite, whose stripped history fits an
+            # alpha near zero.  See fst_stochastic/docs/central_satellite.md.
+            #
+            # The flag is set by get_halo_accretion_rate_from_tree above, so the (large,
+            # possibly un-memoized) cache is not read a second time here.
+            central_filtered = self._tree_cache_is_central_filtered
             full_alphas = np.full(n_groups, alpha_fb)
             if tree_halo_ids.size > 0:
-                sorting = np.argsort(tree_halo_ids)
-                sorted_ids = tree_halo_ids[sorting]
-                sorted_alphas = halo_alphas[sorting]
-                group_ids = subhalo_to_group_map[sorted_ids]
+                # Bounds-check before indexing: an out-of-range SubhaloNumber would either
+                # raise or silently wrap onto an unrelated group.
+                in_range = (tree_halo_ids >= 0) & (tree_halo_ids < subhalo_to_group_map.size)
+                n_invalid = int((~in_range).sum())
+                if n_invalid:
+                    logger.warning(
+                        f"z-index {redshift_index}: {n_invalid} of {tree_halo_ids.size} tree "
+                        f"halo ids fall outside subhalo_to_group_map (size "
+                        f"{subhalo_to_group_map.size}) and are dropped."
+                    )
+                ids = tree_halo_ids[in_range]
+                alphas = halo_alphas[in_range]
+
+                group_ids = subhalo_to_group_map[ids]
                 valid = (group_ids >= 0) & (group_ids < n_groups)
-                full_alphas[group_ids[valid]] = sorted_alphas[valid]
+                target_groups = group_ids[valid]
+
+                # Uniqueness of the target rows is the invariant that makes this a
+                # projection rather than a race.
+                unique_targets, counts = np.unique(target_groups, return_counts=True)
+                n_duplicate = int((counts > 1).sum())
+                if n_duplicate:
+                    message = (
+                        f"z-index {redshift_index}: {n_duplicate} FoF groups receive more than "
+                        f"one tree-derived alpha ({target_groups.size} assignments onto "
+                        f"{unique_targets.size} groups). The surviving value is then decided "
+                        f"by array-assignment order, not by physics."
+                    )
+                    if central_filtered:
+                        raise ValueError(
+                            f"{message} The cache supplies a central mask, so the roots should "
+                            "already be one per FoF group; a duplicate means the mask and the "
+                            "group catalog disagree."
+                        )
+                    logger.warning(message)
+
+                full_alphas[target_groups] = alphas[valid]
+                logger.debug(
+                    f"z-index {redshift_index}: {tree_halo_ids.size} tree roots "
+                    f"({'central-filtered' if central_filtered else 'all subhalos'}), "
+                    f"{n_invalid} out of range, {target_groups.size} valid mappings onto "
+                    f"{unique_targets.size} groups, {n_groups - unique_targets.size} groups "
+                    f"left at the fallback alpha {alpha_fb:.4f}."
+                )
 
             # 4. Replace non-finite values (inf/nan from short/missing histories)
             full_alphas[~np.isfinite(full_alphas)] = alpha_fb
@@ -306,6 +359,9 @@ class MergerTreeLoader(BaseLoader):
         else:
             tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor = cache
             tree_is_central = None
+        # Remembered for load_halo_catalog, which needs to know whether the roots are one
+        # per FoF group (central mask present) or many (legacy four-array cache).
+        self._tree_cache_is_central_filtered = tree_is_central is not None
 
         current_mask = (tree_snap_num == snap_now) & (tree_mass > 0)
         if tree_is_central is not None:
