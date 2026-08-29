@@ -15,6 +15,10 @@ Responsibilities handled here so subclasses do not have to repeat them:
 - **Fallback alpha** — halos not present in the tree, or whose history is
   too short to fit reliably, receive a fallback value controlled by
   ``parameters.source.alpha_fallback``.
+- **Early snapshots** — the first ``mass_accretion_lookback - 1`` snapshots of a
+  simulation have no branch long enough to fit at all.  Each of their halos
+  inherits the alpha fitted for its descendant at the nearest later snapshot
+  whose window covers it, rather than a single hardcoded constant for the box.
 - **Alpha range clamping** — per-halo alphas are clipped to the paintable
   range ``[solver.halo_mass_accretion_alpha[0],
   solver.halo_mass_accretion_alpha[-2]]`` so every halo maps to a valid
@@ -73,6 +77,9 @@ class MergerTreeLoader(BaseLoader):
         # Whether the tree cache last read supplied a central mask.  Set in
         # get_halo_accretion_rate_from_tree, consumed by load_halo_catalog.
         self._tree_cache_is_central_filtered = False
+        # Alphas inherited by each early snapshot, keyed by raw snapshot number, so a
+        # repeated load does not redo the walks.  See _inherit_alphas_for_early_snapshot.
+        self._inherited_alpha_cache = {}
 
     # ── Abstract interface ─────────────────────────────────────────────────
 
@@ -337,6 +344,11 @@ class MergerTreeLoader(BaseLoader):
         the window is full are returned as ``NaN`` and picked up by
         :meth:`fallback_alpha` in :meth:`load_halo_catalog`.
 
+        The earliest snapshots of a simulation have no full window at all
+        (``snap_now + 1 < lookback``); those inherit their alpha from a descendant at
+        the nearest later snapshot that does, via
+        :meth:`_inherit_alphas_for_early_snapshot`.
+
         Args:
             redshift_index (int): Index into :attr:`redshifts`.
 
@@ -370,19 +382,71 @@ class MergerTreeLoader(BaseLoader):
         n_halos = int(current_mask.sum())
 
         if snap_now + 1 < lookback:
-            # Not enough snapshots exist yet for any branch to fill the window.
-            logger.warning(
-                f"Snapshot {snap_now} has only {snap_now + 1} snapshots behind it "
-                f"(lookback {lookback}); returning near-zero fallback alphas."
+            # Not enough snapshots exist yet for any branch to fill the window, so the
+            # alpha is borrowed from a descendant at a later snapshot whose branches do.
+            return current_halo_ids, self._inherit_alphas_for_early_snapshot(
+                snap_now,
+                current_halo_ids,
+                lookback,
+                tree_halo_ids,
+                tree_snap_num,
+                tree_mass,
+                tree_main_progenitor,
+                tree_is_central,
             )
-            return current_halo_ids, np.full(n_halos, 0.04)
 
-        # Walk the main progenitor branch, recording the mass *and* the snapshot it
-        # came from.  Column 0 is the halo itself, later columns step back in time.
-        mass_history = np.zeros((n_halos, lookback), dtype=np.float64)
-        snap_history = np.full((n_halos, lookback), -1, dtype=np.int64)
+        mass_history, snap_history, _ = self._walk_main_branches(
+            np.flatnonzero(current_mask),
+            lookback,
+            tree_halo_ids,
+            tree_snap_num,
+            tree_mass,
+            tree_main_progenitor,
+        )
+        halo_alphas = self._fit_branch_alphas(
+            mass_history, snap_history, lookback, snapshot_redshifts
+        )
 
-        pointer = np.flatnonzero(current_mask)
+        n_short = int(np.isnan(halo_alphas).sum())
+        logger.debug(
+            f"Alpha fit at snapshot {snap_now}: {n_halos} halos, {n_short} with a branch "
+            f"shorter than {lookback} snapshots (-> fallback), "
+            f"{int(np.isinf(halo_alphas).sum())} Inf values"
+        )
+        return current_halo_ids, halo_alphas
+
+    def _walk_main_branches(
+        self,
+        root_rows: np.ndarray,
+        lookback: int,
+        tree_halo_ids: np.ndarray,
+        tree_snap_num: np.ndarray,
+        tree_mass: np.ndarray,
+        tree_main_progenitor: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Walk the main progenitor branch of each root back over the window.
+
+        Column 0 is the root itself, later columns step back in time.  A branch that
+        terminates (or hits a non-positive mass) leaves the remaining columns empty:
+        mass 0, snapshot -1, halo id -1.
+
+        Args:
+            root_rows (np.ndarray): Cache row indices of the roots to walk.
+            lookback (int): Number of snapshots to walk, including the root.
+            tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor: the flat
+                tree cache arrays (see :meth:`load_tree_cache`).
+
+        Returns:
+            tuple of three ``(n_roots, lookback)`` arrays: ``mass_history`` (float),
+            ``snap_history`` (int) and ``id_history`` (int, the subhalo index of each
+            branch entry).
+        """
+        n_roots = int(root_rows.size)
+        mass_history = np.zeros((n_roots, lookback), dtype=np.float64)
+        snap_history = np.full((n_roots, lookback), -1, dtype=np.int64)
+        id_history = np.full((n_roots, lookback), -1, dtype=np.int64)
+
+        pointer = np.asarray(root_rows)
         for step in range(lookback):
             alive = pointer >= 0
             if not alive.any():
@@ -395,12 +459,36 @@ class MergerTreeLoader(BaseLoader):
             good = alive & (mass > 0)
             mass_history[:, step] = np.where(good, mass, 0.0)
             snap_history[:, step] = np.where(good, tree_snap_num[safe], -1)
+            id_history[:, step] = np.where(good, tree_halo_ids[safe], -1)
             pointer = np.where(good, tree_main_progenitor[safe], -1)
 
+        return mass_history, snap_history, id_history
+
+    def _fit_branch_alphas(
+        self,
+        mass_history: np.ndarray,
+        snap_history: np.ndarray,
+        lookback: int,
+        snapshot_redshifts: np.ndarray,
+    ) -> np.ndarray:
+        """Fit alpha for every branch that fills the window.
+
+        Args:
+            mass_history (np.ndarray): ``(n_roots, lookback)`` masses from
+                :meth:`_walk_main_branches`.
+            snap_history (np.ndarray): ``(n_roots, lookback)`` snapshot numbers, -1
+                where the branch has ended.
+            lookback (int): Window length a branch must reach to be fitted.
+            snapshot_redshifts (np.ndarray): Redshift of every simulation snapshot,
+                indexed by raw snapshot number.
+
+        Returns:
+            np.ndarray: ``(n_roots,)`` alphas, ``NaN`` where the branch was too short.
+        """
         # Branches share only a handful of distinct snapshot patterns (main-progenitor
         # links occasionally skip a snapshot), so group identical patterns and fit each
         # group in one vectorised call against its own redshift vector.
-        halo_alphas = np.full(n_halos, np.nan, dtype=np.float64)
+        halo_alphas = np.full(snap_history.shape[0], np.nan, dtype=np.float64)
         lengths = (snap_history >= 0).sum(axis=1)
         fittable = lengths == lookback
         if fittable.any():
@@ -426,13 +514,140 @@ class MergerTreeLoader(BaseLoader):
                     snapshot_redshifts[pattern], mass_history[rows]
                 )
 
-        n_short = int((~fittable).sum())
-        logger.debug(
-            f"Alpha fit at snapshot {snap_now}: {n_halos} halos, {n_short} with a branch "
-            f"shorter than {lookback} snapshots (-> fallback), "
-            f"{int(np.isinf(halo_alphas).sum())} Inf values"
+        return halo_alphas
+
+    def _inherit_alphas_for_early_snapshot(
+        self,
+        snap_now: int,
+        current_halo_ids: np.ndarray,
+        lookback: int,
+        tree_halo_ids: np.ndarray,
+        tree_snap_num: np.ndarray,
+        tree_mass: np.ndarray,
+        tree_main_progenitor: np.ndarray,
+        tree_is_central: "np.ndarray | None",
+    ) -> np.ndarray:
+        """Inherit alpha from the nearest later snapshot whose window covers this one.
+
+        For the first ``lookback - 1`` snapshots of a simulation no branch is long
+        enough to fit.  Rather than paint them all at one arbitrary constant, each halo
+        takes the alpha fitted for its *descendant*: a reference snapshot is walked, and
+        every branch passing through ``snap_now`` hands its alpha to the halo it
+        occupies there.
+
+        Any reference in ``[lookback - 1, snap_now + lookback - 1]`` has a full window
+        reaching ``snap_now``, and they trade locality against coverage:
+
+        - ``lookback - 1`` is the closest in time and its window straddles ``snap_now``,
+          but a full window there demands survival all the way back to snapshot 0, which
+          only the oldest handful of branches manage (THESAN-1: 4,248 of 312,492 roots,
+          so 1.7% of the halos at snapshot 8);
+        - ``snap_now + lookback - 1`` sits at a far richer epoch and covers ~74% of the
+          same halos, but its window lies entirely after ``snap_now``.
+
+        So references are tried in order, nearest first, and each one only fills halos
+        still uncovered: every halo gets the most local window available *to it*.
+        Halos left over — no surviving descendant on any of these branches — keep ``NaN``
+        and fall through to :meth:`fallback_alpha` in :meth:`load_halo_catalog`.
+
+        The borrowed alpha is always fitted over a window later than (or straddling) the
+        painted snapshot: it describes the branch the halo goes on to follow, not its own
+        unmeasurable past.
+
+        Args:
+            snap_now (int): Raw snapshot number being painted.
+            current_halo_ids (np.ndarray): Subhalo indices of the roots at ``snap_now``,
+                in the order the returned alphas must follow.
+            lookback (int): Window length in snapshots.
+            tree_halo_ids, tree_snap_num, tree_mass, tree_main_progenitor,
+                tree_is_central: the flat tree cache arrays.
+
+        Returns:
+            np.ndarray: ``(n_halos,)`` alphas, ``NaN`` where nothing could be inherited.
+        """
+        n_halos = int(current_halo_ids.size)
+        cached = self._inherited_alpha_cache.get(snap_now)
+        if cached is not None and cached.size == n_halos:
+            return cached.copy()
+
+        inherited = np.full(n_halos, np.nan, dtype=np.float64)
+        if n_halos == 0:
+            self._inherited_alpha_cache[snap_now] = inherited
+            return inherited.copy()
+
+        snapshot_redshifts = np.asarray(self.all_snapshot_redshifts)
+        last_snapshot = int(tree_snap_num.max())
+        order = np.argsort(current_halo_ids)
+        sorted_ids = current_halo_ids[order]
+        contributions = {}
+
+        for reference in range(lookback - 1, min(snap_now + lookback, last_snapshot + 1)):
+            missing = ~np.isfinite(inherited)
+            if not missing.any():
+                break
+
+            reference_mask = (tree_snap_num == reference) & (tree_mass > 0)
+            if tree_is_central is not None:
+                reference_mask &= tree_is_central
+            if not reference_mask.any():
+                continue
+
+            mass_history, snap_history, id_history = self._walk_main_branches(
+                np.flatnonzero(reference_mask),
+                lookback,
+                tree_halo_ids,
+                tree_snap_num,
+                tree_mass,
+                tree_main_progenitor,
+            )
+            reference_alphas = self._fit_branch_alphas(
+                mass_history, snap_history, lookback, snapshot_redshifts
+            )
+
+            # Match on the recorded snapshot number rather than the column index
+            # `reference - snap_now`: main-progenitor links occasionally skip a snapshot,
+            # so the column is not the snapshot offset.
+            rows, columns = np.nonzero(snap_history == snap_now)
+            progenitor_ids = id_history[rows, columns]
+            progenitor_alphas = reference_alphas[rows]
+            usable = np.isfinite(progenitor_alphas)
+            progenitor_ids = progenitor_ids[usable]
+            progenitor_alphas = progenitor_alphas[usable]
+            if progenitor_ids.size == 0:
+                continue
+
+            # One halo cannot be the main progenitor of two branches; if the tree says
+            # otherwise the surviving alpha would be decided by assignment order, the
+            # same invariant load_halo_catalog enforces for the group projection.
+            n_duplicate = progenitor_ids.size - np.unique(progenitor_ids).size
+            if n_duplicate:
+                logger.warning(
+                    f"Snapshot {snap_now}: {n_duplicate} halos are claimed as the main "
+                    f"progenitor of more than one branch at reference snapshot "
+                    f"{reference}; the inherited alpha is then decided by "
+                    "array-assignment order, not by physics."
+                )
+
+            position = np.searchsorted(sorted_ids, progenitor_ids)
+            position = np.clip(position, 0, sorted_ids.size - 1)
+            found = sorted_ids[position] == progenitor_ids
+            targets = order[position[found]]
+            # A nearer reference has already given these halos a more local window.
+            fresh = missing[targets]
+            inherited[targets[fresh]] = progenitor_alphas[found][fresh]
+            n_new = int(np.isfinite(inherited).sum()) - sum(contributions.values())
+            if n_new:
+                contributions[reference] = n_new
+
+        n_inherited = int(np.isfinite(inherited).sum())
+        logger.info(
+            f"Snapshot {snap_now} has only {snap_now + 1} snapshots behind it "
+            f"(lookback {lookback}): {n_inherited} of {n_halos} halos inherited alpha "
+            f"from a descendant, {n_halos - n_inherited} left to source.alpha_fallback. "
+            f"Per reference snapshot (nearest first): {contributions}"
         )
-        return current_halo_ids, halo_alphas
+        self._inherited_alpha_cache[snap_now] = inherited
+        return inherited.copy()
 
     # ── Fallback alpha ────────────────────────────────────────────────────
 

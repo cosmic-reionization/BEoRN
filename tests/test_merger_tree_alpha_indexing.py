@@ -189,6 +189,128 @@ def test_short_branch_halo_receives_the_fallback_alpha():
 
 
 # ---------------------------------------------------------------------------
+# Early snapshots: no branch fills the window, so alpha is inherited
+# ---------------------------------------------------------------------------
+
+# redshift_index 0 is raw snapshot 3, which has only 4 snapshots behind it -- one short
+# of the 5-snapshot window.  Its halos must inherit from snapshot LOOKBACK - 1 = 4.
+EARLY_REDSHIFT_INDEX = 0
+REFERENCE_SNAPSHOT = LOOKBACK - 1
+
+
+def test_early_snapshot_is_below_the_window():
+    """Guards the fixture: this index must actually take the inheritance branch."""
+    raw_snapshot = FIRST_EXPOSED_SNAPSHOT + EARLY_REDSHIFT_INDEX
+    assert raw_snapshot + 1 < LOOKBACK
+    assert REFERENCE_SNAPSHOT > raw_snapshot
+
+
+def test_early_snapshot_inherits_alpha_from_the_reference_snapshot():
+    loader = SyntheticTreeLoader(make_parameters())
+
+    halo_ids, alphas = loader.get_halo_accretion_rate_from_tree(EARLY_REDSHIFT_INDEX)
+
+    np.testing.assert_array_equal(halo_ids, np.arange(N_HALOS))
+    # Each halo takes the alpha fitted for its own descendant at snapshot 4, which the
+    # exponential fixture recovers exactly.
+    np.testing.assert_allclose(alphas, TRUE_ALPHAS, rtol=1e-10)
+
+
+def test_early_snapshot_is_not_painted_at_one_constant():
+    """The old behaviour returned 0.04 for every halo, clamped to the grid floor."""
+    loader = SyntheticTreeLoader(make_parameters())
+
+    catalog = loader.load_halo_catalog(EARLY_REDSHIFT_INDEX)
+
+    assert catalog.alphas.std() > 0, "halo-to-halo scatter must survive at early times"
+    grid_floor = make_parameters().solver.halo_mass_accretion_alpha[0]
+    assert not np.any(catalog.alphas == grid_floor)
+
+
+def test_early_snapshot_halo_without_a_descendant_gets_the_fallback():
+    """Halo 0 is not on any branch rooted at the reference snapshot."""
+    # Cutting halo 0's progenitor link *at* snapshot 4 leaves its own branch one entry
+    # long (so it is never fitted) and stops it reaching snapshot 3.
+    loader = SyntheticTreeLoader(make_parameters(), terminate=(0, REFERENCE_SNAPSHOT))
+
+    _, alphas = loader.get_halo_accretion_rate_from_tree(EARLY_REDSHIFT_INDEX)
+    catalog = loader.load_halo_catalog(EARLY_REDSHIFT_INDEX)
+
+    assert np.isnan(alphas[0]), "nothing to inherit must stay NaN, not a made-up value"
+    np.testing.assert_allclose(alphas[1:], TRUE_ALPHAS[1:], rtol=1e-10)
+    assert np.all(np.isfinite(catalog.alphas)), "NaN must not reach the painted catalog"
+    np.testing.assert_allclose(catalog.alphas[0], TRUE_ALPHAS[1:].mean(), rtol=1e-10)
+    np.testing.assert_allclose(catalog.alphas[1:], TRUE_ALPHAS[1:], rtol=1e-10)
+
+
+def test_nearest_reference_wins_over_later_ones():
+    """References are tried nearest first; a later one only fills what is still missing.
+
+    Snapshot 4 already covers all five halos, so no branch walk beyond it may overwrite
+    an alpha that is already set.
+    """
+    loader = SyntheticTreeLoader(make_parameters())
+    references = []
+    original = loader._walk_main_branches
+
+    def recording_walk(root_rows, *args, **kwargs):
+        result = original(root_rows, *args, **kwargs)
+        references.append(int(result[1][0, 0]))
+        return result
+
+    loader._walk_main_branches = recording_walk
+    _, alphas = loader.get_halo_accretion_rate_from_tree(EARLY_REDSHIFT_INDEX)
+
+    assert references[0] == REFERENCE_SNAPSHOT, "the nearest reference must be tried first"
+    np.testing.assert_allclose(alphas, TRUE_ALPHAS, rtol=1e-10)
+    # Everything was covered by the first reference, so the loop stopped there.
+    assert references == [REFERENCE_SNAPSHOT]
+
+
+def test_later_references_fill_halos_the_nearest_one_misses():
+    """A halo whose branch is too short at the nearest reference is picked up later.
+
+    Halo 0's link out of snapshot 2 is cut, one snapshot *below* the painted one. The
+    reference at snapshot 4 then sees only a three-snapshot branch (4, 3, 2) and cannot
+    fit it, while the reference at snapshot 6 spans 6..2 -- a full window that still
+    passes through the painted snapshot 3 -- so the fill loop must recover it.
+    """
+    loader = SyntheticTreeLoader(make_parameters(), terminate=(0, 2))
+    references = []
+    original = loader._walk_main_branches
+
+    def recording_walk(root_rows, *args, **kwargs):
+        result = original(root_rows, *args, **kwargs)
+        references.append(int(result[1][0, 0]))
+        return result
+
+    loader._walk_main_branches = recording_walk
+    _, alphas = loader.get_halo_accretion_rate_from_tree(EARLY_REDSHIFT_INDEX)
+
+    assert references[0] == REFERENCE_SNAPSHOT
+    assert len(references) > 1, "the loop must go on to later references"
+    np.testing.assert_allclose(alphas, TRUE_ALPHAS, rtol=1e-10)
+
+
+def test_inherited_alphas_are_not_recomputed_per_call():
+    loader = SyntheticTreeLoader(make_parameters())
+    walks = []
+    original = loader._walk_main_branches
+
+    def counting_walk(*args, **kwargs):
+        walks.append(args[0])
+        return original(*args, **kwargs)
+
+    loader._walk_main_branches = counting_walk
+    loader.get_halo_accretion_rate_from_tree(EARLY_REDSHIFT_INDEX)
+    n_first = len(walks)
+    loader.get_halo_accretion_rate_from_tree(EARLY_REDSHIFT_INDEX)
+
+    assert n_first >= 1
+    assert len(walks) == n_first, "the second call must reuse the cached alphas"
+
+
+# ---------------------------------------------------------------------------
 # Backward compatibility of the new properties
 # ---------------------------------------------------------------------------
 
