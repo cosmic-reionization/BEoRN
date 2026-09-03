@@ -18,10 +18,10 @@ class HaloCatalog:
     """
 
     positions: np.ndarray
-    """Halo positions in 3D space (X, Y, Z coordinates) in units of cMpc => shape=(N, 3)"""
+    """Halo positions in 3D space (X, Y, Z coordinates) in units of cMpc/h => shape=(N, 3)"""
 
     masses: np.ndarray
-    """Halo masses in units of Msun => shape=(N,)"""
+    """Halo masses in units of Msun/h => shape=(N,)"""
 
     parameters: Parameters
     """The parameters of the simulation, which are used to filter the halo catalog."""

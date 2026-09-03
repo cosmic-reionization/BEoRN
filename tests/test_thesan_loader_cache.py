@@ -6,7 +6,9 @@ sys.modules.setdefault("MAS_library", types.SimpleNamespace(MASL=None))
 
 from pathlib import Path
 
+import h5py
 import numpy as np
+import pytest
 
 from beorn.load_input_data.cosmo_sim_thesan import ThesanLoader, SubboxConfig
 from beorn.structs.parameters import Parameters
@@ -50,11 +52,49 @@ def test_density_cache_path_keyed_by_subbox(tmp_path):
     subbox = make_loader(
         cache_dir=tmp_path,
         subbox=SubboxConfig(
-            origin=np.zeros(3), size=47.75, buffer=10.0, lbox_full=95.5,
+            origin=np.zeros(3), size=32.0, buffer=10.0, lbox_full=64.6917,
         ),
     )
     assert subbox._density_cache_path(0) != full_box._density_cache_path(0)
     assert "subbox" in subbox._density_cache_path(0).name
+
+
+def _make_catalog_chunk(tmp_path, box_ckpc_h):
+    """Write a minimal group-catalog chunk with Header/BoxSize and return its dir."""
+    cat_dir = tmp_path / "groups_060"
+    cat_dir.mkdir()
+    with h5py.File(cat_dir / "fof_subhalo_tab_060.0.hdf5", "w") as f:
+        f.create_group("Header").attrs["BoxSize"] = float(box_ckpc_h)
+    return cat_dir
+
+
+def _guard_loader(tmp_path, box_ckpc_h, lbox, subbox=None):
+    loader = ThesanLoader.__new__(ThesanLoader)
+    loader.parameters = Parameters()
+    loader.parameters.simulation.Lbox = lbox
+    loader.subbox = subbox
+    loader._catalog_directories = [_make_catalog_chunk(tmp_path, box_ckpc_h)]
+    loader.logger = types.SimpleNamespace(info=lambda *a, **k: None)
+    return loader
+
+
+def test_box_guard_passes_on_matching_lbox(tmp_path):
+    # 64691.7 ckpc/h -> 64.6917 cMpc/h matches Lbox: no raise.
+    _guard_loader(tmp_path, box_ckpc_h=64691.7, lbox=64.6917)._verify_box_size()
+
+
+def test_box_guard_raises_on_mismatched_lbox(tmp_path):
+    # The historical bug: Lbox left at the cMpc value 95.5 must be rejected.
+    loader = _guard_loader(tmp_path, box_ckpc_h=64691.7, lbox=95.5)
+    with pytest.raises(ValueError, match="BoxSize"):
+        loader._verify_box_size()
+
+
+def test_box_guard_uses_subbox_full_box(tmp_path):
+    # In subbox mode the guard compares against subbox.lbox_full, not Lbox (=lbox_eff).
+    subbox = SubboxConfig(origin=np.zeros(3), size=32.0, buffer=10.0, lbox_full=64.6917)
+    loader = _guard_loader(tmp_path, box_ckpc_h=64691.7, lbox=52.0, subbox=subbox)
+    loader._verify_box_size()  # matches lbox_full=64.6917 -> no raise
 
 
 def test_load_density_field_returns_cached_mesh_without_reading_particles(tmp_path):

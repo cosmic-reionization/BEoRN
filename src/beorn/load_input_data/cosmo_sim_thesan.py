@@ -315,6 +315,41 @@ class ThesanLoader(MergerTreeLoader):
             with h5py.File(first_snap, "r") as f:
                 self.thesan_h = f["Header"].attrs["HubbleParam"]
 
+        # Box-size sanity guard (fix_plan_2026-09-03 finding 1): the check that
+        # would have caught the box-unit bug.
+        self._verify_box_size()
+
+    def _verify_box_size(self) -> None:
+        """Raise if Header/BoxSize disagrees with the configured full box.
+
+        THESAN group catalogs store ``Header/BoxSize`` in ckpc/h; converted to
+        cMpc/h it must match the full box BEoRN paints into
+        (``subbox.lbox_full`` in subbox mode, else ``parameters.simulation.Lbox``).
+        The old code divided positions/masses by h and set ``Lbox`` to the cMpc
+        value 95.5 instead of the cMpc/h value 64.6917; this guard catches that.
+        """
+        expected_full_box = (
+            self.subbox.lbox_full if self.subbox is not None
+            else self.parameters.simulation.Lbox
+        )
+        try:
+            first_cat = next(self._catalog_directories[0].rglob("*.hdf5"))
+        except (StopIteration, AttributeError):
+            self.logger.info(
+                "No group-catalog chunk available to verify BoxSize; skipping box guard."
+            )
+            return
+        with h5py.File(first_cat, "r") as f:
+            box_ckpc_h = float(f["Header"].attrs["BoxSize"])
+        box_cmpc_h = box_ckpc_h / 1e3
+        if abs(box_cmpc_h - expected_full_box) > 1e-3:
+            raise ValueError(
+                f"THESAN Header/BoxSize = {box_ckpc_h} ckpc/h = {box_cmpc_h:.6g} cMpc/h "
+                f"disagrees with the configured full box {expected_full_box} "
+                f"(parameters.simulation.Lbox or subbox.lbox_full). "
+                "Set Lbox to the header value in cMpc/h (BoxSize / 1e3)."
+            )
+
     # ── BaseLoader interface ───────────────────────────────────────────────
 
     @property
@@ -471,9 +506,12 @@ class ThesanLoader(MergerTreeLoader):
         masses               = masses[:g_ptr]
         subhalo_to_group_map = subhalo_to_group_map[:s_ptr]
 
-        # Unit conversions: kpc/h → Mpc/h, 10^10 M☉/h → M☉
-        positions /= (1e3 * self.thesan_h)   # kpc/h → Mpc/h
-        masses    *= 1e10 / self.thesan_h    # 10^10 M☉/h → M☉
+        # Unit conversions: ckpc/h → cMpc/h, 10^10 M☉/h → M☉/h.
+        # BEoRN works in comoving Mpc/h and Msun/h throughout, so keep the little-h
+        # in both — GroupPos is ckpc/h and GroupMass is 10^10 Msun/h (do NOT divide
+        # out thesan_h). See fix_plan_2026-09-03 findings 1 & 2.
+        positions *= 1e-3   # ckpc/h → cMpc/h
+        masses    *= 1e10   # 10^10 M☉/h → M☉/h
 
         if self.subbox is not None:
             # Keep only groups whose centre falls inside the buffered subbox and
@@ -594,7 +632,7 @@ class ThesanLoader(MergerTreeLoader):
             for snap in snapshots:
                 with h5py.File(snap, "r") as f:
                     pos = f["PartType1"]["Coordinates"][:].astype(np.float32)
-                pos *= 1e-3 / self.thesan_h              # kpc/h → Mpc/h, in-place
+                pos *= 1e-3                               # ckpc/h → cMpc/h, in-place
                 # Build mask axis-by-axis; free each column temp immediately.
                 inside = np.ones(pos.shape[0], dtype=bool)
                 for i in range(3):
@@ -616,7 +654,7 @@ class ThesanLoader(MergerTreeLoader):
             for snap in snapshots:
                 with h5py.File(snap, "r") as f:
                     pos = f["PartType1"]["Coordinates"][:].astype(np.float32)
-                pos *= 1e-3 / self.thesan_h              # kpc/h → Mpc/h, in-place
+                pos *= 1e-3                               # ckpc/h → cMpc/h, in-place
                 map_particles_to_mesh(
                     mesh, physical_size, pos,
                     mass_assignment=mass_assignment, backend=backend,
@@ -675,7 +713,7 @@ class ThesanLoader(MergerTreeLoader):
                 with h5py.File(snap, "r") as f:
                     pos = f["PartType1"]["Coordinates"][:].astype(np.float32)
                     vel = f["PartType1"]["Velocities"][:].astype(np.float32)
-                pos *= 1e-3 / self.thesan_h
+                pos *= 1e-3                               # ckpc/h → cMpc/h, in-place
                 vel *= vel_scale                          # peculiar km/s, in-place
                 inside = np.ones(pos.shape[0], dtype=bool)
                 for i in range(3):
@@ -697,7 +735,7 @@ class ThesanLoader(MergerTreeLoader):
                 with h5py.File(snap, "r") as f:
                     pos = f["PartType1"]["Coordinates"][:].astype(np.float32)
                     vel = f["PartType1"]["Velocities"][:].astype(np.float32)
-                pos *= 1e-3 / self.thesan_h
+                pos *= 1e-3                               # ckpc/h → cMpc/h, in-place
                 vel *= vel_scale
                 map_particles_to_mesh(mesh_x, Lbox, pos, mass_assignment=mass_assignment, backend=backend, weights=vel[:, 0])
                 map_particles_to_mesh(mesh_y, Lbox, pos, mass_assignment=mass_assignment, backend=backend, weights=vel[:, 1])
