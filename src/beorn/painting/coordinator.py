@@ -101,15 +101,18 @@ def _fft_worker_count(use_gpu: bool, cores: int) -> int:
 def _checked_kernel_mean(kernel: np.ndarray) -> float:
     """Mean of a painting kernel, guarded for the renorm denominator (finding 7).
 
-    ``renorm`` divides by ``mean(kernel)``; a non-finite or non-positive mean (from
-    a NaN/Inf in the underlying profile) would otherwise inject Inf/NaN into the
-    Fourier accumulator. Fail loudly instead.
+    ``renorm`` divides by ``mean(kernel)``. A **non-finite** mean signals NaN/Inf in
+    the underlying profile -- real corruption -- so raise. A finite but non-positive
+    mean, by contrast, occurs legitimately for a near-zero / mixed-sign profile (e.g.
+    the X-ray temperature profile at high z, where net heating ~ 0): the kernel and
+    its convolution contribution are both negligible there, so the caller skips that
+    term instead of dividing by ~0. This function returns the mean (possibly <= 0);
+    the caller checks ``> 0`` before using it.
     """
     kmean = float(np.mean(kernel))
-    if not np.isfinite(kmean) or kmean <= 0:
+    if not np.isfinite(kmean):
         raise FloatingPointError(
-            f"kernel mean is {kmean} (non-finite or <= 0); cannot renormalise the "
-            "painted profile -- the source profile likely contains NaN/Inf."
+            f"kernel mean is {kmean} (non-finite); the source profile contains NaN/Inf."
         )
     return kmean
 
@@ -1299,13 +1302,14 @@ class PaintingCoordinator:
             x_HII_profile[radial_grid < R_bubble / (1 + z)] = 1
             profile_fn = interp1d(radial_grid * (1 + z), x_HII_profile, bounds_error=False, fill_value=(1, 0))
             kernel = profile_to_3Dkernel(profile_fn, nGrid, LBox)
-            if np.any(kernel > 0):
+            kmean = _checked_kernel_mean(kernel) if np.any(kernel > 0) else 0.0
+            if np.any(kernel > 0) and kmean > 0:
                 renorm = (
                     _trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
-                    / (LBox / (1 + z)) ** 3 / _checked_kernel_mean(kernel)
+                    / (LBox / (1 + z)) ** 3 / kmean
                 )
                 fa_xHII = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
-            else:
+            elif not np.any(kernel > 0):
                 # Bubble smaller than a cell — represent direct halo weighting in Fourier space.
                 scale = (
                     _trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
@@ -1322,10 +1326,10 @@ class PaintingCoordinator:
                 r_lyal * (1 + z), x_alpha_prof, LBox, nGrid,
                 nGrid_min=self.parameters.simulation.minimum_grid_size_lyal,
             )
-            if np.any(kernel > 0):
+            if np.any(kernel > 0) and (kmean := _checked_kernel_mean(kernel)) > 0:
                 renorm = (
                     _trapz(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal)
-                    / (LBox / (1 + z)) ** 3 / _checked_kernel_mean(kernel)
+                    / (LBox / (1 + z)) ** 3 / kmean
                 )
                 fa_lyal = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
 
@@ -1337,10 +1341,10 @@ class PaintingCoordinator:
                 radial_grid * (1 + z), Temp_profile, LBox, nGrid,
                 nGrid_min=self.parameters.simulation.minimum_grid_size_heat,
             )
-            if np.any(kernel > 0):
+            if np.any(kernel > 0) and (kmean := _checked_kernel_mean(kernel)) > 0:
                 renorm = (
                     _trapz(Temp_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
-                    / (LBox / (1 + z)) ** 3 / _checked_kernel_mean(kernel)
+                    / (LBox / (1 + z)) ** 3 / kmean
                 )
                 fa_temp = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
 

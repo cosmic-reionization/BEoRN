@@ -93,9 +93,14 @@ def test_profile_to_3d_kernel_all_finite():
 def test_profile_to_3d_kernel_symmetric():
     N = 16
     kern = profile_to_3Dkernel(lambda r: np.exp(-r), nGrid=N, LB=4.0)
-    # Symmetric about center: corner values should be equal
-    assert kern[0, 0, 0] == pytest.approx(kern[-1, -1, -1], rel=1e-10)
-    assert kern[0, 0, 0] == pytest.approx(kern[-1, 0, 0], rel=1e-10)
+    # r=0 sits on index N//2 (so ifftshift moves it to index 0); the kernel is
+    # centro-symmetric about that centre, not about the corners. The outermost
+    # -N/2 Nyquist cell has no +N/2 mirror on an even grid, so compare inner offsets.
+    c = N // 2
+    assert np.unravel_index(np.argmax(kern), kern.shape) == (c, c, c)
+    for o in range(1, c):
+        assert kern[c + o, c, c] == pytest.approx(kern[c - o, c, c], rel=1e-10)
+        assert kern[c, c + o, c] == pytest.approx(kern[c, c - o, c], rel=1e-10)
 
 
 def test_profile_to_3d_kernel_nonfinite_raises():

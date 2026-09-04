@@ -220,7 +220,12 @@ def profile_to_3Dkernel(profile: callable, nGrid: int, LB: float) -> np.ndarray:
     Returns:
         numpy.ndarray: 3D kernel of shape ``(nGrid, nGrid, nGrid)`` with the profile centered.
     """
-    x = np.linspace(-LB / 2, LB / 2, nGrid)
+    # r=0 must land exactly on index nGrid//2 with spacing LB/nGrid, so that the
+    # ifftshift applied before the forward FFT (fourier_multiply_kernel / precompute_fft)
+    # moves the profile centre to index 0. The old linspace(-LB/2, LB/2, nGrid) put r=0
+    # between cells (spacing LB/(nGrid-1)), mis-registering the profile by ~half a cell
+    # (finding 3).
+    x = (np.arange(nGrid) - nGrid // 2) * (LB / nGrid)
     # y, z will be the same.
     rx, ry, rz = np.meshgrid(x, x, x, sparse=True)
     rgrid = np.sqrt(rx ** 2 + ry ** 2 + rz ** 2)
@@ -228,6 +233,26 @@ def profile_to_3Dkernel(profile: callable, nGrid: int, LB: float) -> np.ndarray:
     assert np.all(np.isfinite(kern)), "Profile function returned non-finite values."
     return kern
 
+
+
+def _resample_centered(coarse: np.ndarray, nGrid: int) -> np.ndarray:
+    """Resample a centred coarse 3D kernel onto the fine ``nGrid**3`` grid (finding 3).
+
+    The coarse far-field kernel and the fine kernel span the same box with r=0 on
+    index ``N // 2``, so each fine cell centre is mapped to the nearest coarse cell
+    centre by physical coordinate, then gathered as a proper 3D block via ``np.ix_``.
+
+    This replaces the old ``coarse[incr_rez, incr_rez, incr_rez]`` indexing, which
+    (a) floored fine->coarse indices without registering the two grid centres and
+    (b) collapsed to the coarse kernel's 1D diagonal, then broadcast that strip over
+    the last axis of the fine kernel -- so the far-field tail was neither centred nor
+    3D.
+    """
+    nGrid_min = coarse.shape[0]
+    fine_idx = np.arange(nGrid)
+    m = np.rint((fine_idx - nGrid // 2) * (nGrid_min / nGrid)).astype(int) + nGrid_min // 2
+    m = np.clip(m, 0, nGrid_min - 1)
+    return coarse[np.ix_(m, m, m)]
 
 
 def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
@@ -273,9 +298,9 @@ def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
     ## remove the central box, to then add it later with full nGrid resolution
     stacked_xal_ker = stacked_xal_ker - kernel_xal_HM[pix_lft:pix_rgth, pix_lft:pix_rgth, pix_lft:pix_rgth]
 
-    incr_rez = np.asarray(np.arange(0, nGrid) * nGrid_min / nGrid, int)  ## indices to then add
-
-    kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, nGrid, LBox) + stacked_xal_ker[incr_rez, incr_rez, incr_rez]
+    # Register the coarse far-field tail to the fine grid by coordinate (finding 3),
+    # instead of the old nearest-index diagonal broadcast.
+    kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, nGrid, LBox) + _resample_centered(stacked_xal_ker, nGrid)
 
     return kernel_xal_HM
 
@@ -326,8 +351,8 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
     ## remove the central box, to then add it later with full nGrid resolution
     stacked_T_ker = stacked_T_ker - kernel_T_HM[pix_lft:pix_rgth, pix_lft:pix_rgth, pix_lft:pix_rgth]
 
-    incr_rez = np.asarray(np.arange(0, nGrid) * nGrid_min / nGrid, int)  ## indices to then add
-
-    kernel_T_HM = profile_to_3Dkernel(profile_T_HM, nGrid, LBox) + stacked_T_ker[incr_rez, incr_rez, incr_rez]
+    # Register the coarse far-field tail to the fine grid by coordinate (finding 3),
+    # instead of the old nearest-index diagonal broadcast.
+    kernel_T_HM = profile_to_3Dkernel(profile_T_HM, nGrid, LBox) + _resample_centered(stacked_T_ker, nGrid)
 
     return kernel_T_HM
