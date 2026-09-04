@@ -58,13 +58,20 @@ class SyntheticTreeLoader(MergerTreeLoader):
 
     Args:
         parameters (Parameters): BEoRN parameter container.
-        terminate: optional ``(halo, snapshot)`` -- that halo's branch has no
-            progenitor below ``snapshot``, cutting its history short.
+        terminate: optional ``(halo, snapshot)`` tuple, or a list of them -- each cuts
+            that halo's progenitor link *at* ``snapshot`` (so its branch ends going
+            backward there). Two cuts can make a halo both short-branch and
+            descendant-less at a fit snapshot.
     """
 
     def __init__(self, parameters, terminate=None):
         super().__init__(parameters)
-        self.terminate = terminate
+        if terminate is None:
+            self._terminations = []
+        elif isinstance(terminate, tuple):
+            self._terminations = [terminate]
+        else:
+            self._terminations = list(terminate)
 
     @property
     def redshifts(self):
@@ -88,8 +95,7 @@ class SyntheticTreeLoader(MergerTreeLoader):
         for snapshot in range(1, N_SNAPSHOTS):
             for halo in range(N_HALOS):
                 main_progenitor[entry_index(snapshot, halo)] = entry_index(snapshot - 1, halo)
-        if self.terminate is not None:
-            halo, snapshot = self.terminate
+        for halo, snapshot in self._terminations:
             main_progenitor[entry_index(snapshot, halo)] = -1
 
         is_central = np.ones(n, dtype=bool)
@@ -161,20 +167,24 @@ def test_a_uniform_grid_would_not_have_caught_the_shift():
 # Defect C: a terminated branch must not splice in the last cache entry
 # ---------------------------------------------------------------------------
 
-def test_short_branch_returns_nan_instead_of_wrapping_to_the_last_entry():
+def test_short_branch_at_fit_snapshot_inherits_from_descendant():
+    # Finding 4: a short branch at a NON-early snapshot no longer falls straight to the
+    # fallback -- it inherits the alpha of the descendant branch it goes on to follow.
     redshift_index = 7
     raw_snapshot = FIRST_EXPOSED_SNAPSHOT + redshift_index
-    # Halo 0 loses its progenitor two steps into a five-snapshot window.
+    # Halo 0 loses its progenitor two steps into the five-snapshot window (short branch),
+    # but survives forward, so a descendant at a later reference snapshot covers it.
     loader = SyntheticTreeLoader(make_parameters(), terminate=(0, raw_snapshot - 2))
 
     _, alphas = loader.get_halo_accretion_rate_from_tree(redshift_index)
 
-    assert np.isnan(alphas[0]), "a branch shorter than the lookback must not be fitted"
-    # Every other halo is untouched.
+    # Not NaN, not a wrapped last-cache entry, not the fallback: its own descendant's
+    # fitted alpha, which the exponential fixture recovers exactly.
+    np.testing.assert_allclose(alphas[0], TRUE_ALPHAS[0], rtol=1e-10)
     np.testing.assert_allclose(alphas[1:], TRUE_ALPHAS[1:], rtol=1e-10)
 
 
-def test_short_branch_halo_receives_the_fallback_alpha():
+def test_short_branch_at_fit_snapshot_reaches_the_painted_catalog():
     redshift_index = 7
     raw_snapshot = FIRST_EXPOSED_SNAPSHOT + redshift_index
     loader = SyntheticTreeLoader(make_parameters(), terminate=(0, raw_snapshot - 2))
@@ -182,10 +192,45 @@ def test_short_branch_halo_receives_the_fallback_alpha():
     catalog = loader.load_halo_catalog(redshift_index)
 
     assert np.all(np.isfinite(catalog.alphas)), "NaN must not reach the painted catalog"
-    # alpha_fallback='mean' over the well-fitted halos only -- a NaN in that mean would
-    # propagate to every halo.
+    # Inherited (0.30), not the population fallback mean 0.55: scatter is preserved.
+    np.testing.assert_allclose(catalog.alphas, TRUE_ALPHAS, rtol=1e-10)
+
+
+def test_short_branch_without_a_descendant_still_gets_the_fallback():
+    # When a short-branch halo has no surviving descendant either, it correctly falls
+    # through to alpha_fallback (inheritance is best-effort, finding 4).
+    redshift_index = 7
+    raw_snapshot = FIRST_EXPOSED_SNAPSHOT + redshift_index
+    # Cut halo 0 twice: backward at raw_snapshot-2 (short branch) AND forward at
+    # raw_snapshot+1 (its snap raw_snapshot+1 root no longer links back to raw_snapshot,
+    # so no reference branch covers it).
+    loader = SyntheticTreeLoader(
+        make_parameters(),
+        terminate=[(0, raw_snapshot - 2), (0, raw_snapshot + 1)],
+    )
+
+    _, alphas = loader.get_halo_accretion_rate_from_tree(redshift_index)
+    assert np.isnan(alphas[0]), "no descendant to inherit from must stay NaN"
+
+    catalog = loader.load_halo_catalog(redshift_index)
     np.testing.assert_allclose(catalog.alphas[0], TRUE_ALPHAS[1:].mean(), rtol=1e-10)
     np.testing.assert_allclose(catalog.alphas[1:], TRUE_ALPHAS[1:], rtol=1e-10)
+
+
+def test_no_alpha_discontinuity_across_the_early_fit_boundary():
+    # Finding 4's headline: the alpha assignment must not jump as the fit window opens.
+    # The early/fit boundary is snap_now = LOOKBACK - 1; check the two snapshots straddling
+    # it give the same (fixture-exact) per-halo alphas and hence the same scatter.
+    loader = SyntheticTreeLoader(make_parameters())
+    # raw snapshot LOOKBACK-1 is the last early one; LOOKBACK is the first fit one.
+    ri_early = (LOOKBACK - 1) - FIRST_EXPOSED_SNAPSHOT
+    ri_fit = LOOKBACK - FIRST_EXPOSED_SNAPSHOT
+    _, a_early = loader.get_halo_accretion_rate_from_tree(ri_early)
+    _, a_fit = loader.get_halo_accretion_rate_from_tree(ri_fit)
+    np.testing.assert_allclose(a_early, TRUE_ALPHAS, rtol=1e-10)
+    np.testing.assert_allclose(a_fit, TRUE_ALPHAS, rtol=1e-10)
+    # No collapse of scatter on either side of the boundary.
+    assert np.std(a_early) > 0 and np.std(a_fit) > 0
 
 
 # ---------------------------------------------------------------------------

@@ -78,7 +78,7 @@ class MergerTreeLoader(BaseLoader):
         # get_halo_accretion_rate_from_tree, consumed by load_halo_catalog.
         self._tree_cache_is_central_filtered = False
         # Alphas inherited by each early snapshot, keyed by raw snapshot number, so a
-        # repeated load does not redo the walks.  See _inherit_alphas_for_early_snapshot.
+        # repeated load does not redo the walks.  See _inherit_alphas_from_descendants.
         self._inherited_alpha_cache = {}
 
     # ── Abstract interface ─────────────────────────────────────────────────
@@ -341,13 +341,12 @@ class MergerTreeLoader(BaseLoader):
         steps through consecutive snapshots whether or not the loader exposes
         them, so the window — and hence the fitted alpha — does not change when
         the loader's snapshot list is filtered.  Halos whose branch ends before
-        the window is full are returned as ``NaN`` and picked up by
-        :meth:`fallback_alpha` in :meth:`load_halo_catalog`.
-
-        The earliest snapshots of a simulation have no full window at all
-        (``snap_now + 1 < lookback``); those inherit their alpha from a descendant at
-        the nearest later snapshot that does, via
-        :meth:`_inherit_alphas_for_early_snapshot`.
+        the window is full first inherit their alpha from a descendant branch (via
+        :meth:`_inherit_alphas_from_descendants`), and only halos with no surviving
+        descendant fall through to :meth:`fallback_alpha` in :meth:`load_halo_catalog`.
+        This applies at every snapshot -- including the earliest, where no branch has a
+        full window at all (``snap_now + 1 < lookback``) so every alpha is inherited
+        (finding 4).
 
         Args:
             redshift_index (int): Index into :attr:`redshifts`.
@@ -381,12 +380,38 @@ class MergerTreeLoader(BaseLoader):
         current_halo_ids = tree_halo_ids[current_mask]
         n_halos = int(current_mask.sum())
 
+        # 1. Fit alpha for branches at snap_now that fill the lookback window. An early
+        #    snapshot (snap_now + 1 < lookback) cannot fill it -- the fit would be all-NaN
+        #    -- so skip the walk there and seed all-NaN; step 2 supplies every alpha by
+        #    inheritance (and its per-snapshot cache is then the only work on repeat calls).
         if snap_now + 1 < lookback:
-            # Not enough snapshots exist yet for any branch to fill the window, so the
-            # alpha is borrowed from a descendant at a later snapshot whose branches do.
-            return current_halo_ids, self._inherit_alphas_for_early_snapshot(
+            halo_alphas = np.full(n_halos, np.nan, dtype=np.float64)
+        else:
+            mass_history, snap_history, _ = self._walk_main_branches(
+                np.flatnonzero(current_mask),
+                lookback,
+                tree_halo_ids,
+                tree_snap_num,
+                tree_mass,
+                tree_main_progenitor,
+            )
+            halo_alphas = self._fit_branch_alphas(
+                mass_history, snap_history, lookback, snapshot_redshifts
+            )
+
+        # 2. Short branches (NaN) inherit the alpha of the descendant branch they go on
+        #    to follow -- at EVERY snapshot (fix_plan_2026-09-03 finding 4), not only the
+        #    early ones. This removes the discontinuity where, at snap_now = lookback - 1,
+        #    short branches switched abruptly from descendant inheritance to the single
+        #    alpha_fallback constant (which collapsed the high-z alpha scatter: at z~14,
+        #    ~98% of halos are short-branch). Halos with no surviving descendant keep NaN
+        #    and fall through to alpha_fallback in load_halo_catalog.
+        short = ~np.isfinite(halo_alphas)
+        if short.any():
+            halo_alphas = self._inherit_alphas_from_descendants(
                 snap_now,
                 current_halo_ids,
+                halo_alphas,
                 lookback,
                 tree_halo_ids,
                 tree_snap_num,
@@ -395,23 +420,10 @@ class MergerTreeLoader(BaseLoader):
                 tree_is_central,
             )
 
-        mass_history, snap_history, _ = self._walk_main_branches(
-            np.flatnonzero(current_mask),
-            lookback,
-            tree_halo_ids,
-            tree_snap_num,
-            tree_mass,
-            tree_main_progenitor,
-        )
-        halo_alphas = self._fit_branch_alphas(
-            mass_history, snap_history, lookback, snapshot_redshifts
-        )
-
         n_short = int(np.isnan(halo_alphas).sum())
         logger.debug(
-            f"Alpha fit at snapshot {snap_now}: {n_halos} halos, {n_short} with a branch "
-            f"shorter than {lookback} snapshots (-> fallback), "
-            f"{int(np.isinf(halo_alphas).sum())} Inf values"
+            f"Alpha at snapshot {snap_now}: {n_halos} halos, {n_short} still NaN after "
+            f"fit+inherit (-> alpha_fallback), {int(np.isinf(halo_alphas).sum())} Inf values"
         )
         return current_halo_ids, halo_alphas
 
@@ -516,10 +528,11 @@ class MergerTreeLoader(BaseLoader):
 
         return halo_alphas
 
-    def _inherit_alphas_for_early_snapshot(
+    def _inherit_alphas_from_descendants(
         self,
         snap_now: int,
         current_halo_ids: np.ndarray,
+        seed_alphas: np.ndarray,
         lookback: int,
         tree_halo_ids: np.ndarray,
         tree_snap_num: np.ndarray,
@@ -527,26 +540,26 @@ class MergerTreeLoader(BaseLoader):
         tree_main_progenitor: np.ndarray,
         tree_is_central: "np.ndarray | None",
     ) -> np.ndarray:
-        """Inherit alpha from the nearest later snapshot whose window covers this one.
+        """Fill short-branch (NaN) alphas from the descendant branch each halo follows.
 
-        For the first ``lookback - 1`` snapshots of a simulation no branch is long
-        enough to fit.  Rather than paint them all at one arbitrary constant, each halo
-        takes the alpha fitted for its *descendant*: a reference snapshot is walked, and
-        every branch passing through ``snap_now`` hands its alpha to the halo it
-        occupies there.
+        ``seed_alphas`` holds the per-halo fit for ``snap_now``: finite where the branch
+        filled the lookback window, NaN where it was too short. This method leaves the
+        finite entries untouched and supplies each NaN entry with the alpha fitted for a
+        *descendant* -- a later reference snapshot is walked, and every branch passing
+        through ``snap_now`` hands its alpha to the halo it occupies there. Applied at
+        every snapshot (finding 4): for early snapshots the seed is all-NaN and this
+        supplies every alpha; for later ones it fills only the recently-formed halos that
+        the fit left NaN.
 
-        Any reference in ``[lookback - 1, snap_now + lookback - 1]`` has a full window
-        reaching ``snap_now``, and they trade locality against coverage:
-
-        - ``lookback - 1`` is the closest in time and its window straddles ``snap_now``,
-          but a full window there demands survival all the way back to snapshot 0, which
-          only the oldest handful of branches manage (THESAN-1: 4,248 of 312,492 roots,
-          so 1.7% of the halos at snapshot 8);
-        - ``snap_now + lookback - 1`` sits at a far richer epoch and covers ~74% of the
-          same halos, but its window lies entirely after ``snap_now``.
-
-        So references are tried in order, nearest first, and each one only fills halos
-        still uncovered: every halo gets the most local window available *to it*.
+        The reference range is ``[max(snap_now + 1, lookback - 1), snap_now + lookback - 1]``:
+        every such reference has a full window reaching ``snap_now``. For a general (non-
+        early) snapshot that is ``[snap_now + 1, snap_now + lookback - 1]`` -- strictly
+        later descendants. For an early snapshot it clamps to ``lookback - 1`` (the
+        earliest snapshot that can fill a window at all), reproducing the original
+        early-snapshot behaviour. References trade locality against coverage (a nearer one
+        is more local but demands longer survival), so they are tried nearest-first and
+        each only fills halos still uncovered: every halo gets the most local window
+        available *to it*.
         Halos left over — no surviving descendant on any of these branches — keep ``NaN``
         and fall through to :meth:`fallback_alpha` in :meth:`load_halo_catalog`.
 
@@ -570,7 +583,10 @@ class MergerTreeLoader(BaseLoader):
         if cached is not None and cached.size == n_halos:
             return cached.copy()
 
-        inherited = np.full(n_halos, np.nan, dtype=np.float64)
+        # Seed with the fit: finite entries (long branches) are kept as-is; only the NaN
+        # (short-branch) entries are candidates for descendant inheritance below.
+        inherited = np.array(seed_alphas, dtype=np.float64, copy=True)
+        n_seed_finite = int(np.isfinite(inherited).sum())
         if n_halos == 0:
             self._inherited_alpha_cache[snap_now] = inherited
             return inherited.copy()
@@ -581,7 +597,8 @@ class MergerTreeLoader(BaseLoader):
         sorted_ids = current_halo_ids[order]
         contributions = {}
 
-        for reference in range(lookback - 1, min(snap_now + lookback, last_snapshot + 1)):
+        reference_start = max(snap_now + 1, lookback - 1)
+        for reference in range(reference_start, min(snap_now + lookback, last_snapshot + 1)):
             missing = ~np.isfinite(inherited)
             if not missing.any():
                 break
@@ -635,15 +652,18 @@ class MergerTreeLoader(BaseLoader):
             # A nearer reference has already given these halos a more local window.
             fresh = missing[targets]
             inherited[targets[fresh]] = progenitor_alphas[found][fresh]
-            n_new = int(np.isfinite(inherited).sum()) - sum(contributions.values())
+            # Count only entries filled by inheritance, excluding the seeded fit baseline.
+            n_new = int(np.isfinite(inherited).sum()) - n_seed_finite - sum(contributions.values())
             if n_new:
                 contributions[reference] = n_new
 
-        n_inherited = int(np.isfinite(inherited).sum())
+        n_inherited = int(np.isfinite(inherited).sum()) - n_seed_finite
+        n_short = n_halos - n_seed_finite
+        n_fallback = n_halos - int(np.isfinite(inherited).sum())
         logger.info(
-            f"Snapshot {snap_now} has only {snap_now + 1} snapshots behind it "
-            f"(lookback {lookback}): {n_inherited} of {n_halos} halos inherited alpha "
-            f"from a descendant, {n_halos - n_inherited} left to source.alpha_fallback. "
+            f"Snapshot {snap_now} (lookback {lookback}): {n_seed_finite}/{n_halos} halos "
+            f"fitted directly, {n_short} short-branch of which {n_inherited} inherited alpha "
+            f"from a descendant and {n_fallback} left to source.alpha_fallback. "
             f"Per reference snapshot (nearest first): {contributions}"
         )
         self._inherited_alpha_cache[snap_now] = inherited
