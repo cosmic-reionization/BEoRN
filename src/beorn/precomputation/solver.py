@@ -513,12 +513,16 @@ class RadiationProfileSolver:
             numpy.ndarray: Temperature profiles with the same mass/alpha/z
             axes as the inputs.
         """
-        # add the decoupling redshift as "initial condition"
-        z0 = self.parameters.solver.z_decoupling
-        zz = np.insert(self.z_bins, 0, z0)
-
-        # prepend 0 to the rho_xray array to account for the additional z bin
-        rho_xray = np.concatenate((np.zeros_like(rho_xray[..., 0])[..., None], rho_xray), axis=-1)
+        # Start the heating integration at the first profile redshift with T = 0
+        # (fix_plan_2026-09-03 finding 8). Sources begin at z_source_start, and the
+        # profile grid now starts there (profile_redshifts extends it upward), so
+        # rho_xray is ~0 at the top edge. The old code seeded the ODE at
+        # z_decoupling (=135) and prepended rho_xray=0 there, which made the
+        # interpolation ramp X-ray heating linearly in a all the way down from z=135 --
+        # injecting spurious heat before any source existed. T=0 at z_source_start is
+        # the correct initial condition (X-ray heating is zero above it; the adiabatic
+        # temperature is handled separately by T_adiab_fluctu at paint time).
+        zz = self.z_bins
 
         # the shape of the xray profile at a given redshift is:
         # (rr, M_bin, alpha_bin)
@@ -549,13 +553,11 @@ class RadiationProfileSolver:
                 rtol, atol, result.message,
             )
         source_in_time = result.y
-        # don't keep the initial condition at the first time step (time is in the last axis)
-        # logger.debug(f"{source_in_time.shape=}")
-        rho_heat = source_in_time[..., 1:]
-
-        # currently rho_heat has the shape (rr * M_bin * alpha_bin, zz) because all dimensions are flattened (except redshift)
-        # we need to reshape it to (rr, M_bin, alpha_bin, zz)
-        rho_heat_full = rho_heat.reshape((*single_rho_xray_shape, -1))
+        # The ODE now integrates directly over the profile grid (no prepended
+        # z_decoupling initial-condition point to drop), so every z-slice is kept.
+        # rho_heat has shape (rr * M_bin * alpha_bin, zz) with all non-redshift axes
+        # flattened; reshape to (rr, M_bin, alpha_bin, zz).
+        rho_heat_full = source_in_time.reshape((*single_rho_xray_shape, -1))
 
         return rho_heat_full
 
