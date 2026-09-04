@@ -567,18 +567,27 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
         f_st_n = int(self.f_st_grid.size)
         return f"radiation_profiles_fstar_grid_fmin_{f_st_min:.6g}_fmax_{f_st_max:.6g}_n_{f_st_n}"
 
-    def get_or_compute_profiles(self, handler: Handler) -> "RadiationProfilesFStarGrid":
-        """Load f_st-grid profiles from cache or compute and save them if unavailable."""
-        try:
-            profiles = handler.load_file(
-                self.parameters,
-                RadiationProfilesFStarGrid,
-                cache_namespace=self.profile_cache_namespace(),
-            )
-            logger.info("Loaded f_st-grid radiation profiles from cache.")
-            return profiles
-        except FileNotFoundError:
-            logger.info("f_st-grid radiation profiles not found in cache. Launching a single computation process.")
+    def get_or_compute_profiles(self, handler: Handler, force_recompute: bool = False) -> "RadiationProfilesFStarGrid":
+        """Load f_st-grid profiles from cache or compute and save them if unavailable.
+
+        Args:
+            force_recompute: If ``True``, ignore any cached cube and recompute from
+                scratch (finding 6 -- otherwise ``--force-recompute-profiles`` is a
+                no-op on the single-rank path, which re-finds and returns the cache).
+        """
+        if not force_recompute:
+            try:
+                profiles = handler.load_file(
+                    self.parameters,
+                    RadiationProfilesFStarGrid,
+                    cache_namespace=self.profile_cache_namespace(),
+                )
+                logger.info("Loaded f_st-grid radiation profiles from cache.")
+                return profiles
+            except FileNotFoundError:
+                logger.info("f_st-grid radiation profiles not found in cache. Launching a single computation process.")
+        else:
+            logger.info("force_recompute=True — recomputing f_st-grid radiation profiles.")
 
         if MPI_ENABLED:
             comm = MPI.COMM_WORLD

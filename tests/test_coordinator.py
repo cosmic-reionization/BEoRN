@@ -620,7 +620,9 @@ def test_paint_cache_namespace_legacy_vs_fstar():
     legacy_ns = coordinator._paint_cache_namespace(legacy_profiles)
     fstar_ns = coordinator._paint_cache_namespace(fstar_profiles)
 
-    assert legacy_ns == "painted_output_legacy"
+    # The namespace now carries a trailing BEoRN code-version tag (finding 5) so a
+    # painting-code fix lands in a fresh namespace.
+    assert legacy_ns.startswith("painted_output_legacy")
     assert fstar_ns.startswith("painted_output_fstar_dist_lognormal_sigma_")
     assert "seed_808" in fstar_ns
 
@@ -682,7 +684,9 @@ def test_paint_single_legacy_cache_uses_legacy_namespace():
 
     result = coordinator.paint_single(0, profiles=legacy_profiles)
     assert isinstance(result, CachedCube)
-    assert calls["kwargs"]["cache_namespace"] == "painted_output_legacy"
+    assert calls["kwargs"]["cache_namespace"].startswith("painted_output_legacy")
+    # Painted cache is keyed by the raw snapshot number, not the loader z_index (finding 5).
+    assert "snapshot" in calls["kwargs"]
 
 
 def test_paint_single_fstar_cache_uses_fstar_namespace():

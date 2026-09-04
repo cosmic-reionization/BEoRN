@@ -473,12 +473,29 @@ class ThesanLoader(MergerTreeLoader):
             key=lambda p: int(p.stem.split(".")[1]),
         )
 
+        # Catalog-integrity checks (fix_plan_2026-09-03 finding 10): a truncated or
+        # misread group catalog otherwise silently produces too few halos.
+        if not snap_files:
+            raise FileNotFoundError(
+                f"THESAN group-catalog directory {catalog_dir} contains no .hdf5 chunks "
+                f"(snapshot index {redshift_index})."
+            )
+        with h5py.File(snap_files[0], "r") as f:
+            num_files_header = int(f["Header"].attrs["NumFiles"])
+            ngroups_total    = int(f["Header"].attrs["Ngroups_Total"])
+        if len(snap_files) != num_files_header:
+            raise ValueError(
+                f"THESAN catalog {catalog_dir}: found {len(snap_files)} chunk file(s) but "
+                f"Header/NumFiles = {num_files_header}; the catalog is truncated or has stray files."
+            )
+
         with h5py.File(offset_file, "r") as f:
             group_offsets    = f["FileOffsets"]["Group"][:]
             subhalo_offsets  = f["FileOffsets"]["Subhalo"][:]
 
-        # Pre-allocate with generous upper bounds (THESAN docs lack Ngroups_Total)
-        n_groups_approx   = int(group_offsets[-1]  * 1.5)
+        # Pre-allocate with a margin above Header/Ngroups_Total; the exact count is
+        # verified against g_ptr after the read (finding 10).
+        n_groups_approx   = int(ngroups_total * 1.5) + 1
         n_subhalos_approx = int(subhalo_offsets[-1] * 1.5)
 
         positions              = np.zeros((n_groups_approx, 3), dtype=np.float32)
@@ -501,6 +518,13 @@ class ThesanLoader(MergerTreeLoader):
                 s_end = s_ptr + smap.shape[0]
                 subhalo_to_group_map[s_ptr:s_end] = smap
                 s_ptr = s_end
+
+        if g_ptr != ngroups_total:
+            raise ValueError(
+                f"THESAN catalog {catalog_dir}: read {g_ptr} groups across "
+                f"{len(snap_files)} chunk(s) but Header/Ngroups_Total = {ngroups_total}; "
+                "the catalog is incomplete."
+            )
 
         positions            = positions[:g_ptr]
         masses               = masses[:g_ptr]

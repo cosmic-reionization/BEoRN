@@ -41,6 +41,95 @@ from ..structs.halo_catalog import HaloCatalog
 from ..load_input_data.base import BaseLoader
 
 
+_CODE_VERSION_CACHE = None
+
+
+def _beorn_code_version() -> str:
+    """Short identifier of the BEoRN source, for the painted-cache namespace.
+
+    Returns the git short hash of the ``beorn`` package (plus ``-dirty`` when the
+    working tree has uncommitted changes) so that a code fix that changes painting
+    lands in a fresh cache namespace instead of silently reusing stale painted grids
+    (the fix_plan_2026-09-03 finding 5 / §9d/§9g/§10 trap). Falls back to ``nogit``
+    when git or the repo is unavailable (e.g. an installed wheel), in which case the
+    namespace is stable and the operator is responsible for using fresh roots.
+    """
+    global _CODE_VERSION_CACHE
+    if _CODE_VERSION_CACHE is not None:
+        return _CODE_VERSION_CACHE
+    version = "nogit"
+    try:
+        import subprocess
+        import beorn
+        pkg_dir = str(Path(beorn.__file__).resolve().parent)
+        head = subprocess.check_output(
+            ["git", "-C", pkg_dir, "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        dirty = subprocess.call(
+            ["git", "-C", pkg_dir, "diff", "--quiet", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        )
+        version = head + ("-dirty" if dirty else "")
+    except Exception:
+        version = "nogit"
+    _CODE_VERSION_CACHE = version
+    return version
+
+
+def _fft_worker_count(use_gpu: bool, cores: int) -> int:
+    """Number of FFT worker threads, bounded so MPI ranks do not oversubscribe.
+
+    The old code used ``workers=-1`` (all node CPUs) whenever ``cores <= 1``; under
+    N MPI ranks per node that is an N-fold oversubscription (finding 7). Bound the
+    count by the CPUs actually allocated to THIS rank -- ``SLURM_CPUS_PER_TASK`` when
+    set, else the process CPU affinity, else the machine count -- divided among the
+    ``cores`` multiprocessing workers.
+    """
+    if use_gpu:
+        return 1
+    cpt = os.environ.get("SLURM_CPUS_PER_TASK")
+    if cpt and cpt.isdigit():
+        avail = int(cpt)
+    elif hasattr(os, "sched_getaffinity"):
+        avail = len(os.sched_getaffinity(0))
+    else:
+        avail = os.cpu_count() or 1
+    return max(1, avail // max(1, cores))
+
+
+def _checked_kernel_mean(kernel: np.ndarray) -> float:
+    """Mean of a painting kernel, guarded for the renorm denominator (finding 7).
+
+    ``renorm`` divides by ``mean(kernel)``; a non-finite or non-positive mean (from
+    a NaN/Inf in the underlying profile) would otherwise inject Inf/NaN into the
+    Fourier accumulator. Fail loudly instead.
+    """
+    kmean = float(np.mean(kernel))
+    if not np.isfinite(kmean) or kmean <= 0:
+        raise FloatingPointError(
+            f"kernel mean is {kmean} (non-finite or <= 0); cannot renormalise the "
+            "painted profile -- the source profile likely contains NaN/Inf."
+        )
+    return kmean
+
+
+def _assert_grids_finite(z_index: int, zgrid: float, **grids: np.ndarray) -> None:
+    """Raise if any painted grid holds NaN/Inf before excess spreading (finding 7).
+
+    A non-finite cell here silently corrupts ``spreading_excess_fast`` (which
+    renormalises by grid sums) and every downstream statistic, so fail loudly with
+    the snapshot and field named rather than propagating garbage.
+    """
+    for name, grid in grids.items():
+        if not np.isfinite(grid).all():
+            n_bad = int((~np.isfinite(grid)).sum())
+            raise FloatingPointError(
+                f"{name} has {n_bad} non-finite cell(s) before excess spreading "
+                f"at z_index={z_index} (z={zgrid:.3f})."
+            )
+
+
 def sigma_dex_for_mass(
     Mh: np.ndarray,
     sigma0: float,
@@ -241,8 +330,44 @@ class PaintingCoordinator:
             return f"{value:.6g}"
         return str(value).replace("/", "-")
 
+    def _snapshot_key(self, z_index: int) -> int:
+        """Stable cache/RNG key for a painted snapshot: the raw snapshot number.
+
+        The loader index ``z_index`` is not stable -- it depends on which snapshots
+        are available and on the redshift range filter, so the same ``z_index`` can
+        map to different physical snapshots between runs, colliding painted caches
+        (fix_plan_2026-09-03 finding 5 / §9's Bug B). Loaders that expose
+        ``snapshot_numbers`` (THESAN, merger-tree) are keyed by the raw snapshot
+        number; other loaders fall back to ``z_index``.
+        """
+        snums = getattr(self.loader, "snapshot_numbers", None)
+        if snums is not None:
+            return int(snums[z_index])
+        return int(z_index)
+
+    def _raise_if_unexpected_empty_catalog(self, zgrid: float) -> None:
+        """Raise when an empty halo catalog at low z is almost certainly a data error.
+
+        For THESAN, halos are resolved well before z=20, so an empty catalog there
+        means a truncated/misread group catalog rather than a genuine absence of
+        sources -- painting empty grids would silently corrupt the run (finding 10).
+        Non-THESAN loaders keep the old permissive behaviour.
+        """
+        is_thesan = getattr(self.loader, "thesan_h", None) is not None
+        if is_thesan and zgrid < 20.0:
+            raise ValueError(
+                f"THESAN halo catalog is empty at z={zgrid:.2f} (< 20); this is a data "
+                "error (truncated/misread group catalog), not a real absence of halos. "
+                "Refusing to paint empty grids."
+            )
+
     def _paint_cache_namespace(self, profiles: RadiationProfiles | RadiationProfilesFStarGrid) -> str:
-        """Return the cache namespace for painted coeval outputs."""
+        """Return the cache namespace for painted coeval outputs.
+
+        The BEoRN code version is appended so a painting-code fix lands in a fresh
+        namespace rather than reusing stale painted grids (finding 5).
+        """
+        code = _beorn_code_version()
         if isinstance(profiles, RadiationProfilesFStarGrid):
             source = self.parameters.source
             distribution = self._format_cache_value(getattr(source, "f_st_paint_distribution", "lognormal"))
@@ -254,8 +379,8 @@ class PaintingCoordinator:
                 sigma_tag = f"sigma_{self._format_cache_value(getattr(source, 'f_st_paint_sigma', 0.5))}"
             seed = self._format_cache_value(getattr(source, "f_st_paint_seed", None))
             beorn_hash = self.parameters.beorn_hash()
-            return f"painted_output_fstar_dist_{distribution}_{sigma_tag}_seed_{seed}_{beorn_hash}"
-        return "painted_output_legacy"
+            return f"painted_output_fstar_dist_{distribution}_{sigma_tag}_seed_{seed}_{beorn_hash}_{code}"
+        return f"painted_output_legacy_{code}"
     
     """Orchestrate painting of 1D radiation profiles to 3D grids.
 
@@ -560,7 +685,9 @@ class PaintingCoordinator:
                     is_fstar = "f_st_grid" in h5
                     if is_fstar:
                         profile_z_index = self._nearest_profile_redshift_index(h5["z_history"][...], z_index)
-            except Exception:
+            except (OSError, KeyError):
+                # OSError: not an HDF5 file / unreadable; KeyError: missing z_history.
+                # Any other exception is a real bug and should propagate (finding 7).
                 is_fstar = False
             if is_fstar:
                 profiles = self._load_fstar_profiles_z_slice(profiles_path, profile_z_index)
@@ -575,7 +702,7 @@ class PaintingCoordinator:
                 grid_data = self.cache_handler.load_file(
                     self.parameters, 
                     CoevalCube, 
-                    z_index=z_index,
+                    snapshot=self._snapshot_key(z_index),
                     cache_namespace=self._paint_cache_namespace(profiles)
                 )
                 self.logger.info(f"Found painted output in cache for {z_index=}. Skipping.")
@@ -625,6 +752,7 @@ class PaintingCoordinator:
         # 2. if there are halos but they lie outside the mass range -> raise an error
 
         if halo_catalog.masses.size == 0:
+            self._raise_if_unexpected_empty_catalog(float(zgrid))
             self.logger.info(f'No halos at z={zgrid:.2f}. Returning empty grids.')
             grid_data = CoevalCube(
                 parameters=self.parameters,
@@ -648,7 +776,7 @@ class PaintingCoordinator:
         # provides internal parallelism for each FFT.  CPU numpy uses ProcessPoolExecutor.
         use_gpu = fft_backend in _GPU_BACKENDS
         use_multiprocess = cores > 1 and not use_gpu
-        fft_workers = 1 if use_gpu else (-1 if cores <= 1 else max(1, (os.cpu_count() or 1) // cores))
+        fft_workers = _fft_worker_count(use_gpu, cores)
 
         # Fourier-space accumulators: contributions from all bins are summed here,
         # and exactly 3 inverse FFTs are performed at the end (regardless of N_bins).
@@ -743,6 +871,7 @@ class PaintingCoordinator:
         self.logger.info(f'Profile painting took {timedelta(seconds=time.time() - start_time)}.')
 
         ## Excess spreading
+        _assert_grids_finite(z_index, float(zgrid), Grid_xHII=Grid_xHII, Grid_xal=Grid_xal, Grid_Temp=Grid_Temp)
         start_time = time.time()
         Grid_xHII = spreading_excess_fast(self.parameters, Grid_xHII)
 
@@ -797,7 +926,7 @@ class PaintingCoordinator:
             self.cache_handler.write_file(
                 self.parameters, 
                 grid_data, 
-                z_index=z_index,
+                snapshot=self._snapshot_key(z_index),
                 cache_namespace=self._paint_cache_namespace(profiles)
             )
             self.logger.info(
@@ -814,7 +943,7 @@ class PaintingCoordinator:
                 grid_data = self.cache_handler.load_file(
                     self.parameters, 
                     CoevalCube, 
-                    z_index=z_index,
+                    snapshot=self._snapshot_key(z_index),
                     cache_namespace=self._paint_cache_namespace(profiles)
                 )
                 self.logger.info(f"Found painted output in cache for {z_index=}. Skipping.")
@@ -852,6 +981,7 @@ class PaintingCoordinator:
         )
 
         if halo_catalog.masses.size == 0:
+            self._raise_if_unexpected_empty_catalog(float(zgrid))
             self.logger.info(f'No halos at z={float(zgrid):.2f}. Returning empty grids.')
             return CoevalCube(
                 parameters=self.parameters,
@@ -872,7 +1002,7 @@ class PaintingCoordinator:
         fft_backend = _resolve_fft_backend(self.parameters.simulation.fft_backend)
         use_gpu = fft_backend in _GPU_BACKENDS
         use_multiprocess = cores > 1 and not use_gpu
-        fft_workers = 1 if use_gpu else (-1 if cores <= 1 else max(1, (os.cpu_count() or 1) // cores))
+        fft_workers = _fft_worker_count(use_gpu, cores)
 
         fourier_shape = (nGrid, nGrid, nGrid // 2 + 1)
         accum_xHII = make_fourier_accumulator(fourier_shape, fft_backend) if "Grid_xHII" in store_grids else None
@@ -984,6 +1114,7 @@ class PaintingCoordinator:
         Grid_xal  = ifft_field(accum_lyal,  (nGrid, nGrid, nGrid), backend=fft_backend, workers=fft_workers) if accum_lyal  is not None else zero_grid.copy()
         Grid_Temp = ifft_field(accum_temp,  (nGrid, nGrid, nGrid), backend=fft_backend, workers=fft_workers) if accum_temp  is not None else zero_grid.copy()
 
+        _assert_grids_finite(z_index, float(zgrid), Grid_xHII=Grid_xHII, Grid_xal=Grid_xal, Grid_Temp=Grid_Temp)
         start_time = time.time()
         Grid_xHII = spreading_excess_fast(self.parameters, Grid_xHII)
         self.logger.info(f'Redistributing excess photons from the overlapping regions took {timedelta(seconds=time.time() - start_time)}.')
@@ -1021,7 +1152,7 @@ class PaintingCoordinator:
             self.cache_handler.write_file(
                 self.parameters, 
                 grid_data, 
-                z_index=z_index,
+                snapshot=self._snapshot_key(z_index),
                 cache_namespace=self._paint_cache_namespace(profiles)
             )
             self.logger.info(
@@ -1103,10 +1234,13 @@ class PaintingCoordinator:
         return np.abs(np.log(sampled_f_st[:, None]) - np.log(f_st_grid[None, :])).argmin(axis=1)
 
     def _make_f_st_rng(self, z_index: int):
+        # Seed by the raw snapshot number, not the loader index, so a given physical
+        # snapshot always draws the same f_st sample regardless of which other
+        # snapshots are available (finding 5). See _snapshot_key.
         seed = getattr(self.parameters.source, "f_st_paint_seed", None)
         if seed is None:
             return np.random.default_rng()
-        return np.random.default_rng(int(seed) + int(z_index))
+        return np.random.default_rng(int(seed) + self._snapshot_key(z_index))
 
 
     def paint_single_mass_bin(
@@ -1168,7 +1302,7 @@ class PaintingCoordinator:
             if np.any(kernel > 0):
                 renorm = (
                     _trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
-                    / (LBox / (1 + z)) ** 3 / np.mean(kernel)
+                    / (LBox / (1 + z)) ** 3 / _checked_kernel_mean(kernel)
                 )
                 fa_xHII = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
             else:
@@ -1191,7 +1325,7 @@ class PaintingCoordinator:
             if np.any(kernel > 0):
                 renorm = (
                     _trapz(x_alpha_prof * 4 * np.pi * r_lyal ** 2, r_lyal)
-                    / (LBox / (1 + z)) ** 3 / np.mean(kernel)
+                    / (LBox / (1 + z)) ** 3 / _checked_kernel_mean(kernel)
                 )
                 fa_lyal = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
 
@@ -1206,7 +1340,7 @@ class PaintingCoordinator:
             if np.any(kernel > 0):
                 renorm = (
                     _trapz(Temp_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
-                    / (LBox / (1 + z)) ** 3 / np.mean(kernel)
+                    / (LBox / (1 + z)) ** 3 / _checked_kernel_mean(kernel)
                 )
                 fa_temp = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
 
