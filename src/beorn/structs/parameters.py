@@ -53,10 +53,10 @@ class SourceParameters:
     """power law index for lyal. 0.0 for constant, 1.0 for linear, 2.0 for quadratic"""
 
     halo_mass_min: float = 1e8
-    """Minimum mass of star forming halo. Mdark in HM. Objects below this mass are not considered during the painting process"""
+    """Minimum star-forming halo mass [Msun/h]. Objects below this mass are not painted. (finding 13: Msun/h, not Msun -- BEoRN keeps little-h internally.)"""
 
     halo_mass_max: float = 1e16
-    """Maximum mass of star forming halo. Objects above this mass are not considered during the painting process"""
+    """Maximum star-forming halo mass [Msun/h]. Objects above this mass are not painted."""
 
     f_st: float = 0.05
     """the prefactor of the star formation efficiency f_star which is a function of halo mass"""
@@ -196,10 +196,10 @@ class SolverParameters:
     """Coefficient for exponential mass accretion. Since beorn distinguishes between accretion rates a range should be specified"""
 
     halo_mass_bin_min: float = 1e5
-    """Minimum halo mass bin in solar masses."""
+    """Minimum halo mass bin edge [Msun/h] (finding 13: Msun/h, not Msun)."""
 
     halo_mass_bin_max: float = 1e14
-    """Maximum halo mass bin in solar masses."""
+    """Maximum halo mass bin edge [Msun/h]."""
 
     halo_mass_nbin: int = 100
     """Number of mass bins."""
@@ -285,10 +285,14 @@ class SimulationParameters:
     processes."""
 
     spreading_pixel_threshold: int = -1
-    """When spreading the excess ionization fraction, treat all the connected regions with less than "thresh_pixel" as a single connected region (to speed up). If set to a negative value, a default nonzero value will be used"""
+    """UNUSED / dead parameter (finding 13). Intended: when spreading the excess ionization
+    fraction, treat connected regions smaller than this as one region to speed up. No code in
+    src/beorn reads it (spreading_excess_fast ignores it); many yamls set it to -1 out of
+    habit. Kept only so those yamls still load. Wire it into spread.py or drop it + the yaml keys."""
 
     spreading_subgrid_approximation: bool = True
-    """When spreading the excess ionization fraction and running distance_transform_edt, whether or not to do the subgrid approximation."""
+    """UNUSED / dead parameter (finding 13). Intended: toggle the distance_transform_edt subgrid
+    approximation during excess-ionization spreading. Not read anywhere in src/beorn."""
 
     minimum_grid_size_heat: int = 4
     """Minimum grid size used when computing the heat kernel from its associated profile."""
@@ -540,10 +544,10 @@ class Parameters:
                 [f"  Snapshot z  : z={cosmo_sim.snapshot_redshifts[0]:.1f} -> {cosmo_sim.snapshot_redshifts[-1]:.1f} ({cosmo_sim.snapshot_redshifts.size} snapshots)"]
                 if cosmo_sim.snapshot_redshifts is not None else []
             ),
-            f"  1D RT bins  : {slv.halo_mass_bin_min:.1e} - {slv.halo_mass_bin_max:.1e} Msun at z={z_min:.1f} ({slv.halo_mass_nbin} bins, traced back via exp. accretion)",
+            f"  1D RT bins  : {slv.halo_mass_bin_min:.1e} - {slv.halo_mass_bin_max:.1e} Msun/h at z={z_min:.1f} ({slv.halo_mass_nbin} bins, traced back via exp. accretion)",
             f"  Source      : f_st={src.f_st}, Nion={src.Nion}, f0_esc={src.f0_esc}, pl_esc={src.pl_esc}",
             f"  X-ray       : norm={src.xray_normalisation:.2e}, E=[{src.energy_cutoff_min_xray}, {src.energy_cutoff_max_xray}] eV",
-            f"  Lyman-alpha : n_phot={src.n_lyman_alpha_photons}, star-forming above {src.halo_mass_min:.1e} Msun",
+            f"  Lyman-alpha : n_phot={src.n_lyman_alpha_photons}, star-forming above {src.halo_mass_min:.1e} Msun/h",
             f"  Beorn hash  : {self.beorn_hash()}",
             "=" * 60,
         ]

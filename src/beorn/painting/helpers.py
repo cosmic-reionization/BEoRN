@@ -287,7 +287,7 @@ def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
         box_extension = 1
 
     elif box_extension % 2 == 0:
-        box_extension += 1  ### this need to be even to make things work
+        box_extension += 1  ### force ODD: the central sub-box must sit at the exact centre of the stacked grid (finding 13; the old comment said "even", but the code adds 1 to an even value to make it odd)
 
     kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, box_extension * nGrid_min, box_extension * LBox)
 
@@ -340,7 +340,7 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
         box_extension = 1
 
     elif box_extension % 2 == 0:
-        box_extension += 1  ### this need to be even to make things work
+        box_extension += 1  ### force ODD: the central sub-box must sit at the exact centre of the stacked grid (finding 13; the old comment said "even", but the code adds 1 to an even value to make it odd)
 
     kernel_T_HM = profile_to_3Dkernel(profile_T_HM, box_extension * nGrid_min, box_extension * LBox)
 
