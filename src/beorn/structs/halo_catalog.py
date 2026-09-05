@@ -74,7 +74,9 @@ class HaloCatalog:
             numpy.ndarray: Integer indices of matching halos (may be empty).
         """
         if self.masses.size == 0:
-            return []
+            # Return an ndarray (not a bare list) so callers can use .size / fancy
+            # indexing uniformly (finding 14).
+            return np.empty(0, dtype=np.intp)
 
         alpha_inf, alpha_sup = alpha_range
         mass_inf, mass_sup = mass_range

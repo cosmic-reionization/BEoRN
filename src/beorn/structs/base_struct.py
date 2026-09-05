@@ -41,20 +41,25 @@ class BaseStruct(ABC):
         Dynamically add attributes to the class for type checking and code completion. All the available hdf5 datasets are now available as attributes
         """
         if self._file_path is not None:
-            # Do not use a context manager here, because we want to keep the file open
-            hdf5_file = h5py.File(self._file_path, 'r')
-            for dataset_name in hdf5_file.keys():
-                if dataset_name == "parameters":
-                    attribute = Parameters.from_group(hdf5_file[dataset_name])
-                elif isinstance(getattr(type(self), dataset_name, None), property):
-                    continue  # skip properties, they are not writable
-                else:
-                    attribute = hdf5_file[dataset_name]
+            # Materialise each dataset into memory and close the file (finding 14). The old
+            # code kept the h5py.File open and stored lazy Dataset handles, which leaked a
+            # file handle per read (never closed; relied on GC). Reading the arrays eagerly
+            # -- like the f_st z-slice path does -- keeps the same attribute access while
+            # releasing the handle. (Callers that need a single z-slice of a multi-GB cube
+            # use the dedicated slice reader instead of this eager path.)
+            with h5py.File(self._file_path, 'r') as hdf5_file:
+                for dataset_name in hdf5_file.keys():
+                    if dataset_name == "parameters":
+                        attribute = Parameters.from_group(hdf5_file[dataset_name])
+                    elif isinstance(getattr(type(self), dataset_name, None), property):
+                        continue  # skip properties, they are not writable
+                    else:
+                        attribute = hdf5_file[dataset_name][...]  # materialise into numpy
 
-                logger.debug(f"Adding dataset {dataset_name} as attribute to {self.__class__.__name__}")
-                setattr(self, dataset_name, attribute)
-            for field in hdf5_file.attrs.keys():
-                setattr(self, field, hdf5_file.attrs[field])
+                    logger.debug(f"Adding dataset {dataset_name} as attribute to {self.__class__.__name__}")
+                    setattr(self, dataset_name, attribute)
+                for field in hdf5_file.attrs.keys():
+                    setattr(self, field, hdf5_file.attrs[field])
             logger.debug(f"Read data from {self._file_path}")
 
 

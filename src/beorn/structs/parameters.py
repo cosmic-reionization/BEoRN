@@ -643,8 +643,9 @@ def to_dict(obj: dataclass) -> dict:
             # recursively convert dataclass to dict
             out[f.name] = to_dict(value)
         elif isinstance(value, (list, tuple)):
-            # ensure the types are writable to hdf5
-            if isinstance(value[0], Path):
+            # ensure the types are writable to hdf5 (finding 14: guard the empty case,
+            # value[0] would otherwise IndexError).
+            if len(value) and isinstance(value[0], Path):
                 out[f.name] = [v.as_posix() for v in value]
             else:
                 out[f.name] = value

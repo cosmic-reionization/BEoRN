@@ -224,6 +224,12 @@ class PKDGravLoader(NBodyLoader):
                 return np.array([]), np.zeros((0, 3))
             catalog_array = catalog_array[np.newaxis, :]
 
+        # NOTE (fix_plan_2026-09-03 finding 14): this multiplies by h0, i.e. M_sun/h ->
+        # M_sun (h-free), matching the docstring but NOT BEoRN's internal M_sun/h
+        # convention that the THESAN loader was fixed to (findings 1 & 2). Left as-is
+        # because there is no PKDGrav dataset here to validate a change against; a future
+        # PKDGrav run must re-check this against Lbox/mass units before trusting absolute
+        # numbers.
         masses = catalog_array[:, 0] * self.parameters.cosmology.h0
         positions = catalog_array[:, 1:] + self.parameters.simulation.Lbox / 2
         return masses, positions

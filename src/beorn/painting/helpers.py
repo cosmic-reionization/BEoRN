@@ -274,7 +274,11 @@ def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
         Lyman-alpha profile with periodic stacking.
     """
     profile_xal_HM = interp1d(rr_al, lyal_array, bounds_error=False, fill_value=0)  ##screening
-    ind_lya_0 = np.min(np.where(lyal_array == 0))  ## indice where the lyman alpha profile gets to zero
+    ## index where the lyman-alpha profile reaches zero; if it never does (all > 0),
+    ## fall back to the last index -- use the whole profile (finding 14; mirrors the
+    ## T-kernel guard below), instead of np.min(np.where(...)) raising on an empty match.
+    zero_lya_indices = np.where(lyal_array == 0)[0]
+    ind_lya_0 = int(np.min(zero_lya_indices)) if zero_lya_indices.size else -1
     rr_al_max = rr_al[ind_lya_0]  ### max radius that we need to consider to fully include the lyman alpha profile
     box_extension = int(rr_al_max / (LBox / 2)) + 1
 
