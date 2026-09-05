@@ -44,7 +44,10 @@ class Handler:
                 into each call to :meth:`write_file`.
         """
         self.file_root = Path(file_root)
-        self.file_root.mkdir(exist_ok=True)
+        # parents=True so a not-yet-created parent does not raise FileNotFoundError, and
+        # exist_ok=True so two concurrent same-root jobs do not race here (a missing
+        # parents=True hung a Phase-4b job for 10h; fix_plan_2026-09-03).
+        self.file_root.mkdir(parents=True, exist_ok=True)
         self.write_kwargs = write_kwargs if write_kwargs is not None else {}
         if input_tag is not None:
             self.write_kwargs['input_tag'] = input_tag
@@ -117,7 +120,7 @@ class Handler:
         """
         self.logger.info(f"Clearing persistence directory at {self.file_root}")
         shutil.rmtree(self.file_root)
-        self.file_root.mkdir()
+        self.file_root.mkdir(parents=True, exist_ok=True)
 
 
     def save_logs(self, parameters: Parameters) -> None:
