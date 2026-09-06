@@ -409,6 +409,25 @@ class Parameters:
     """cosmo-sim input parameters (py21cmfast, Thesan, PKDGrav, etc.)"""
 
 
+    # ── KNOWN ISSUE: fragile hashing (fix_plan_2026-09-03 finding 12) ──────────────
+    # unique_hash / profiles_hash / beorn_hash all MD5 the *string form* of a dict that
+    # contains numpy scalars and arrays (via `f"{d}"` / `str(d)`). A numpy object's string
+    # is a display convention, not a serialization contract, so this hash is NOT stable:
+    #   1. np.set_printoptions(precision=...) changes the string -> different hash for the
+    #      same parameters (a cache MISS), and rounding at low precision makes DIFFERENT
+    #      parameter sets stringify identically -> a hash COLLISION (silent wrong-cache reuse);
+    #   2. the `threshold` print option truncates long arrays with "..." -> collisions on
+    #      arrays that differ only in the hidden middle;
+    #   3. numpy's scalar/array repr changed between numpy 1.x and 2.x, so a numpy upgrade
+    #      re-hashes identical parameters and invalidates every cache.
+    # RECOMMENDED FIX (do as its own commit -- it changes EVERY hash and so re-baselines all
+    # caches and painted outputs): serialize deterministically before hashing --
+    #   json.dumps(_to_jsonable(d), sort_keys=True)  where _to_jsonable converts arrays with
+    #   .tolist() and formats floats with a fixed form (e.g. f"{x:.17g}") -- none of which
+    #   depends on print options or the numpy version. Add a test asserting the hash is
+    #   invariant under np.set_printoptions changes and across numpy string forms.
+    # Left as-is for now: within one numpy version at default print options the hash is
+    # self-consistent (all existing runs are fine); the fix is a deliberate re-baseline.
     def unique_hash(self) -> str:
         """
         Generates a unique hash for the current set of parameters. This can be used as a unique key when caching the computations.
@@ -416,6 +435,7 @@ class Parameters:
         dict_params = to_dict(self)
         # using the string representation of the dictionary is not optimal because it is not guaranteed to be the same for the same dictionary (if the order of the keys is different for instance)
         # but the key is that the hashes are guaranteed to be different for unique parameter sets
+        # See the "KNOWN ISSUE: fragile hashing (finding 12)" note above.
         dict_string = f"{dict_params}"
 
         return hashlib.md5(dict_string.encode()).hexdigest()
