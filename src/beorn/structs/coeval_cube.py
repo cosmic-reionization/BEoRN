@@ -18,10 +18,11 @@ class CoevalCube(BaseStruct, GridBasePropertiesMixin, GridDerivedPropertiesMixin
     def to_arrays(self) -> None:
         """Ensure all fields are plain numpy arrays.
 
-        When a :class:`CoevalCube` is loaded from HDF5 its datasets are
-        ``h5py.Dataset`` objects which are not picklable across MPI
-        processes. This helper converts such datasets to numpy arrays in
-        place.
+        ``BaseStruct.__post_init__`` now reads every dataset eagerly and closes the file, so a
+        :class:`CoevalCube` loaded from HDF5 already holds numpy values and this is a no-op for
+        it. It is kept for callers that assign ``h5py.Dataset`` objects to fields themselves
+        (those are not picklable across MPI processes) and converts any such field in place
+        (review_2026-09-14 Phase 5).
         """
         open_files = {}
         for field in fields(self):

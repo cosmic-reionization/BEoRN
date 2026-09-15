@@ -39,6 +39,13 @@ class BaseStruct(ABC):
     def __post_init__(self):
         """
         Dynamically add attributes to the class for type checking and code completion. All the available hdf5 datasets are now available as attributes
+
+        Loading is **eager**: every dataset is read into memory and the file is closed. This applies to
+        every subclass that does not override ``__post_init__`` -- ``RadiationProfiles``,
+        ``RadiationProfilesFStarGrid`` and ``CoevalCube``; ``TemporalCube`` overrides it. A profile
+        cube therefore costs its full size in RAM (about 10.9 GB for THESAN-1 ``tree_scatter`` at
+        nbin=80, 13 f_st values, 63 redshifts). Painting with several MPI ranks avoids that: each
+        rank reads one z-slice instead (review_2026-09-14 Phase 5, branch A).
         """
         if self._file_path is not None:
             # Materialise each dataset into memory and close the file (finding 14). The old

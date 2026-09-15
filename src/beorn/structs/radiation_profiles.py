@@ -71,9 +71,10 @@ class RadiationProfiles(BaseStruct):
         """Check all profile arrays for NaN/Inf values.
 
         Called automatically after fresh computation. When loading from disk the
-        data was already validated at write time, so this is skipped to avoid
-        loading the entire (potentially multi-GB) HDF5 dataset into RAM.
-        Call explicitly if you need to re-validate a loaded profile.
+        data was already validated at write time, so this is skipped. Loading is
+        eager (``BaseStruct.__post_init__`` reads every dataset into RAM), so the skip
+        saves the isfinite scans, not memory. Call explicitly if you need to
+        re-validate a loaded profile.
         """
         assert np.all(np.isfinite(self.rho_xray)), "rho_xray contains invalid values"
         assert np.all(np.isfinite(self.rho_heat)), "rho_heat contains invalid values"
@@ -85,9 +86,9 @@ class RadiationProfiles(BaseStruct):
         BaseStruct.__post_init__(self)
         assert self.z_history.ndim == 1, "z_history must be a 1D array"
         assert self.r_grid_cell.ndim == 1, "r_grid_cell must be a 1D array"
-        # Only validate when profiles are freshly computed (not when loaded from disk).
-        # np.isfinite forces full materialisation of h5py.Dataset arrays into RAM, which
-        # is wasteful (and slow) when the data was already validated at write time.
+        # Only validate when profiles are freshly computed (not when loaded from disk): the
+        # data was validated at write time. The arrays are already in RAM either way, since
+        # loading is eager; the skip only saves the isfinite scans (review_2026-09-14 Phase 5).
         if self._file_path is None:
             self.validate()
 
