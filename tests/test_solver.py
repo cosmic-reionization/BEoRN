@@ -342,3 +342,20 @@ def test_fstar_cache_namespace_shared_by_distributions_with_the_same_grid():
     """'normal' and 'uniform' both build the linear grid, so they may share one cube."""
     normal, uniform = _fst_solver_with_distribution("normal"), _fst_solver_with_distribution("uniform")
     assert normal.profile_cache_namespace() == uniform.profile_cache_namespace()
+
+
+def test_emission_history_interpolator_keeps_the_top_value_when_the_grid_reaches_the_anchor():
+    """A grid ending exactly at z_source_start must not get a second zero point there, which
+    forced the rate to 0 at z=35 and ramped it across z=34-35 (review_2026-09-14 finding 7)."""
+    from beorn.precomputation.helpers import emission_history_interpolator
+
+    rate = np.array([[4.0, 2.0, 1.0]])
+    reaches = emission_history_interpolator(np.array([35.0, 34.0, 33.0]), rate, 35.0)
+    np.testing.assert_allclose(reaches(np.array([35.0, 34.5, 33.5])), [[4.0, 3.0, 1.5]])
+
+
+def test_emission_history_interpolator_anchors_zero_above_a_grid_that_stops_short():
+    from beorn.precomputation.helpers import emission_history_interpolator
+
+    below = emission_history_interpolator(np.array([34.0, 33.0]), np.array([[2.0, 1.0]]), 35.0)
+    np.testing.assert_allclose(below(np.array([35.0, 34.5, 33.5])), [[0.0, 1.0, 1.5]])

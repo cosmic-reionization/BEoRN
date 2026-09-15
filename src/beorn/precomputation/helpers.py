@@ -220,6 +220,23 @@ def solve_xe(parameters: Parameters, mean_G_ion, mean_Gsec_ion, zz: np.ndarray):
 
 
 
+def emission_history_interpolator(z_bins: np.ndarray, rate: np.ndarray, z_anchor: float) -> interp1d:
+    """Interpolate an emission rate over redshift (last axis), zero before sources start.
+
+    ``rate[..., i]`` is the rate at ``z_bins[i]``. A zero point is prepended at ``z_anchor``
+    (``solver.z_source_start``) only when the grid stops below it. When the grid already
+    reaches the anchor, as ``fst_stochastic``'s profile grid does (it ends exactly at
+    z_source_start), prepending handed interp1d a duplicate x: the rate was forced to 0 at the
+    top grid point and ramped linearly to 0 across the top interval instead of using the
+    computed values there (review_2026-09-14 finding 7).
+    """
+    z_bins = np.asarray(z_bins, dtype=float)
+    if np.max(z_bins) < z_anchor:
+        z_bins = np.concatenate(([z_anchor], z_bins))
+        rate = np.concatenate((np.zeros_like(rate[..., :1]), rate), axis=-1)
+    return interp1d(z_bins, rate, axis=-1, fill_value='extrapolate')
+
+
 def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.ndarray, halo_mass: np.ndarray, halo_mass_derivative: np.ndarray):
     """
     Ly-al coupling profile
@@ -254,17 +271,10 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
     alS_lyal  = parameters.source.lyman_alpha_power_law
     eps_lyal_C = eps_lyal(1.0, parameters)  # constant: Anorm * N_al / (m_p_in_Msun * h0)
 
-    # Build dMdt_star_int once over the full redshift history.
-    # z_prime is always in [z_current, z_star], so the interpolator is never queried
-    # below the lowest z_bin; anchoring at z_star with zeros is the same boundary
-    # condition used in the previous per-iteration construction.
+    # Build dMdt_star_int once over the full redshift history, zero at z_star. z_prime is
+    # always in [z_current, z_star], so it is never queried below the lowest z_bin.
     dMdt_star_full = halo_mass_derivative * f_star_Halo(parameters, halo_mass) * parameters.cosmology.Ob / parameters.cosmology.Om
-    dMdt_star_int = interp1d(
-        np.concatenate(([z_star], z_bins)),
-        np.concatenate((np.zeros_like(dMdt_star_full[..., :1]), dMdt_star_full), axis=-1),
-        axis=-1,
-        fill_value='extrapolate',
-    )
+    dMdt_star_int = emission_history_interpolator(z_bins, dMdt_star_full, z_star)
 
     for i, z in enumerate(z_bins):
         if z > z_star:

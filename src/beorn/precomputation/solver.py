@@ -22,7 +22,7 @@ from .. import constants
 # TODO: replace these unit conversions by astropy units
 from ..constants import m_p_in_Msun, km_per_Mpc, h_eV_sec, cm_per_Mpc, E_HI, E_HeI, kb_eV_per_K, rhoc0
 from ..astro import f_Xh, f_star_Halo, eps_xray
-from .helpers import Ngdot_ion, rho_alpha_profile, cum_optical_depth
+from .helpers import Ngdot_ion, rho_alpha_profile, cum_optical_depth, emission_history_interpolator
 from .massaccretion import mass_accretion
 from copy import deepcopy
 logger = logging.getLogger(__name__)
@@ -432,18 +432,10 @@ class RadiationProfileSolver:
 
         rho_xray = np.zeros((len(rr), self.parameters.solver.halo_mass_nbin - 1, len(self.parameters.solver.halo_mass_accretion_alpha) - 1, len(self.z_bins)))
 
-        # Build dMdt_int once over the full redshift history.
-        # We anchor M_star_dot = 0 at z_source_start (no emission above the starting
-        # redshift) and include all z_bins. z_prime is always queried in
-        # [z_current, z_star_i], so the interpolator is never extrapolated below
-        # the lowest z_bin.
-        _z_anchor = self.parameters.solver.z_source_start
-        dMdt_int = interp1d(
-            x = np.concatenate(([_z_anchor], self.z_bins)),
-            y = np.concatenate((np.zeros_like(M_star_dot[..., :1]), M_star_dot), axis=-1),
-            axis = -1,
-            fill_value = 'extrapolate',
-        )
+        # Build dMdt_int once over the full redshift history, zero at z_source_start (no
+        # emission before sources start). z_prime is always queried in [z_current, z_star_i],
+        # so it is never extrapolated below the lowest z_bin.
+        dMdt_int = emission_history_interpolator(self.z_bins, M_star_dot, self.parameters.solver.z_source_start)
 
         for i, z in enumerate(self.z_bins):
             # Determine the maximum lookback redshift for this snapshot.
