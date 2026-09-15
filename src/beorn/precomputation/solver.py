@@ -563,11 +563,18 @@ class RadiationProfileSolver:
 
 class RadiationProfileFstSolver(RadiationProfileSolver):
     def profile_cache_namespace(self) -> str:
-        """Return the cache namespace for f_st-grid radiation profiles."""
+        """Return the cache namespace for f_st-grid radiation profiles.
+
+        The namespace, not ``profiles_fstar_hash``, is what distinguishes f_st grids:
+        ``f_st_paint_distribution`` is a paint-only key stripped from that hash, yet it picks
+        log or linear spacing in :meth:`_build_f_st_grid`. The spacing is therefore part of
+        the name, taken from the grid as built (review_2026-09-14 finding 5).
+        """
         f_st_min = float(self.f_st_grid[0])
         f_st_max = float(self.f_st_grid[-1])
         f_st_n = int(self.f_st_grid.size)
-        return f"radiation_profiles_fstar_grid_fmin_{f_st_min:.6g}_fmax_{f_st_max:.6g}_n_{f_st_n}"
+        return (f"radiation_profiles_fstar_grid_fmin_{f_st_min:.6g}_fmax_{f_st_max:.6g}_n_{f_st_n}"
+                f"_{self.f_st_grid_spacing}")
 
     def get_or_compute_profiles(self, handler: Handler, force_recompute: bool = False) -> "RadiationProfilesFStarGrid":
         """Load f_st-grid profiles from cache or compute and save them if unavailable.
@@ -657,7 +664,9 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
             # f_st_min = 10**log_min
             # logger.info(f"Redefine f_st_min to {f_st_min:.4f}")
             # logger.info("Return f_st_grid in log space")
+            self.f_st_grid_spacing = "log"
             return np.logspace(np.log10(f_st_min), np.log10(f_st_max), f_st_n, base=10)
+        self.f_st_grid_spacing = "lin"
         return np.linspace(f_st_min, f_st_max, f_st_n)
 
     def _parameters_with_f_st(self, f_st: float) -> Parameters:

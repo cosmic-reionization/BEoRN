@@ -313,3 +313,32 @@ def test_mpi_fstar_profile_cache_roundtrip(tmp_path, monkeypatch):
     gathered = comm.gather(profiles.payload, root=0)
     if rank == 0:
         assert gathered == ["computed-by-rank-0", "computed-by-rank-0"]
+
+
+def _fst_solver_with_distribution(distribution):
+    from beorn.structs.parameters import Parameters
+
+    parameters = Parameters()
+    parameters.source.f_st_paint_distribution = distribution
+    parameters.source.f_st_grid_min, parameters.source.f_st_grid_max, parameters.source.f_st_grid_n = 0.004, 0.25, 13
+    return RadiationProfileFstSolver(parameters, np.array([10.0, 6.0]))
+
+
+def test_fstar_cache_namespace_records_grid_spacing():
+    """The distribution picks log or linear f_st spacing but is stripped from
+    profiles_fstar_hash, so only the namespace can keep the two cubes apart
+    (review_2026-09-14 finding 5)."""
+    log_solver = _fst_solver_with_distribution("lognormal")
+    lin_solver = _fst_solver_with_distribution("uniform")
+
+    assert log_solver.parameters.profiles_fstar_hash() == lin_solver.parameters.profiles_fstar_hash()
+    assert not np.allclose(log_solver.f_st_grid, lin_solver.f_st_grid)
+    assert log_solver.profile_cache_namespace() != lin_solver.profile_cache_namespace()
+    assert log_solver.profile_cache_namespace() == "radiation_profiles_fstar_grid_fmin_0.004_fmax_0.25_n_13_log"
+    assert lin_solver.profile_cache_namespace().endswith("_n_13_lin")
+
+
+def test_fstar_cache_namespace_shared_by_distributions_with_the_same_grid():
+    """'normal' and 'uniform' both build the linear grid, so they may share one cube."""
+    normal, uniform = _fst_solver_with_distribution("normal"), _fst_solver_with_distribution("uniform")
+    assert normal.profile_cache_namespace() == uniform.profile_cache_namespace()
