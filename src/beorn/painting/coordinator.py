@@ -151,6 +151,20 @@ def sigma_dex_for_mass(
 
 
 class PaintingCoordinator:
+    """Orchestrate painting of 1D radiation profiles to 3D grids.
+
+    The coordinator handles loading halo catalogs / density fields,
+    dispatching painting work across processes (or MPI ranks), and
+    writing the resulting :class:`CoevalCube` / :class:`TemporalCube`
+    outputs.
+
+    Attributes:
+        parameters (Parameters): Simulation parameters.
+        loader (BaseLoader): Loader class providing halo catalogs and density fields for each redshift.
+        output_handler (Handler): IO handler used to save results.
+        cache_handler (Handler|None): Optional cache for intermediate painted outputs.
+    """
+
     @staticmethod
     def _profile_redshift_array(z_history) -> np.ndarray:
         """Materialize profile redshifts as a small in-memory array.
@@ -409,19 +423,6 @@ class PaintingCoordinator:
             return f"painted_output_fstar_dist_{distribution}_{sigma_tag}_seed_{seed}_{beorn_hash}_{code}"
         return f"painted_output_legacy_{code}"
     
-    """Orchestrate painting of 1D radiation profiles to 3D grids.
-
-    The coordinator handles loading halo catalogs / density fields,
-    dispatching painting work across processes (or MPI ranks), and
-    writing the resulting :class:`CoevalCube` / :class:`TemporalCube`
-    outputs.
-
-    Attributes:
-        parameters (Parameters): Simulation parameters.
-        loader (BaseLoader): Loader class providing halo catalogs and density fields for each redshift.
-        output_handler (Handler): IO handler used to save results.
-        cache_handler (Handler|None): Optional cache for intermediate painted outputs.
-    """
     logger = logging.getLogger(__name__)
 
     def __init__(

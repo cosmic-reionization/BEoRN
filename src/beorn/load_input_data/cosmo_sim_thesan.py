@@ -1,4 +1,4 @@
-"""Loader for THESAN dark-matter-only simulation data.
+"""Loader for THESAN simulation data (full-hydro THESAN-1 / THESAN-2).
 
 Inherits merger tree walking and alpha fitting from
 :class:`~beorn.load_input_data.merger_tree_base.MergerTreeLoader`.
@@ -103,7 +103,10 @@ def _subbox_filter(
 
 
 class ThesanLoader(MergerTreeLoader):
-    """Loader for THESAN-DARK simulation data with LHaloTree merger trees.
+    """Loader for THESAN simulation data with LHaloTree merger trees.
+
+    Used with the full-hydro THESAN-1 run (docs/tree_alpha.md section 9); only dark-matter
+    products are read -- group catalogs, merger trees and PartType1 density meshes.
 
     This is the production-ready loader shipped with BEoRN.  If you are
     writing a custom loader for a different simulation see
@@ -128,8 +131,8 @@ class ThesanLoader(MergerTreeLoader):
             methods — :meth:`load_merger_tree_data` and
             :meth:`get_halo_information_from_catalog` — are unavailable and
             raise; use it for grid preprocessing, not for a full solver run.
-        is_high_res (bool): ``True`` for THESAN-DARK 1 (2100³ particles),
-            ``False`` (default) for THESAN-DARK 2 (1050³ particles).
+        is_high_res (bool): ``True`` for THESAN-1 (2100³ dark-matter particles),
+            ``False`` (default) for THESAN-2 (1050³).
         density_cache_dir (Path | str | None): When set, painted density
             meshes are cached as ``.npy`` files in this directory, keyed by
             snapshot, mesh geometry, mass-assignment scheme, and subbox.

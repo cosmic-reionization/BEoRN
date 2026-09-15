@@ -34,10 +34,6 @@ except (ImportError, RuntimeError):
 
 
 class RadiationProfileSolver:
-    def profile_cache_namespace(self) -> str:
-        """Return the cache namespace for the radiation profiles."""
-        return "radiation_profiles_legacy"
-    
     """Compute radiation, heating and ionization profiles around sources.
 
     The solver produces arrays of X-ray emissivity, heating rates and
@@ -46,6 +42,10 @@ class RadiationProfileSolver:
     :class:`RadiationProfiles` instance.
     """
 
+    def profile_cache_namespace(self) -> str:
+        """Return the cache namespace for the radiation profiles."""
+        return "radiation_profiles_legacy"
+    
     def __init__(self, parameters: Parameters, redshifts: np.ndarray):
         """
         Args:
@@ -554,6 +554,13 @@ class RadiationProfileSolver:
         return rho_heat_full
 
 class RadiationProfileFstSolver(RadiationProfileSolver):
+    """Compute radiation profiles on a (mass, alpha, f_st, z) grid.
+
+    This solver extends the legacy single-f_st solver without modifying its
+    behavior. It precomputes one profile cube per f_st value and stacks the
+    results into a :class:`RadiationProfilesFStarGrid` instance.
+    """
+
     def profile_cache_namespace(self) -> str:
         """Return the cache namespace for f_st-grid radiation profiles.
 
@@ -624,13 +631,6 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
             )
             logger.info("f_st-grid radiation profiles computed and saved to cache.")
         return profiles
-    """Compute radiation profiles on a (mass, alpha, f_st, z) grid.
-
-    This solver extends the legacy single-f_st solver without modifying its
-    behavior. It precomputes one profile cube per f_st value and stacks the
-    results into a :class:`RadiationProfilesFStarGrid` instance.
-    """
-
     def __init__(self, parameters: Parameters, redshifts: np.ndarray):
         super().__init__(parameters, redshifts)
         self.f_st_grid = self._build_f_st_grid()

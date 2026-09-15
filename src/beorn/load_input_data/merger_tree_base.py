@@ -114,7 +114,7 @@ class MergerTreeLoader(BaseLoader):
             tuple of three arrays:
 
             - ``positions``              (N, 3) float — comoving positions in Mpc/h
-            - ``masses``                 (N,)   float — halo masses in M☉
+            - ``masses``                 (N,)   float — halo masses in M☉/h
             - ``subhalo_to_group_map``   (S,)   int   — for each subhalo entry
               in the tree, the group/FoF index it belongs to (length S ≥ N)
         """
@@ -205,7 +205,9 @@ class MergerTreeLoader(BaseLoader):
         """
         alpha_constant = getattr(self.parameters.source, "alpha_constant", None)
         alpha_constant_z = getattr(self.parameters.source, "alpha_constant_z", None)
+        alpha_source = "source.alpha_constant"
         if alpha_constant is None and alpha_constant_z is not None:
+            alpha_source = "source.alpha_constant_z (interpolated at this snapshot)"
             z_table, alpha_table = alpha_constant_z[0], alpha_constant_z[1]
             alpha_constant = float(
                 np.interp(self.redshifts[redshift_index], z_table, alpha_table)
@@ -297,7 +299,7 @@ class MergerTreeLoader(BaseLoader):
             # every halo with the wrong profile bin, so fail loudly instead.
             if not (alpha_range[0] <= alpha_constant < alpha_range[-1]):
                 raise ValueError(
-                    f"source.alpha_constant={alpha_constant} lies outside the paintable "
+                    f"{alpha_source}={alpha_constant} lies outside the paintable "
                     f"alpha grid solver.halo_mass_accretion_alpha="
                     f"[{alpha_range[0]}, {alpha_range[-1]}]."
                 )
@@ -679,6 +681,11 @@ class MergerTreeLoader(BaseLoader):
         - ``float``    — use that fixed value
         - ``"mean"``   — mean of ``fitted_alphas``
         - ``"median"`` — median of ``fitted_alphas``
+
+        For ``"mean"`` / ``"median"`` with no fitted alpha at all (empty ``fitted_alphas``) the
+        hardcoded last resort **0.6** is returned. That can still happen after short branches have
+        inherited a descendant's alpha: a snapshot where no halo has a fittable history and none
+        inherited one (typically the earliest, sparsest snapshots) falls back to 0.6 for every halo.
 
         Args:
             fitted_alphas (np.ndarray): Alphas already fitted from the tree

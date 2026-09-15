@@ -23,7 +23,7 @@ def vectorized_alpha_fit(redshifts: np.ndarray, mass_history: np.ndarray) -> np.
     z0 = redshifts[0]
     dz = z0 - redshifts[:]
     assert np.all(dz <= 0), "Redshift values must be ascending (now -> past)."
-    assert np.all(mass_history > 0), "Mass history must be non-negative."
+    assert np.all(mass_history > 0), "Mass history must be strictly positive."
 
 
     # since mass history is given in order of ascending redshift, the later mass is subtracted from the earlier mass

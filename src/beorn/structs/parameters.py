@@ -40,8 +40,7 @@ class SourceParameters:
     """upper energy cutoff for the xray band"""
 
     alS_xray: float = 1.00001
-    """TODO"""
-    """PL sed Xray part N ~ nu**-alS [nbr of photons/s/Hz]"""
+    """Power-law index of the X-ray SED, N ~ nu**-alS [nbr of photons/s/Hz]."""
 
     xray_normalisation: float = 3.4e40
     """Xray normalization [(erg/s) * (yr/Msun)] (astro-ph/0607234 eq22)"""
@@ -192,7 +191,9 @@ class SolverParameters:
     Stored inside the RadiationProfiles cache — does not need to be written to igm_data/igm_params.yaml."""
 
     fXh: Literal['constant', 'variable'] = 'constant'
-    """if fXh is constant here, it will take the value 0.11. Otherwise, we will compute the free e- fraction in neutral medium and take the fit fXh = xe**0.225"""
+    """Fraction of X-ray energy deposited as heat, fXh = x_e**0.225. ``'constant'`` fixes the free-electron
+    fraction at x_e = 2e-4, giving fXh = (2e-4)**0.225 ~ 0.147; ``'variable'`` uses the x_e history of the
+    neutral medium."""
 
     halo_mass_accretion_alpha: np.ndarray = field(default_factory=lambda: np.linspace(0.1, 0.9, 10))
     """Coefficient for exponential mass accretion. Since beorn distinguishes between accretion rates a range should be specified"""
@@ -204,7 +205,7 @@ class SolverParameters:
     """Maximum halo mass bin edge [Msun/h]."""
 
     halo_mass_nbin: int = 100
-    """Number of mass bins."""
+    """Number of mass bin **edges**, so ``halo_mass_nbin - 1`` bins (the adopted 80 gives 79 bins)."""
 
     HI_frac: float = 1 - 0.08
     """HI number fraction. Only used when running H_He_Final."""
