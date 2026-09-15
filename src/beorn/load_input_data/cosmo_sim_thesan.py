@@ -483,6 +483,12 @@ class ThesanLoader(MergerTreeLoader):
         with h5py.File(snap_files[0], "r") as f:
             num_files_header = int(f["Header"].attrs["NumFiles"])
             ngroups_total    = int(f["Header"].attrs["Ngroups_Total"])
+            if "Nsubgroups_Total" not in f["Header"].attrs:
+                raise KeyError(
+                    f"THESAN catalog {catalog_dir}: Header/Nsubgroups_Total is missing; it is needed "
+                    "to size the subhalo-to-group map exactly."
+                )
+            nsubgroups_total = int(f["Header"].attrs["Nsubgroups_Total"])
         if len(snap_files) != num_files_header:
             raise ValueError(
                 f"THESAN catalog {catalog_dir}: found {len(snap_files)} chunk file(s) but "
@@ -491,16 +497,16 @@ class ThesanLoader(MergerTreeLoader):
 
         with h5py.File(offset_file, "r") as f:
             group_offsets    = f["FileOffsets"]["Group"][:]
-            subhalo_offsets  = f["FileOffsets"]["Subhalo"][:]
 
-        # Pre-allocate with a margin above Header/Ngroups_Total; the exact count is
-        # verified against g_ptr after the read (finding 10).
+        # Groups: pre-allocate with a margin above Header/Ngroups_Total; the exact count is
+        # verified against g_ptr after the read (finding 10). Subhalos: sized exactly from
+        # Header/Nsubgroups_Total and verified the same way, replacing a heuristic of 1.5x the
+        # last file offset (review_2026-09-14 3d).
         n_groups_approx   = int(ngroups_total * 1.5) + 1
-        n_subhalos_approx = int(subhalo_offsets[-1] * 1.5)
 
         positions              = np.zeros((n_groups_approx, 3), dtype=np.float32)
         masses                 = np.zeros(n_groups_approx, dtype=np.float64)
-        subhalo_to_group_map   = np.zeros(n_subhalos_approx, dtype=np.int64)
+        subhalo_to_group_map   = np.zeros(nsubgroups_total, dtype=np.int64)
 
         g_ptr, s_ptr = 0, 0
         for snap_file in snap_files:
@@ -516,6 +522,11 @@ class ThesanLoader(MergerTreeLoader):
 
                 smap  = f["Subhalo"]["SubhaloGrNr"][:]
                 s_end = s_ptr + smap.shape[0]
+                if s_end > nsubgroups_total:
+                    raise ValueError(
+                        f"THESAN catalog {catalog_dir}: more subhalos than Header/Nsubgroups_Total = "
+                        f"{nsubgroups_total} (reached {s_end} in {snap_file})."
+                    )
                 subhalo_to_group_map[s_ptr:s_end] = smap
                 s_ptr = s_end
 
@@ -523,6 +534,13 @@ class ThesanLoader(MergerTreeLoader):
             raise ValueError(
                 f"THESAN catalog {catalog_dir}: read {g_ptr} groups across "
                 f"{len(snap_files)} chunk(s) but Header/Ngroups_Total = {ngroups_total}; "
+                "the catalog is incomplete."
+            )
+
+        if s_ptr != nsubgroups_total:
+            raise ValueError(
+                f"THESAN catalog {catalog_dir}: read {s_ptr} subhalos across "
+                f"{len(snap_files)} chunk(s) but Header/Nsubgroups_Total = {nsubgroups_total}; "
                 "the catalog is incomplete."
             )
 
