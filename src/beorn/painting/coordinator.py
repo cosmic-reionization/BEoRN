@@ -163,6 +163,16 @@ class PaintingCoordinator:
         return np.asarray(z_history[...]) if isinstance(z_history, h5py.Dataset) else np.asarray(z_history)
 
     @staticmethod
+    def _output_redshift(z_history: np.ndarray, z: float) -> float:
+        """Redshift a snapshot at loader redshift *z* is written under by ``paint_single``.
+
+        ``paint_single`` names each CoevalCube after the nearest profile redshift, so every
+        resume check must look for that name rather than the raw loader redshift
+        (review_2026-09-14 finding 6).
+        """
+        return float(z_history[int(np.argmin(np.abs(z_history - z)))])
+
+    @staticmethod
     def _small_profile_array(values) -> np.ndarray:
         """Materialize a small 1D HDF5-backed profile array when needed."""
         return np.asarray(values[...]) if isinstance(values, h5py.Dataset) else np.asarray(values)
@@ -548,11 +558,15 @@ class PaintingCoordinator:
                 self.output_handler.file_root,
                 **self.output_handler.write_kwargs
             )
+            # Test the profile-matched name paint_single writes, as paint_simple_loop does; the raw
+            # loader redshift misses files whenever the two grids differ (review_2026-09-14 finding 6).
+            z_history = self._profile_redshift_array(radiation_profiles.z_history)
+            output_z = {i: self._output_redshift(z_history, self.loader.redshifts[i]) for i in active_indices}
             if self.force_recompute:
                 missing_indices = list(active_indices)
                 n_cached = sum(
                     1 for i in active_indices
-                    if cube.snapshot_path(self.loader.redshifts[i]).exists()
+                    if cube.snapshot_path(output_z[i]).exists()
                 )
                 if n_cached:
                     self.logger.info(
@@ -562,7 +576,7 @@ class PaintingCoordinator:
             else:
                 missing_indices = [
                     i for i in active_indices
-                    if not cube.snapshot_path(self.loader.redshifts[i]).exists()
+                    if not cube.snapshot_path(output_z[i]).exists()
                 ]
                 n_cached = len(active_indices) - len(missing_indices)
                 if n_cached:
@@ -1280,13 +1294,11 @@ class PaintingCoordinator:
         """
         cores = self.parameters.simulation.cores
         fft_backend = _resolve_fft_backend(self.parameters.simulation.fft_backend)
-        # GPU handles internal parallelism; don't over-subscribe CPU threads in workers.
-        if fft_backend in _GPU_BACKENDS:
-            fft_workers = 1
-        elif cores <= 1:
-            fft_workers = -1
-        else:
-            fft_workers = max(1, (os.cpu_count() or 1) // cores)
+        # Bounded by this rank's allocated CPUs, like the final inverse FFTs. The old
+        # workers=-1 for cores <= 1 used every node CPU in every per-bin FFT, an N-fold
+        # oversubscription under N ranks per node (review_2026-09-14 finding 3). Computed here
+        # rather than passed in because this method also runs inside ProcessPoolExecutor workers.
+        fft_workers = _fft_worker_count(fft_backend in _GPU_BACKENDS, cores)
 
         nGrid = self.parameters.simulation.Ncell
         LBox = self.parameters.simulation.Lbox
@@ -1302,20 +1314,17 @@ class PaintingCoordinator:
             x_HII_profile[radial_grid < R_bubble / (1 + z)] = 1
             profile_fn = interp1d(radial_grid * (1 + z), x_HII_profile, bounds_error=False, fill_value=(1, 0))
             kernel = profile_to_3Dkernel(profile_fn, nGrid, LBox)
-            kmean = _checked_kernel_mean(kernel) if np.any(kernel > 0) else 0.0
-            if np.any(kernel > 0) and kmean > 0:
+            # fill_value=(1, 0) makes the origin cell read 1, so the kernel always has a positive
+            # cell and a bubble smaller than one cell is painted through that cell with this same
+            # renorm. The former sub-cell branch (`elif not np.any(kernel > 0)`) could never run
+            # and is removed (review_2026-09-14 finding 2).
+            kmean = _checked_kernel_mean(kernel)
+            if kmean > 0:
                 renorm = (
                     _trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
                     / (LBox / (1 + z)) ** 3 / kmean
                 )
                 fa_xHII = fourier_multiply_kernel(fa_halo, kernel, backend=fft_backend, workers=fft_workers) * renorm
-            elif not np.any(kernel > 0):
-                # Bubble smaller than a cell — represent direct halo weighting in Fourier space.
-                scale = (
-                    _trapz(x_HII_profile * 4 * np.pi * radial_grid ** 2, radial_grid)
-                    / (LBox / nGrid / (1 + z)) ** 3
-                )
-                fa_xHII = fa_halo * scale
 
         fa_lyal = None
         if "Grid_xal" in store_grids:

@@ -1039,3 +1039,14 @@ def test_mpi_paint_single_fstar_cache_roundtrip(tmp_path, monkeypatch):
     if rank == 0:
         assert len(gathered) == 2
         assert gathered[0] == gathered[1]
+
+
+def test_output_redshift_is_the_nearest_profile_redshift():
+    """paint_mpi's resume check must look for the file paint_single writes, which is named
+    after the nearest profile redshift, not the raw loader redshift (review_2026-09-14
+    finding 6)."""
+    z_history = np.array([35.0, 12.0, 10.04, 6.04])
+
+    assert PaintingCoordinator._output_redshift(z_history, 10.0312) == 10.04
+    assert PaintingCoordinator._output_redshift(z_history, 6.0) == 6.04
+    assert PaintingCoordinator._output_redshift(z_history, 12.0) == 12.0
