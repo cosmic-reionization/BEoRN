@@ -4,6 +4,8 @@ This module provides utilities that convert 1D radial profiles into
 3D convolution kernels and helpers to build stacked kernels that
 account for profiles extending beyond the simulation box.
 """
+from functools import lru_cache
+
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.fft import rfftn as _rfftn, irfftn as _irfftn
@@ -219,6 +221,14 @@ def profile_to_3Dkernel(profile: callable, nGrid: int, LB: float) -> np.ndarray:
 
     Returns:
         numpy.ndarray: 3D kernel of shape ``(nGrid, nGrid, nGrid)`` with the profile centered.
+
+    Note:
+        Every cell is a point sample of ``profile`` at the cell centre, and the centre cell
+        (index ``nGrid // 2``) is sampled at exactly r = 0. That is adequate for the
+        ionisation top-hat, whose ``fill_value=(1, 0)`` already makes the centre 1, but not
+        for the steep heating and Lyman-alpha profiles. The stacked builders therefore add
+        the cell-averaged self-term afterwards via :func:`_add_centre_cell_average`
+        (review_2026-09-14 finding 1). Keep this function a pure point sampler.
     """
     # r=0 must land exactly on index nGrid//2 with spacing LB/nGrid, so that the
     # ifftshift applied before the forward FFT (fourier_multiply_kernel / precompute_fft)
@@ -253,6 +263,72 @@ def _resample_centered(coarse: np.ndarray, nGrid: int) -> np.ndarray:
     m = np.rint((fine_idx - nGrid // 2) * (nGrid_min / nGrid)).astype(int) + nGrid_min // 2
     m = np.clip(m, 0, nGrid_min - 1)
     return coarse[np.ix_(m, m, m)]
+
+
+@lru_cache(maxsize=16)
+def _centre_cell_radii(cell: float, n_sub: int) -> np.ndarray:
+    """Radii of the midpoint sub-samples of one octant of the cube ``[-cell/2, cell/2]^3``.
+
+    The cube is symmetric under reflection in each axis and the midpoints of an even
+    ``n_sub`` grid mirror exactly, so the mean over one octant equals the mean over the
+    whole cell at 1/8 of the cost. Cached because every kernel of a snapshot uses the
+    same cell size.
+    """
+    h = (np.arange(n_sub // 2) + 0.5) / n_sub * cell
+    x, y, z = np.meshgrid(h, h, h, indexing="ij", sparse=True)
+    r = np.sqrt(x ** 2 + y ** 2 + z ** 2).ravel()
+    r.setflags(write=False)
+    return r
+
+
+def _centre_cell_average(rr: np.ndarray, values: np.ndarray, cell: float, n_sub: int = 64) -> float:
+    """Mean of a tabulated radial profile over the output cell that contains the source.
+
+    The heating and Lyman-alpha profiles rise roughly as 1/r^2 towards the source and are
+    tabulated only from ``rr[0] > 0`` (0.01 cMpc/h and ~1e-4 cMpc/h in production), so a
+    point sample at the kernel origin is meaningless: the ``fill_value=0`` interpolators in
+    the stacked builders return exactly 0 there, which removed the source's contribution
+    to its own cell (review_2026-09-14 finding 1). The physically meaningful kernel value is
+    the mean of ``profile(|r|)`` over the cube ``[-cell/2, cell/2]^3``, evaluated here with a
+    midpoint rule on an ``n_sub^3`` sub-grid.
+
+    Args:
+        rr: Increasing radii at which ``values`` is tabulated, in the units of ``cell``.
+        values: Profile values at ``rr``.
+        cell: Side length of one output cell, ``LBox / nGrid``.
+        n_sub: Sub-samples per axis. Must be even, so no sub-sample sits on r = 0.
+            At the production cell (64.6917 / 128 cMpc/h) the default 64 gives heating
+            averages to 0.1%, and Lyman-alpha averages about 1.1% low: their ~1/r^2 rise
+            continues down to ~1e-4 cMpc/h, so the midpoint rule converges only as
+            1/n_sub (-2.2% at 32, -0.56% at 128, at 5x the cost). That residual is far
+            below the 5-10% point-sampling error that remains in the face-neighbour cells.
+
+    Returns:
+        float: Mean profile value over the source's cell. Below ``rr[0]`` the profile is
+        extended flat at ``values[0]``; beyond ``rr[-1]`` it is zero, matching the builders.
+    """
+    if n_sub < 2 or n_sub % 2:
+        raise ValueError(f"n_sub must be a positive even integer; got {n_sub}")
+    rr = np.asarray(rr, dtype=float)
+    values = np.asarray(values, dtype=float)
+    if not np.all(np.diff(rr) > 0):
+        raise ValueError("rr must be strictly increasing")
+    radii = _centre_cell_radii(float(cell), int(n_sub))
+    return float(np.mean(np.interp(radii, rr, values, left=values[0], right=0.0)))
+
+
+def _add_centre_cell_average(kernel: np.ndarray, profile, rr, values, LBox: float, nGrid: int) -> np.ndarray:
+    """Replace the point-sampled self-term at the kernel origin by the cell average.
+
+    ``profile`` is the interpolator the builder passed to :func:`profile_to_3Dkernel`, so
+    ``profile(0)`` is exactly what that call stored at the origin (0 whenever ``rr[0] > 0``).
+    It is subtracted and the cell average added. The value is added, not overwritten,
+    because the origin cell also holds the periodic-image tail from
+    :func:`_resample_centered`, which must be kept.
+    """
+    c = nGrid // 2
+    kernel[c, c, c] += _centre_cell_average(rr, values, LBox / nGrid) - float(profile(0.0))
+    return kernel
 
 
 def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
@@ -305,6 +381,9 @@ def stacked_lyal_kernel(rr_al, lyal_array, LBox, nGrid, nGrid_min):
     # Register the coarse far-field tail to the fine grid by coordinate (finding 3),
     # instead of the old nearest-index diagonal broadcast.
     kernel_xal_HM = profile_to_3Dkernel(profile_xal_HM, nGrid, LBox) + _resample_centered(stacked_xal_ker, nGrid)
+    # The source's own cell: cell-average the profile instead of point-sampling r=0
+    # (review_2026-09-14 finding 1).
+    kernel_xal_HM = _add_centre_cell_average(kernel_xal_HM, profile_xal_HM, rr_al, lyal_array, LBox, nGrid)
 
     return kernel_xal_HM
 
@@ -358,5 +437,8 @@ def stacked_T_kernel(rr_T, T_array, LBox, nGrid, nGrid_min):
     # Register the coarse far-field tail to the fine grid by coordinate (finding 3),
     # instead of the old nearest-index diagonal broadcast.
     kernel_T_HM = profile_to_3Dkernel(profile_T_HM, nGrid, LBox) + _resample_centered(stacked_T_ker, nGrid)
+    # The source's own cell: cell-average the profile instead of point-sampling r=0
+    # (review_2026-09-14 finding 1).
+    kernel_T_HM = _add_centre_cell_average(kernel_T_HM, profile_T_HM, rr_T, T_array, LBox, nGrid)
 
     return kernel_T_HM
