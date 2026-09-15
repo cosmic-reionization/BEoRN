@@ -224,9 +224,9 @@ class RadiationProfileSolver:
     def _z_star_at(self, z: float) -> float:
         """Return the maximum lookback redshift for X-ray integration at redshift *z*.
 
-        When ``parameters.source.source_age`` is ``None`` (default), the
-        original hardcoded value of 35 is used.  Otherwise the lookback
-        window is capped at ``source_age`` Myr by integrating
+        When ``parameters.source.t_source_age`` is ``None`` (default),
+        ``parameters.solver.z_source_start`` is used.  Otherwise the lookback
+        window is capped at ``t_source_age`` Myr by integrating
         dt = dz / ((1+z) H(z)) backward from *z*.
 
         Args:
@@ -447,8 +447,8 @@ class RadiationProfileSolver:
 
         for i, z in enumerate(self.z_bins):
             # Determine the maximum lookback redshift for this snapshot.
-            # When source_age is set, this caps the integration window to the
-            # halo's lifetime; otherwise the full history back to z=35 is used.
+            # When t_source_age is set, this caps the integration window to the
+            # halo's lifetime; otherwise the full history back to z_source_start is used.
             z_star_i = self._z_star_at(z)
 
             if z > z_star_i:

@@ -231,7 +231,10 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
     Return rho_alpha : shape is (zz,rr,MM). Units : [pcm-2.s-1.Hz-1]
     """
     # TODO: remove hardcoded values
-    z_star = 35
+    # Lyman-alpha lookback limit = the source start redshift, as in rho_xray. This was a
+    # hardcoded 35 that ignored solver.z_source_start (review_2026-09-14 finding 8);
+    # t_source_age is not applied here (see its docstring).
+    z_star = parameters.solver.z_source_start
     h0 = parameters.cosmology.h0
     rectrunc = 23
 

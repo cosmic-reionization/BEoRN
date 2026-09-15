@@ -170,11 +170,13 @@ class SourceParameters:
     like ``solver.halo_mass_accretion_alpha``."""
 
     t_source_age: float = None
-    """Maximum source age in Myr.  When set, the X-ray and ionisation integrals
-    are limited to a lookback window of this duration rather than integrating
-    all the way back to ``solver.z_source_start``.  This prevents unphysically
-    old emission histories for halos that formed recently.  ``None`` (default)
-    preserves the original behaviour (integrate back to ``solver.z_source_start``).
+    """Maximum source age in Myr.  When set, the X-ray emission integral (``rho_xray``) is
+    limited to a lookback window of this duration rather than integrating all the way back
+    to ``solver.z_source_start``, which prevents unphysically old emission histories for
+    halos that formed recently.  Only the X-ray integral honours it: the Lyman-alpha
+    integral (``rho_alpha_profile``) always looks back to ``solver.z_source_start``, and the
+    bubble and heating ODEs integrate over ``solver.redshifts``.  ``None`` (default)
+    integrates back to ``solver.z_source_start``.
     """
 
 
@@ -214,11 +216,11 @@ class SolverParameters:
     """Redshift at which the gas decouples from CMB and starts cooling adiabatically."""
 
     z_source_start: float = 35.0
-    """Maximum lookback redshift for X-ray and ionisation integrals.  Sources are
-    assumed to have started emitting no earlier than this redshift.  When
-    ``source.source_age`` is ``None`` (default), the integral extends all the way
-    back to ``z_source_start``.  When ``source_age`` is set, the window is further
-    capped by the finite age — whichever limit is reached first applies."""
+    """Redshift at which sources start emitting: the maximum lookback redshift of the X-ray
+    (``rho_xray``) and Lyman-alpha (``rho_alpha_profile``) emission integrals.  For X-rays
+    only, ``source.t_source_age`` can cap the window further (whichever limit is reached
+    first applies).  ``R_bubble`` and ``rho_heat`` do not read it: they integrate over
+    ``solver.redshifts``, so extend that grid up to this redshift for them to start here."""
 
     ode_rtol: float = 1e-2
     """Relative tolerance for ODE integrations (R_bubble, rho_heat).
