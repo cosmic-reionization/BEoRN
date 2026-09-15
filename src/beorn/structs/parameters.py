@@ -581,6 +581,16 @@ class Parameters:
         ]
         return "\n".join(lines)
 
+    # ── KNOWN ISSUE: beorn_hash couples the output name to parallelism (review_2026-09-14 2c) ──
+    # beorn_hash hashes all of to_dict(self.simulation), which includes `cores` and `fft_backend`.
+    # Neither changes the painted physics, but changing either renames the
+    # igm_data_<tag>_<hash> output directory, so a run interrupted and resumed with a different
+    # rank layout or FFT backend silently starts again in a new directory instead of resuming.
+    # OPERATIONAL RULE: do not change simulation.cores or simulation.fft_backend between the
+    # launch and the resume of one run.
+    # Not fixed here: excluding them renames every existing output directory, the same kind of
+    # re-baseline as the fragile-hashing fix above (finding 12), so both belong in one deliberate
+    # commit rather than two.
     def beorn_hash(self) -> str:
         """Short MD5 hash of BEoRN-specific parameters (source, solver, simulation).
 
