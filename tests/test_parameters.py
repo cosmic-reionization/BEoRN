@@ -5,6 +5,8 @@ import types
 if "MAS_library" not in sys.modules:
     sys.modules["MAS_library"] = types.SimpleNamespace(MASL=None)
 
+import pytest
+
 from beorn.structs.parameters import Parameters
 
 
@@ -29,6 +31,17 @@ def test_profiles_fstar_hash_stable_across_sigma0_sigma1_mpiv_changes():
 
     assert base.profiles_fstar_hash() == mass_dependent.profiles_fstar_hash()
     assert base.profiles_fstar_hash() == other_mass_dependent.profiles_fstar_hash()
+
+
+@pytest.mark.parametrize("key, value", [("ode_rtol", 1e-6), ("ode_atol", 1e-10), ("ode_method", "LSODA")])
+def test_profile_hashes_change_with_ode_solver_settings(key, value):
+    """The tolerances and method change R_bubble and rho_heat, so a cube solved at other
+    settings must not be reused (review_2026-09-14 finding 4)."""
+    base = _make_params()
+    changed = _make_params()
+    setattr(changed.solver, key, value)
+    assert base.profiles_hash() != changed.profiles_hash()
+    assert base.profiles_fstar_hash() != changed.profiles_fstar_hash()
 
 
 def test_beorn_hash_changes_with_sigma0():

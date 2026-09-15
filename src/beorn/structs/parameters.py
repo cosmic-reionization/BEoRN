@@ -443,8 +443,10 @@ class Parameters:
     def profiles_hash(self) -> str:
         """Short MD5 hash of parameters that affect the 1D radiation profiles.
 
-        Covers source parameters, cosmology, solver redshifts, and the halo
-        mass / accretion-rate bins.  Intentionally excludes random seed, grid
+        Covers source parameters, cosmology, solver redshifts, the halo
+        mass / accretion-rate bins, and the ODE tolerances and method (they change
+        R_bubble and rho_heat, so a cube solved at other tolerances must not be
+        reused; review_2026-09-14 finding 4).  Intentionally excludes random seed, grid
         dimensions (Ncell, Lbox, py21cmfast_high_res_factor), and other
         simulation parameters that do not influence the 1D profile shapes.
         This allows profiles to be reused when re-running BEoRN with a
@@ -464,6 +466,9 @@ class Parameters:
             'z_decoupling': self.solver.z_decoupling,
             'z_source_start': self.solver.z_source_start,
             't_source_age': self.source.t_source_age,
+            'ode_rtol': self.solver.ode_rtol,
+            'ode_atol': self.solver.ode_atol,
+            'ode_method': self.solver.ode_method,
         }
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 
@@ -505,6 +510,9 @@ class Parameters:
             'z_decoupling': self.solver.z_decoupling,
             'z_source_start': self.solver.z_source_start,
             't_source_age': self.source.t_source_age,
+            'ode_rtol': self.solver.ode_rtol,
+            'ode_atol': self.solver.ode_atol,
+            'ode_method': self.solver.ode_method,
         }
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 
