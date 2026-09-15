@@ -163,6 +163,20 @@ class PaintingCoordinator:
         return np.asarray(z_history[...]) if isinstance(z_history, h5py.Dataset) else np.asarray(z_history)
 
     @staticmethod
+    def _profile_z_history(radiation_profiles) -> np.ndarray:
+        """Profile redshift grid of a loaded profile object or of a path-only stand-in.
+
+        MPI launches (``full_run_thesan.py``) hand ``paint_mpi`` a namespace carrying only
+        ``_file_path``, so each rank loads the large cube itself; the small ``z_history``
+        vector is then read straight from that file.
+        """
+        z_history = getattr(radiation_profiles, "z_history", None)
+        if z_history is None:
+            with h5py.File(radiation_profiles._file_path, "r") as f:
+                return np.asarray(f["z_history"][()])
+        return PaintingCoordinator._profile_redshift_array(z_history)
+
+    @staticmethod
     def _output_redshift(z_history: np.ndarray, z: float) -> float:
         """Redshift a snapshot at loader redshift *z* is written under by ``paint_single``.
 
@@ -560,7 +574,7 @@ class PaintingCoordinator:
             )
             # Test the profile-matched name paint_single writes, as paint_simple_loop does; the raw
             # loader redshift misses files whenever the two grids differ (review_2026-09-14 finding 6).
-            z_history = self._profile_redshift_array(radiation_profiles.z_history)
+            z_history = self._profile_z_history(radiation_profiles)
             output_z = {i: self._output_redshift(z_history, self.loader.redshifts[i]) for i in active_indices}
             if self.force_recompute:
                 missing_indices = list(active_indices)

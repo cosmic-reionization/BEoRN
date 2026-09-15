@@ -1050,3 +1050,18 @@ def test_output_redshift_is_the_nearest_profile_redshift():
     assert PaintingCoordinator._output_redshift(z_history, 10.0312) == 10.04
     assert PaintingCoordinator._output_redshift(z_history, 6.0) == 6.04
     assert PaintingCoordinator._output_redshift(z_history, 12.0) == 12.0
+
+
+def test_profile_z_history_reads_the_file_behind_a_path_only_stand_in(tmp_path):
+    """full_run_thesan.py's MPI launch passes paint_mpi a SimpleNamespace(_file_path=...) instead
+    of a loaded cube; the resume check must still find the profile redshift grid."""
+    z_history = np.array([35.0, 12.0, 10.04, 6.04])
+    path = tmp_path / "RadiationProfiles_test.h5"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("z_history", data=z_history)
+
+    stand_in = SimpleNamespace(_file_path=path)
+    loaded = SimpleNamespace(z_history=z_history)
+
+    np.testing.assert_array_equal(PaintingCoordinator._profile_z_history(stand_in), z_history)
+    np.testing.assert_array_equal(PaintingCoordinator._profile_z_history(loaded), z_history)
