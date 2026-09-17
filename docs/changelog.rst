@@ -2,6 +2,69 @@
 Changelog
 =========
 
+Unreleased
+----------
+
+Corrections from the 2026-09-14 internal review of the painting and profile code. **This is not a
+complete record of changes since v2.1.0** -- it lists only that review's user-visible results.
+
+Behaviour
+~~~~~~~~~
+
+* The stacked heating and Lyman-alpha painting kernels now include each source's contribution to
+  its own cell. That cell used to be a point sample of a steeply rising (~1/r^2) profile at r = 0,
+  which the interpolators returned as zero, so a source deposited nothing in the cell it occupies.
+  ``Grid_Temp``, ``Grid_xal`` and the derived ``Grid_dTb`` change as a result -- most at small
+  scales -- while ``Grid_xHII`` is unaffected. Maps painted with earlier versions are not
+  comparable in T_k or x_al.
+* The X-ray and Lyman-alpha emission histories no longer receive a duplicate zero anchor at
+  ``solver.z_source_start`` when the profile redshift grid already starts there. The duplicate made
+  the interpolator ramp the star-formation rate to zero across the top grid interval instead of
+  using the computed values. The painted effect is small (<= 3e-5 per cell where measured), but it
+  changes profile-cube contents.
+* ``rho_alpha_profile`` honours ``solver.z_source_start`` instead of a hardcoded 35.
+
+Caches -- action required when upgrading
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``profiles_hash`` and ``profiles_fstar_hash`` now cover ``solver.ode_rtol``, ``ode_atol`` and
+  ``ode_method``, and the f_st cube namespace records the grid spacing (``_log`` / ``_lin``).
+  Previously a tolerance change silently reused a cube solved at other tolerances. **Existing
+  profile cubes therefore resolve to new names and will not be found**: copy them to the new names
+  or let them be recomputed. The renaming alone does not change cube contents.
+* Note the emission-anchor fix above *does* change cube contents without changing the hash, so a
+  cube solved by an earlier version is still found under its old name. Use
+  ``--force-recompute-profiles`` or a fresh cache root if you need corrected profiles.
+
+Fixes
+~~~~~
+
+* MPI painting: the resume check now tests the filename ``paint_single`` actually writes -- the
+  nearest profile redshift -- as the serial loop already did. An MPI run whose loader redshifts
+  differ from the profile grid no longer repaints snapshots it has or skips ones it lacks.
+* The per-bin forward FFTs no longer run with ``workers=-1`` when several ranks share a node, which
+  oversubscribed the node's CPUs; the worker count is bounded by the CPUs allocated to each rank.
+* ``ThesanLoader`` sizes the subhalo-to-group map from ``Header/Nsubgroups_Total`` and verifies the
+  count, instead of guessing 1.5x the last file offset.
+* ``PaintingCoordinator``, ``RadiationProfileSolver`` and ``RadiationProfileFstSolver`` have class
+  docstrings again; they sat after the first method, so ``__doc__`` was ``None``.
+* Removed an unreachable branch in the ionisation-kernel path, and an assertion message that
+  contradicted its own check.
+
+Documentation
+~~~~~~~~~~~~~
+
+* Reading a struct from HDF5 is eager: every dataset is materialised and the file closed, so a
+  profile cube costs its full size in RAM (~10.9 GB for the largest THESAN-1 cube). Painting with
+  several MPI ranks avoids this -- each rank reads one redshift slice -- and a single-rank run now
+  warns when the cube is large relative to the memory available to the job.
+* ``beorn_hash`` includes ``simulation.cores`` and ``simulation.fft_backend``, so changing either
+  mid-run renames the output directory and silently breaks resume. Documented with the rule not to
+  change them between a run's launch and its resume.
+* Corrected parameter docstrings: halo masses are in Msun/h; ``fXh = 'constant'`` gives
+  (2e-4)**0.225 ~ 0.147, not 0.11; ``halo_mass_nbin`` counts bin *edges*; ``ThesanLoader`` reads
+  full-hydro THESAN, not THESAN-DARK.
+
 v2.1.0
 ------
 * Per-halo accretion rate α fitting from merger trees (Moll 2025, Master's thesis, ETH Zürich)
