@@ -1025,6 +1025,7 @@ class PaintingCoordinator:
             )
 
         self._raise_if_halos_outside_profile_coverage(halo_catalog, mass_range, zgrid)
+        self._raise_if_f_st_outside_profile_coverage(profiles.f_st_grid)
 
         self.logger.info(f'Painting {halo_catalog.size} halos at {zgrid=:.2f} ({z_index=:.0f}) using stochastic f_st sampling.')
 
@@ -1204,8 +1205,10 @@ class PaintingCoordinator:
         - f_st_paint_sigma0, f_st_paint_sigma1, f_st_paint_sigma_mpiv: mass-dependent
           scatter (lognormal distribution only) -- sigma_dex(Mh) = f_st_paint_sigma0 +
           f_st_paint_sigma1 * log10(Mh / f_st_paint_sigma_mpiv), see sigma_dex_for_mass()
-          and fit_thesan_fst.md section 6. Ignored (falls back to f_st_paint_sigma) when
-          f_st_paint_sigma0 is None.
+          and fit_thesan_fst.md section 6. Falls back to the constant f_st_paint_sigma when
+          f_st_paint_sigma0 is None. Setting f_st_paint_sigma0 with a 'normal' or
+          'uniform' distribution, or a non-zero f_st_paint_sigma1 without
+          f_st_paint_sigma0, raises ValueError instead of being silently ignored.
         - f_st_paint_min
         - f_st_paint_max
         - f_st_paint_seed
@@ -1217,11 +1220,22 @@ class PaintingCoordinator:
 
         Args:
             halo_masses (np.ndarray): Per-halo mass [Msun/h], one entry per halo to sample.
-                Only ``.size`` is used unless ``f_st_paint_sigma0`` is set, in which case the
-                lognormal scatter width is evaluated per halo from its actual mass.
+                Must be finite and positive. The values set the scatter only when
+                ``f_st_paint_sigma0`` is set, in which case the lognormal width is evaluated
+                per halo from its actual mass.
             rng (np.random.Generator): Snapshot-seeded RNG (see ``_make_f_st_rng``).
+
+        Raises:
+            ValueError: If any halo mass is zero, negative or non-finite, or if the scatter
+                configuration is inconsistent (see above).
         """
         halo_masses = np.asarray(halo_masses, dtype=float)
+        bad_mass = ~(np.isfinite(halo_masses) & (halo_masses > 0))
+        if np.any(bad_mass):
+            raise ValueError(
+                f"{int(bad_mass.sum())} of {halo_masses.size} halo mass(es) are zero, negative "
+                "or non-finite; refusing to sample f_st for them."
+            )
         halo_count = halo_masses.size
         source = self.parameters.source
         distribution = getattr(source, "f_st_paint_distribution", "lognormal").lower()
@@ -1230,8 +1244,20 @@ class PaintingCoordinator:
         sigma1 = float(getattr(source, "f_st_paint_sigma1", 0.0))
         sigma_mpiv = float(getattr(source, "f_st_paint_sigma_mpiv", 1e11))
         f_st_center = float(source.f_st)
-        f_st_min = float(getattr(source, "f_st_paint_min", getattr(source, "f_st_grid_min", 0.01)))
-        f_st_max = float(getattr(source, "f_st_paint_max", getattr(source, "f_st_grid_max", 1.0)))
+        f_st_min, f_st_max = self._f_st_paint_bounds()
+
+        if sigma0 is not None and distribution != "lognormal":
+            raise ValueError(
+                f"f_st_paint_sigma0 is set, but mass-dependent scatter is only defined for the "
+                f"'lognormal' distribution, not {distribution!r}. Unset f_st_paint_sigma0 "
+                "(and f_st_paint_sigma1) or switch to 'lognormal'."
+            )
+        if sigma0 is None and sigma1 != 0.0:
+            raise ValueError(
+                f"f_st_paint_sigma1={sigma1} is set without f_st_paint_sigma0; the "
+                "mass-dependent scatter needs both. Set f_st_paint_sigma0, or leave "
+                "f_st_paint_sigma1 at 0."
+            )
 
         if f_st_center <= 0:
             raise ValueError("parameters.source.f_st must be > 0 for stochastic f_st painting")
@@ -1260,6 +1286,35 @@ class PaintingCoordinator:
 
         return np.clip(sampled, f_st_min, f_st_max)
     
+    def _f_st_paint_bounds(self) -> tuple[float, float]:
+        """Clipping range ``(f_st_min, f_st_max)`` applied to sampled f_st values."""
+        source = self.parameters.source
+        f_st_min = float(getattr(source, "f_st_paint_min", getattr(source, "f_st_grid_min", 0.01)))
+        f_st_max = float(getattr(source, "f_st_paint_max", getattr(source, "f_st_grid_max", 1.0)))
+        return f_st_min, f_st_max
+
+    def _raise_if_f_st_outside_profile_coverage(self, f_st_grid) -> None:
+        """Fail early when sampled f_st can fall outside the precomputed f_st grid.
+
+        The f_st counterpart of :meth:`_raise_if_halos_outside_profile_coverage`. Sampled
+        values are clipped to ``[f_st_paint_min, f_st_paint_max]``, so that range must lie
+        inside the grid; otherwise ``_nearest_f_st_indices`` would silently snap every
+        out-of-range sample onto a grid end point.
+        """
+        f_st_grid = self._small_profile_array(f_st_grid)
+        grid_min, grid_max = float(f_st_grid.min()), float(f_st_grid.max())
+        f_st_min, f_st_max = self._f_st_paint_bounds()
+        # Relative tolerance: the grid is logspace/linspace-built and read back from HDF5.
+        rtol = 1e-9
+        if f_st_min >= grid_min * (1 - rtol) and f_st_max <= grid_max * (1 + rtol):
+            return
+        raise RuntimeError(
+            f"f_st painting range [{f_st_min:.6g}, {f_st_max:.6g}] (f_st_paint_min/max) lies "
+            f"outside the precomputed f_st grid [{grid_min:.6g}, {grid_max:.6g}]. Samples "
+            "outside the grid would be snapped onto its end points. Narrow "
+            "f_st_paint_min/max, or widen f_st_grid_min/max and recompute the profiles."
+        )
+
     def _nearest_f_st_indices(self, sampled_f_st: np.ndarray, f_st_grid: np.ndarray) -> np.ndarray:
         """Map sampled f_st values to the nearest precomputed f_st-grid index."""
         f_st_grid = self._small_profile_array(f_st_grid)
