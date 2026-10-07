@@ -230,6 +230,37 @@ class SolverParameters:
     ode_atol: float = 1e-2
     """Absolute tolerance for ODE integrations (R_bubble, rho_heat)."""
 
+    numerics: Literal['v2', 'legacy'] = 'v2'
+    """Numerical scheme of the profile solver and the painter (nonuniform-fix, 2026-10).
+
+    ``'v2'`` (default): continuous source onset (emission rates evaluated on the analytic
+    bin-centre trajectory at every integration point, so the ``source.halo_mass_min`` cutoff
+    acts at the exact crossing time), the exponential-integrator bubble solve, the exact
+    heating quadrature on an internal redshift grid, log-M weight-split interpolation when
+    painting, and the automatic top-edge check of the mass grid.
+
+    ``'legacy'``: the pre-2026-10 scheme, bit-for-bit: emission tabulated at the profile
+    redshifts and interpolated, ``solve_ivp`` for R_bubble and rho_heat, nearest-bin painting,
+    no mass-grid adjustment. Every v2-only field below is then ignored, and the three
+    parameter hashes are exactly those of the old code, so old runs and caches are reproduced
+    by adding ``numerics: legacy`` to their yaml."""
+
+    onset_internal_refine: int = 16
+    """v2 only: the X-ray heating integral is evaluated on an internal redshift grid with this
+    many sub-intervals (uniform in scale factor) per profile-redshift interval."""
+
+    xray_dz_prime: float = 0.02
+    """v2 only: lookback-redshift spacing of the X-ray emission integral in ``rho_xray``
+    (legacy hard-codes 0.1)."""
+
+    bubble_substeps: int = 2000
+    """v2 only: sub-steps per profile-redshift interval of the exponential integrator for the
+    ionized-bubble volume."""
+
+    mass_top_check: bool = True
+    """v2 only: before the profiles are computed, raise ``halo_mass_bin_max`` (at fixed bin
+    width) if a painted halo traced back to the reference redshift would lie above it."""
+
     ode_method: str = 'RK45'
     """Integration method passed to scipy.integrate.solve_ivp for R_bubble and rho_heat.
     'RK45' (default) is fine for non-stiff or mildly stiff systems.
@@ -238,6 +269,11 @@ class SolverParameters:
     rates or very fine redshift grids at high z)."""
 
     # derived properties that are directly related to the parameters
+    @property
+    def is_legacy(self) -> bool:
+        """True when the pre-2026-10 numerical scheme is selected (``numerics == 'legacy'``)."""
+        return self.numerics == 'legacy'
+
     @property
     def halo_mass_bins(self) -> np.ndarray:
         return np.logspace(np.log10(self.halo_mass_bin_min), np.log10(self.halo_mass_bin_max), self.halo_mass_nbin, base=10)
@@ -255,6 +291,14 @@ class SolverParameters:
             self.redshifts = np.array(self.redshifts)
         if isinstance(self.halo_mass_accretion_alpha, list):
             self.halo_mass_accretion_alpha = np.array(self.halo_mass_accretion_alpha)
+        if self.numerics not in ('v2', 'legacy'):
+            raise ValueError(f"solver.numerics must be 'v2' or 'legacy', got {self.numerics!r}")
+        if int(self.onset_internal_refine) < 1:
+            raise ValueError("solver.onset_internal_refine must be >= 1")
+        if int(self.bubble_substeps) < 10:
+            raise ValueError("solver.bubble_substeps must be >= 10")
+        if not float(self.xray_dz_prime) > 0:
+            raise ValueError("solver.xray_dz_prime must be > 0")
 
 
 
@@ -308,6 +352,13 @@ class SimulationParameters:
 
     compute_x_coll_fluctuations: bool = True
     """Whether or not to include the fluctuations in the collisional coupling coefficient x_coll when computing the x_tot fraction."""
+
+    mass_interpolation: Literal['log_linear', 'none'] = 'log_linear'
+    """How halos are assigned to profile mass bins when painting. ``'log_linear'`` (default,
+    v2): each halo is split between the two neighbouring bin centres with weights linear in
+    log M (exact for the linear T_k / x_alpha sums, volume-conserving for x_HII), with a zero
+    knot at ``source.halo_mass_min``. ``'none'``: nearest-bin painting. Ignored (treated as
+    ``'none'``) when ``solver.numerics == 'legacy'``."""
 
     degrade_resolution: int = 1
     """Downsample density grids read from N-body files by this integer factor before painting.
@@ -431,11 +482,43 @@ class Parameters:
     #   invariant under np.set_printoptions changes and across numpy string forms.
     # Left as-is for now: within one numpy version at default print options the hash is
     # self-consistent (all existing runs are fine); the fix is a deliberate re-baseline.
+    # Fields added by the nonuniform-fix (2026-10). Under numerics == 'legacy' they are dropped
+    # from every hash, so a legacy configuration hashes exactly as it did before they existed.
+    _V2_SOLVER_KEYS = ("numerics", "onset_internal_refine", "xray_dz_prime", "bubble_substeps",
+                       "mass_top_check")
+    _V2_SIMULATION_KEYS = ("mass_interpolation",)
+
+    def _strip_v2_keys(self, d: dict) -> dict:
+        """Remove the v2-only keys from a ``to_dict`` tree when the legacy scheme is selected."""
+        if not self.solver.is_legacy:
+            return d
+        if "solver" in d:
+            d["solver"] = {k: v for k, v in d["solver"].items() if k not in self._V2_SOLVER_KEYS}
+        if "simulation" in d:
+            d["simulation"] = {k: v for k, v in d["simulation"].items() if k not in self._V2_SIMULATION_KEYS}
+        return d
+
+    def _v2_profile_keys(self) -> dict:
+        """Profile-shaping v2 settings (empty for legacy, so legacy profile hashes are unchanged)."""
+        if self.solver.is_legacy:
+            return {}
+        return {
+            'numerics': self.solver.numerics,
+            'onset_internal_refine': int(self.solver.onset_internal_refine),
+            'xray_dz_prime': float(self.solver.xray_dz_prime),
+            'bubble_substeps': int(self.solver.bubble_substeps),
+        }
+
+    @property
+    def mass_interpolation_active(self) -> bool:
+        """True when painting splits halos between mass nodes (v2 and ``log_linear``)."""
+        return (not self.solver.is_legacy) and self.simulation.mass_interpolation == 'log_linear'
+
     def unique_hash(self) -> str:
         """
         Generates a unique hash for the current set of parameters. This can be used as a unique key when caching the computations.
         """
-        dict_params = to_dict(self)
+        dict_params = self._strip_v2_keys(to_dict(self))
         # using the string representation of the dictionary is not optimal because it is not guaranteed to be the same for the same dictionary (if the order of the keys is different for instance)
         # but the key is that the hashes are guaranteed to be different for unique parameter sets
         # See the "KNOWN ISSUE: fragile hashing (finding 12)" note above.
@@ -473,6 +556,7 @@ class Parameters:
             'ode_atol': self.solver.ode_atol,
             'ode_method': self.solver.ode_method,
         }
+        d.update(self._v2_profile_keys())
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 
     # Keys in the source section that control stochastic painting but do not
@@ -517,6 +601,7 @@ class Parameters:
             'ode_atol': self.solver.ode_atol,
             'ode_method': self.solver.ode_method,
         }
+        d.update(self._v2_profile_keys())
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 
     def to_yaml(self, path: Path, exclude_keys: "set[str] | None" = None) -> None:
@@ -606,11 +691,11 @@ class Parameters:
         but does not affect the underlying physics model — it is already encoded
         in the input_tag.
         """
-        d = {
+        d = self._strip_v2_keys({
             'source': to_dict(self.source),
             'solver': to_dict(self.solver),
             'simulation': to_dict(self.simulation),
-        }
+        })
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 
 
