@@ -22,8 +22,8 @@ from .. import constants
 # TODO: replace these unit conversions by astropy units
 from ..constants import m_p_in_Msun, km_per_Mpc, h_eV_sec, cm_per_Mpc, E_HI, E_HeI, kb_eV_per_K, rhoc0
 from ..astro import f_Xh, f_star_Halo, eps_xray
-from .helpers import Ngdot_ion, rho_alpha_profile, cum_optical_depth, emission_history_interpolator
-from .massaccretion import mass_accretion
+from .helpers import Ngdot_ion, rho_alpha_profile, cum_optical_depth, emission_history_interpolator, emission_rate_fn
+from .massaccretion import mass_accretion, trajectory_at
 from copy import deepcopy
 logger = logging.getLogger(__name__)
 try:
@@ -31,6 +31,11 @@ try:
     MPI_ENABLED = True
 except (ImportError, RuntimeError):
     MPI_ENABLED = False
+
+
+def _is_legacy(parameters) -> bool:
+    """Legacy numerics? Objects without the v2 switch (e.g. test doubles) are treated as legacy."""
+    return bool(getattr(parameters.solver, "is_legacy", True))
 
 
 class RadiationProfileSolver:
@@ -194,17 +199,18 @@ class RadiationProfileSolver:
                 "Set parameters.solver.fXh = 'constant' to use the default approximation (x_e = 2e-4)."
             )
 
-        logger.info(f"Computing profiles for {self.z_bins.size} redshifts, {self.parameters.solver.halo_mass_bins.size - 1} halo mass bins and {self.parameters.solver.halo_mass_accretion_alpha.size - 1} alpha bins.")
-        r_bubble = self.R_bubble()
-
-        rho_xray = self.rho_xray(self.r_grid, x_e)
-        rho_heat = self.rho_heat(rho_xray)
-
+        logger.info(f"Computing profiles for {self.z_bins.size} redshifts, {self.parameters.solver.halo_mass_bins.size - 1} halo mass bins and {self.parameters.solver.halo_mass_accretion_alpha.size - 1} alpha bins (numerics={getattr(self.parameters.solver, 'numerics', 'legacy')}).")
         r_lyal = np.logspace(-5, 2, 1000, base=10)
         # TODO - recheck this:
         # physical distance for lyal profile. Never goes further away than 10**2 = 100 pMpc/h (checked)
 
-        rho_alpha = rho_alpha_profile(self.parameters, self.z_bins, r_lyal, halo_mass, halo_mass_derivative)
+        if _is_legacy(self.parameters):
+            r_bubble = self.R_bubble()
+            rho_xray = self.rho_xray(self.r_grid, x_e)
+            rho_heat = self.rho_heat(rho_xray)
+            rho_alpha = rho_alpha_profile(self.parameters, self.z_bins, r_lyal, halo_mass, halo_mass_derivative)
+        else:
+            r_bubble, rho_xray, rho_heat, rho_alpha = self._continuous_profiles(self.parameters, r_lyal)
         logger.debug(f"Results have shapes: {rho_xray.shape=}, {rho_heat.shape=}, {r_bubble.shape=}, {r_lyal.shape=}, {rho_alpha.shape=}")
 
         return RadiationProfiles(
@@ -220,6 +226,167 @@ class RadiationProfileSolver:
         )
 
 
+
+    # ------------------------------------------------------------------------------------
+    # v2 numerics (solver.numerics == 'v2'): continuous source onset
+    # ------------------------------------------------------------------------------------
+    # Emission rates are evaluated on the analytic bin-centre trajectory at every integration
+    # point instead of being tabulated at the profile redshifts and interpolated between them.
+    # The source.halo_mass_min cutoff therefore acts at the exact crossing time of each
+    # trajectory (in the legacy scheme a source switching on between two profile redshifts is
+    # credited with a linear ramp from the earlier one). See
+    # fst_stochastic/docs/src_fix_plan_2026-10-01.md (D1-D4) and the prototype
+    # fst_stochastic/review/phase3_onset.py, which this reproduces.
+
+    def _z_ref(self) -> float:
+        """Reference redshift of the mass grid (where the bin edges are defined): min(z_bins)."""
+        return float(np.min(self.z_bins))
+
+    def _continuous_profiles(self, parameters: Parameters, r_lyal: np.ndarray):
+        """(R_bubble, rho_xray, rho_heat, rho_alpha) on the profile grid, v2 scheme."""
+        m_ref = parameters.solver.halo_mass_bin_centers
+        alphas = parameters.solver.halo_mass_accretion_alpha_bin_centers
+        z_ref = self._z_ref()
+        r_bubble = self._R_bubble_continuous(parameters, m_ref, alphas, z_ref)
+        rho_xray, rho_heat = self._xray_and_heat_continuous(parameters, m_ref, alphas, z_ref)
+        halo_mass, halo_mass_derivative = mass_accretion(parameters, self.z_bins, m_ref, alphas)
+        rho_alpha = rho_alpha_profile(parameters, self.z_bins, r_lyal, halo_mass, halo_mass_derivative,
+                                      rate_fn=emission_rate_fn(parameters, m_ref, alphas, z_ref))
+        return r_bubble, rho_xray, rho_heat, rho_alpha
+
+    def _R_bubble_continuous(self, parameters: Parameters, m_ref, alphas, z_ref) -> np.ndarray:
+        """Ionized-bubble radius by an exponential integrator (v2).
+
+        The bubble volume obeys the linear ODE dV/da = P(a) - B(a) V with source
+        P = K Ngdot/n_b and recombination B = K alpha_B C h^3/cm^3 n_b/a^3, K = km_per_Mpc/(H a).
+        Over each of ``solver.bubble_substeps`` uniform sub-steps h per profile interval:
+        V <- V exp(-dI) + h/2 (P_j exp(-dI) + P_{j+1}), dI = h (B_j + B_{j+1})/2, with Ngdot
+        evaluated analytically on the trajectory at every sub-step (so the onset step lands
+        within one sub-step of the exact crossing). Second order, unconditionally stable in
+        the recombination term, and independent of the other columns (no shared error norm).
+        """
+        Ob, h0 = parameters.cosmology.Ob, parameters.cosmology.h0
+        nb = (Ob * constants.rhoc0) / (constants.m_p_in_Msun * h0)
+        crec = alpha_HII(1e4) * parameters.solver.clumping / cm_per_Mpc ** 3 * h0 ** 3
+        nsub = int(parameters.solver.bubble_substeps)
+        aa = 1.0 / (1.0 + self.z_bins)
+        V = np.zeros((m_ref.size, alphas.size))
+        out = np.zeros((m_ref.size, alphas.size, aa.size))
+        for k in range(aa.size - 1):
+            a_sub = np.linspace(aa[k], aa[k + 1], nsub + 1)
+            z_sub = 1.0 / a_sub - 1.0
+            Mh, dM = trajectory_at(parameters, z_sub, m_ref, alphas, z_ref)
+            N = Ngdot_ion(parameters, z_sub[None, None, :], Mh, dM)
+            N[..., z_sub > parameters.solver.z_source_start] = 0.0
+            K = km_per_Mpc / (hubble(z_sub, parameters) * a_sub)
+            B = K * crec * nb / a_sub ** 3
+            P = (K / nb)[None, None, :] * N
+            for j in range(nsub):
+                h = a_sub[j + 1] - a_sub[j]
+                e = np.exp(-0.5 * h * (B[j] + B[j + 1]))
+                V = V * e + 0.5 * h * (P[..., j] * e + P[..., j + 1])
+            out[..., k + 1] = V
+        np.clip(out, 0, None, out=out)
+        return (out * 3 / (4 * np.pi)) ** (1 / 3)
+
+    def _internal_grid(self, refine: int):
+        """Profile z grid refined ``refine`` x (uniform in scale factor) between neighbours.
+
+        Returns ``(z_int, idx)``: z_int descending, and the positions of the profile redshifts
+        in it (kept exact)."""
+        aa = 1.0 / (1.0 + self.z_bins)
+        pieces = [np.linspace(aa[k], aa[k + 1], refine + 1)[:-1] for k in range(aa.size - 1)]
+        idx = np.arange(aa.size) * refine
+        a_int = np.concatenate(pieces + [aa[-1:]])
+        z_int = 1.0 / a_int - 1.0
+        z_int[idx] = self.z_bins
+        return z_int, idx
+
+    def _xray_and_heat_continuous(self, parameters: Parameters, m_ref, alphas, z_ref, chunk_bytes: float = 2e9):
+        """rho_xray and rho_heat on the profile grid, v2.
+
+        rho_xray is computed on the internal grid (``solver.onset_internal_refine``) with the
+        analytic lookback rate and lookback spacing ``solver.xray_dz_prime``; the heating is the
+        exact quadrature of d(a^2 T)/da = a^2 gamma on that grid (no ODE solver, never
+        negative); both are subsampled at the profile redshifts. Alpha columns are processed in
+        chunks so the internal-grid arrays stay below ~``chunk_bytes``.
+        """
+        z_int, idx = self._internal_grid(int(parameters.solver.onset_internal_refine))
+        xe = np.full(z_int.size, 2e-4)
+        n_r, n_m, n_a = self.r_grid.size, m_ref.size, alphas.size
+        per_alpha = 2 * n_r * n_m * z_int.size * 8
+        step = max(1, int(chunk_bytes // max(per_alpha, 1)))
+        rho_xray = np.zeros((n_r, n_m, n_a, self.z_bins.size))
+        rho_heat = np.zeros_like(rho_xray)
+        for a0 in range(0, n_a, step):
+            sl = slice(a0, min(n_a, a0 + step))
+            rate = emission_rate_fn(parameters, m_ref, alphas[sl], z_ref)
+            x_int = self._rho_xray_on(parameters, self.r_grid, z_int, xe, rate, n_m, sl.stop - sl.start,
+                                      float(parameters.solver.xray_dz_prime))
+            h_int = self._heat_quadrature(parameters, z_int, x_int)
+            rho_xray[:, :, sl, :] = x_int[..., idx]
+            rho_heat[:, :, sl, :] = h_int[..., idx]
+        return rho_xray, rho_heat
+
+    def _rho_xray_on(self, parameters: Parameters, rr, z_grid, xe, rate_fn, n_mass, n_alpha, dz_prime):
+        """Same physics as :meth:`rho_xray`, on an arbitrary z grid with a given lookback-rate
+        callable and lookback spacing (``rho_xray`` is this with ``self.z_bins``, the tabulated
+        interpolator and dz' = 0.1)."""
+        Om, Ob, h0 = parameters.cosmology.Om, parameters.cosmology.Ob, parameters.cosmology.h0
+        Emin, Emax, NE = parameters.source.energy_cutoff_min_xray, parameters.source.energy_cutoff_max_xray, 50
+        nb0 = rhoc0 * Ob / (m_p_in_Msun * h0)
+        nu = np.logspace(np.log(Emin / constants.h_eV_sec), np.log(Emax / constants.h_eV_sec), NE, base=np.e)
+        f_He_bynumb = 1 - parameters.solver.HI_frac
+        nH0, nHe0 = (1 - f_He_bynumb) * nb0, f_He_bynumb * nb0
+        original = self.parameters
+        self.parameters = parameters          # _z_star_at reads self.parameters
+        try:
+            out = np.zeros((len(rr), n_mass, n_alpha, len(z_grid)))
+            for i, z in enumerate(z_grid):
+                z_star_i = self._z_star_at(z)
+                if z > z_star_i:
+                    continue
+                N_prime_i = max(4, int((z_star_i - z) / dz_prime))
+                z_prime = np.logspace(np.log(z), np.log(z_star_i), N_prime_i, base=np.e)
+                rcom_prime = comoving_distance(z_prime, parameters) * h0
+                rate = rate_fn(z_prime)
+
+                def integrand(nu_val):
+                    tau_prime = cum_optical_depth(z_prime, nu_val * constants.h_eV_sec, parameters)
+                    nu_prime = nu_val[:, None] * ((1 + z_prime) / (1 + z))[None, :]
+                    eps_X = eps_xray(nu_prime, parameters)
+                    fac = (np.exp(-tau_prime) * eps_X)[:, None, None, :] * rate[None, ...]
+                    fac_r = interp1d(rcom_prime, fac, axis=-1, fill_value=0.0, bounds_error=False)(rr)
+                    fac_r = np.moveaxis(fac_r, -1, 1)
+                    pref = ((nH0 / nb0) * sigma_HI(nu_val * h_eV_sec) * (nu_val * h_eV_sec - E_HI)
+                            + (nHe0 / nb0) * sigma_HeI(nu_val * h_eV_sec) * (nu_val * h_eV_sec - E_HeI))
+                    return pref[:, None, None, None] * fac_r
+
+                heat = trapezoid(integrand(nu), nu, axis=0)
+                out[..., i] = f_Xh(xe[i]) / (4 * np.pi * (rr / (1 + z)) ** 2)[:, None, None] * heat / (cm_per_Mpc / h0) ** 2
+        finally:
+            self.parameters = original
+        return out
+
+    @staticmethod
+    def _heat_quadrature(parameters: Parameters, z_grid, rho_xray, nsub: int = 64) -> np.ndarray:
+        """Exact solution of dT/da = gamma - 2T/a with T(a0) = 0: T(a) = a^-2 int a'^2 gamma da'.
+
+        gamma = 2 rho_xray / (3 k_B a H) * km_per_Mpc, with rho_xray linear in a between grid
+        points (the interpolant the legacy ODE uses). The integrand is linear in rho on each
+        interval, so the only quadrature is over the smooth factor 2 a km_per_Mpc/(3 k_B H(a)),
+        done with ``nsub`` trapezoid sub-steps (converged to ~1e-5). Never negative."""
+        aa = 1.0 / (1.0 + np.asarray(z_grid, dtype=float))
+        out = np.zeros_like(rho_xray)
+        acc = np.zeros(rho_xray.shape[:-1])
+        for k in range(aa.size - 1):
+            a_sub = np.linspace(aa[k], aa[k + 1], nsub + 1)
+            w = (a_sub - aa[k]) / (aa[k + 1] - aa[k])
+            f = 2.0 * a_sub * km_per_Mpc / (3.0 * kb_eV_per_K * hubble(1.0 / a_sub - 1.0, parameters))
+            c0, c1 = trapezoid(f * (1 - w), a_sub), trapezoid(f * w, a_sub)
+            acc = acc + rho_xray[..., k] * c0 + rho_xray[..., k + 1] * c1
+            out[..., k + 1] = acc / aa[k + 1] ** 2
+        return out
 
     def _z_star_at(self, z: float) -> float:
         """Return the maximum lookback redshift for X-ray integration at redshift *z*.
@@ -674,6 +841,10 @@ class RadiationProfileFstSolver(RadiationProfileSolver):
         halo_mass_derivative: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         r_lyal = np.logspace(-5, 2, 1000, base=10)
+        if not _is_legacy(parameters):
+            # v2: per-f_st parameters carry f_st into the analytic emission rate
+            r_bubble, rho_xray, rho_heat, rho_alpha = self._continuous_profiles(parameters, r_lyal)
+            return r_bubble, rho_xray, rho_heat, rho_alpha
         original_parameters = self.parameters
         try:
             self.parameters = parameters

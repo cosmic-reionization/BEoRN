@@ -237,7 +237,31 @@ def emission_history_interpolator(z_bins: np.ndarray, rate: np.ndarray, z_anchor
     return interp1d(z_bins, rate, axis=-1, fill_value='extrapolate')
 
 
-def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.ndarray, halo_mass: np.ndarray, halo_mass_derivative: np.ndarray):
+def emission_rate_fn(parameters: Parameters, m_ref: np.ndarray, alphas: np.ndarray, z_ref: float):
+    """Analytic star-formation rate along the bin-centre trajectories (v2 continuous onset).
+
+    Returns a callable ``rate(z_prime)`` giving ``Ob/Om * f_star(M(z')) * dM/dt`` with shape
+    ``(len(m_ref), len(alphas), len(z_prime))`` -- the same contract as the callable returned by
+    :func:`emission_history_interpolator`, but evaluated exactly at every ``z_prime`` instead of
+    interpolated between profile redshifts. ``f_star_Halo`` is zero below
+    ``source.halo_mass_min``, so the switch-on cutoff acts at the exact crossing; the rate is
+    also zero above ``solver.z_source_start``.
+    """
+    from .massaccretion import trajectory_at
+    ob_om = parameters.cosmology.Ob / parameters.cosmology.Om
+    z_start = parameters.solver.z_source_start
+
+    def rate(z_prime):
+        z_prime = np.atleast_1d(np.asarray(z_prime, dtype=float))
+        Mh, dM = trajectory_at(parameters, z_prime, m_ref, alphas, z_ref)
+        out = ob_om * f_star_Halo(parameters, Mh) * dM
+        out[..., z_prime > z_start] = 0.0
+        return out
+
+    return rate
+
+
+def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.ndarray, halo_mass: np.ndarray, halo_mass_derivative: np.ndarray, rate_fn=None):
     """
     Ly-al coupling profile
     of shape (r_grid)
@@ -273,8 +297,13 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
 
     # Build dMdt_star_int once over the full redshift history, zero at z_star. z_prime is
     # always in [z_current, z_star], so it is never queried below the lowest z_bin.
-    dMdt_star_full = halo_mass_derivative * f_star_Halo(parameters, halo_mass) * parameters.cosmology.Ob / parameters.cosmology.Om
-    dMdt_star_int = emission_history_interpolator(z_bins, dMdt_star_full, z_star)
+    # rate_fn (v2): the analytic lookback rate of emission_rate_fn; otherwise (legacy) the rate
+    # tabulated at the profile redshifts and interpolated between them.
+    if rate_fn is not None:
+        dMdt_star_int = rate_fn
+    else:
+        dMdt_star_full = halo_mass_derivative * f_star_Halo(parameters, halo_mass) * parameters.cosmology.Ob / parameters.cosmology.Om
+        dMdt_star_int = emission_history_interpolator(z_bins, dMdt_star_full, z_star)
 
     for i, z in enumerate(z_bins):
         if z > z_star:

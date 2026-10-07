@@ -60,3 +60,22 @@ def mass_accretion_derivative(parameters: Parameters, halo_mass: np.ndarray, z_b
     # using the function from above we can formulate an analytical expression for the derivative:
     # dMh/dt = Mh * alpha * H(z) * (z+1)
     return halo_mass * alpha_bins[None, :, None] * ((1 + z_bins) * Hubble(z_bins, parameters))[None, None, :]
+
+
+def trajectory_at(parameters: Parameters, z: np.ndarray, m_ref: np.ndarray, alphas: np.ndarray,
+                  z_ref: float) -> tuple[np.ndarray, np.ndarray]:
+    """Halo mass and dM/dt on the exponential trajectories at arbitrary redshifts.
+
+    Same model as :func:`mass_accretion`, ``M(z) = M_ref * exp(alpha * (z_ref - z))``, but with
+    the reference redshift given explicitly, so it can be evaluated on any sub-grid (the v2
+    continuous-onset solver, ``solver.numerics == 'v2'``).
+
+    Returns:
+        ``(Mh, dMh_dt)``, each of shape ``(len(m_ref), len(alphas), len(z))``.
+    """
+    z = np.atleast_1d(np.asarray(z, dtype=float))
+    m_ref = np.asarray(m_ref, dtype=float)
+    alphas = np.asarray(alphas, dtype=float)
+    Mh = m_ref[:, None, None] * np.exp(alphas[None, :, None] * (z_ref - z[None, None, :]))
+    dMh_dt = Mh * alphas[None, :, None] * ((1 + z) * Hubble(z, parameters))[None, None, :]
+    return Mh, dMh_dt
