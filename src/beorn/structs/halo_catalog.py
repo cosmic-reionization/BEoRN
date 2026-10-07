@@ -38,6 +38,10 @@ class HaloCatalog:
     Inputs that provide a mass history will override this value to have the same shape as the masses array.
     """
 
+    weights: np.ndarray = None
+    """Optional per-halo painting weights (v2 log-M interpolation: the share of a halo painted
+    with one mass bin). ``None`` means weight 1 for every halo, i.e. the legacy behaviour."""
+
     def __post_init__(self):
         self.masses = np.asarray(self.masses)
         assert self.positions.shape[0] == self.masses.size, "Halo catalog arrays must have the same length."
@@ -53,6 +57,10 @@ class HaloCatalog:
         self.positions = self.positions[condition_min & condition_max, :]
         self.masses = self.masses[condition_min & condition_max]
         self.alphas = self.alphas[condition_min & condition_max]
+        if self.weights is not None:
+            self.weights = np.asarray(self.weights, dtype=np.float64)
+            assert self.weights.size == condition_min.size, "weights must match the halo arrays"
+            self.weights = self.weights[condition_min & condition_max]
 
 
     @property
@@ -61,6 +69,18 @@ class HaloCatalog:
         Returns the number of halos in the catalog.
         """
         return self.masses.size
+
+    @property
+    def weight_sum(self) -> float:
+        """Sum of the painting weights (the halo count when no weights are set)."""
+        return float(self.size if self.weights is None else np.sum(self.weights))
+
+    def with_weights(self, weights: np.ndarray) -> "HaloCatalog":
+        """Return a copy of this catalog carrying the given per-halo painting weights."""
+        out = self.at_indices(np.arange(self.size))
+        out.weights = np.asarray(weights, dtype=np.float64)
+        assert out.weights.size == out.size, "weights must match the halo arrays"
+        return out
 
 
     def get_halo_indices(self, alpha_range: list[float], mass_range: list[float]) -> np.ndarray:
@@ -109,6 +129,7 @@ class HaloCatalog:
         map_particles_to_mesh(
             mesh, physical_size, self.positions.astype(np.float32),
             mass_assignment="NGP", backend=backend,
+            weights=None if self.weights is None else self.weights.astype(np.float32),
         )
         return mesh
 
@@ -133,7 +154,8 @@ class HaloCatalog:
             parameters = self.parameters,
             redshift_index = self.redshift_index,
             redshift = self.redshift,
-            alphas = self.alphas[indices]
+            alphas = self.alphas[indices],
+            weights = None if self.weights is None else self.weights[indices],
         )
 
 

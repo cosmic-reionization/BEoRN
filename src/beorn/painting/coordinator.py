@@ -841,41 +841,30 @@ class PaintingCoordinator:
         start_time = time.time()
 
         try:
-            for alpha_index in alpha_indices:
-                loop_alpha_range = [
-                    solver_cfg.halo_mass_accretion_alpha[alpha_index],
-                    solver_cfg.halo_mass_accretion_alpha[alpha_index + 1]
-                ]
-                for mass_index in mass_indices:
-                    loop_mass_range = [
-                        mass_range[mass_index, alpha_index],
-                        mass_range[mass_index + 1, alpha_index]
-                    ]
-                    halo_indices = halo_catalog.get_halo_indices(loop_alpha_range, loop_mass_range)
-                    if halo_indices.size == 0:
-                        continue
-                    total_halos += halo_indices.size
+            for alpha_index, mass_index, bin_catalog, bin_count, _ in self._iter_bin_assignments(
+                    halo_catalog, mass_range, alpha_indices, mass_indices, solver_cfg):
+                total_halos += bin_count
 
-                    profiles_of_bin = profiles.profiles_of_halo_bin(profile_z_index, alpha_index, mass_index)
-                    assert not np.any(np.isnan(profiles_of_bin[0])), "R_bubble at the current range seem to be malformed (got nan values)"
-                    assert not np.any(np.isnan(profiles_of_bin[1])), "rho_alpha at the current range seem to be malformed (got nan values)"
-                    assert not np.any(np.isnan(profiles_of_bin[2])), "rho_heat at the current range seem to be malformed (got nan values)"
+                profiles_of_bin = profiles.profiles_of_halo_bin(profile_z_index, alpha_index, mass_index)
+                assert not np.any(np.isnan(profiles_of_bin[0])), "R_bubble at the current range seem to be malformed (got nan values)"
+                assert not np.any(np.isnan(profiles_of_bin[1])), "rho_alpha at the current range seem to be malformed (got nan values)"
+                assert not np.any(np.isnan(profiles_of_bin[2])), "rho_heat at the current range seem to be malformed (got nan values)"
 
-                    radial_grid = profiles.r_grid_cell[:] / (1 + zgrid)  # pMpc/h
-                    kwargs = {
-                        "halo_catalog": halo_catalog.at_indices(halo_indices),
-                        "z": zgrid,
-                        "radial_grid": radial_grid,
-                        "r_lyal": profiles.r_lyal[:],
-                        "profiles_of_bin": profiles_of_bin,
-                        "store_grids": store_grids,
-                    }
+                radial_grid = profiles.r_grid_cell[:] / (1 + zgrid)  # pMpc/h
+                kwargs = {
+                    "halo_catalog": bin_catalog,
+                    "z": zgrid,
+                    "radial_grid": radial_grid,
+                    "r_lyal": profiles.r_lyal[:],
+                    "profiles_of_bin": profiles_of_bin,
+                    "store_grids": store_grids,
+                }
 
-                    if executor is not None:
-                        f = executor.submit(self.paint_single_mass_bin, **kwargs)
-                        futures.append(f)
-                    else:
-                        _add_fourier(self.paint_single_mass_bin(**kwargs))
+                if executor is not None:
+                    f = executor.submit(self.paint_single_mass_bin, **kwargs)
+                    futures.append(f)
+                else:
+                    _add_fourier(self.paint_single_mass_bin(**kwargs))
 
             if futures:
                 for future in as_completed(futures):
@@ -884,7 +873,8 @@ class PaintingCoordinator:
             if executor is not None:
                 executor.shutdown(wait=True)
 
-        assert total_halos == halo_catalog.size, (
+        total_halos += self._knot_dropped_weight
+        assert np.isclose(total_halos, halo_catalog.size, rtol=0, atol=1e-6 * max(halo_catalog.size, 1)), (
             f"Number of painted halos ({total_halos}) does not match the halo catalog size "
             f"({halo_catalog.size}). {halo_catalog.size - total_halos} halo(s) fell outside "
             f"all mass/alpha bins. Catalog mass range: "
@@ -1066,6 +1056,37 @@ class PaintingCoordinator:
         start_time = time.time()
 
         try:
+          if self._mass_interpolation_active():
+            # v2: f_st is sampled once per halo for the whole catalog (same seeded rng), then
+            # each halo's weight is split between its two mass nodes; within a node the halos
+            # are grouped by their f_st profile slice.
+            all_f_st_indices = self._nearest_f_st_indices(
+                self._sample_f_st_for_halos(halo_catalog.masses, rng), profiles.f_st_grid)
+            for alpha_index, mass_index, bin_catalog, _, members in self._iter_bin_assignments(
+                    halo_catalog, mass_range, alpha_indices, mass_indices, solver_cfg):
+                f_idx = all_f_st_indices[members]
+                for f_st_index in np.unique(f_idx):
+                    sub_catalog = bin_catalog.at_indices(np.where(f_idx == f_st_index)[0])
+                    total_halos += sub_catalog.weight_sum
+                    profiles_of_bin = profiles.profiles_of_halo_bin(
+                        profile_z_index, alpha_index, mass_index, int(f_st_index))
+                    assert not np.any(np.isnan(profiles_of_bin[0])), "R_bubble at the current range seem to be malformed (got nan values)"
+                    assert not np.any(np.isnan(profiles_of_bin[1])), "rho_alpha at the current range seem to be malformed (got nan values)"
+                    assert not np.any(np.isnan(profiles_of_bin[2])), "rho_heat at the current range seem to be malformed (got nan values)"
+                    kwargs = {
+                        "halo_catalog": sub_catalog,
+                        "z": zgrid,
+                        "radial_grid": profiles.r_grid_cell[:] / (1 + zgrid),
+                        "r_lyal": profiles.r_lyal[:],
+                        "profiles_of_bin": profiles_of_bin,
+                        "store_grids": store_grids,
+                    }
+                    if executor is not None:
+                        futures.append(executor.submit(self.paint_single_mass_bin, **kwargs))
+                    else:
+                        _add_fourier(self.paint_single_mass_bin(**kwargs))
+            total_halos += self._knot_dropped_weight
+          else:
             for alpha_index in alpha_indices:
                 loop_alpha_range = [
                     solver_cfg.halo_mass_accretion_alpha[alpha_index],
@@ -1137,7 +1158,7 @@ class PaintingCoordinator:
             if executor is not None:
                 executor.shutdown(wait=True)
 
-        assert total_halos == halo_catalog.size, (
+        assert np.isclose(total_halos, halo_catalog.size, rtol=0, atol=1e-6 * max(halo_catalog.size, 1)), (
             f"Number of painted halos ({total_halos}) does not match the halo catalog size ({halo_catalog.size})."
         )
 
@@ -1329,6 +1350,91 @@ class PaintingCoordinator:
             return np.random.default_rng()
         return np.random.default_rng(int(seed) + self._snapshot_key(z_index))
 
+
+    # ------------------------------------------------------------------------------------
+    # Halo -> profile-bin assignment (legacy nearest bin | v2 log-M weight split)
+    # ------------------------------------------------------------------------------------
+    def _mass_interpolation_active(self) -> bool:
+        return bool(getattr(self.parameters, "mass_interpolation_active", False))
+
+    def _mass_interpolation_weights(self, masses: np.ndarray, edges: np.ndarray):
+        """Log-M interpolation weights of ``masses`` between the bin centres of one alpha column.
+
+        ``edges`` are this column's mass-bin edges at the painting redshift; the nodes are their
+        geometric centres. A halo with c_j <= M < c_{j+1} gets (1 - w) on bin j and w on bin j+1,
+        w = (log M - log c_j) / (log c_{j+1} - log c_j). Below the first and above the last node
+        it is clamped to that node. Zero knot at M_min = ``source.halo_mass_min`` (the switch-on
+        cutoff): when c_j <= M_min < M, the weight on j+1 is measured from M_min instead,
+        w' = (log M - log M_min)/(log c_{j+1} - log M_min), and the remaining 1 - w' goes to bin j,
+        whose profile is zero (its centre trajectory is below the cutoff), i.e. it paints nothing.
+        For M_min < M < c_0 the weight w' goes to bin 0 and 1 - w' is dropped (reported as
+        ``dropped``) -- the profile there tends continuously to zero at the cutoff.
+
+        Returns ``(lower_bin, upper_bin, w_lower, w_upper, dropped)`` arrays.
+        """
+        lc = np.log10(np.sqrt(edges[:-1] * edges[1:]))
+        lm = np.log10(masses)
+        n = lc.size
+        j = np.searchsorted(lc, lm, side="right") - 1
+        lo = np.clip(j, 0, n - 1)
+        hi = np.clip(j + 1, 0, n - 1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            w = np.where(hi > lo, (lm - lc[lo]) / (lc[hi] - lc[lo]), 0.0)
+        w = np.clip(w, 0.0, 1.0)
+        dropped = np.zeros_like(lm)
+        lmin = np.log10(float(self.parameters.source.halo_mass_min))
+        # knot inside an interval: c_j <= M_min < M < c_{j+1}
+        knot = (j >= 0) & (j < n - 1) & (lc[lo] <= lmin) & (lm > lmin)
+        w = np.where(knot, np.clip((lm - lmin) / (lc[hi] - lmin), 0.0, 1.0), w)
+        # below the first node, with the cutoff below it too: M_min < M < c_0
+        first = (j < 0) & (lmin < lc[0]) & (lm > lmin)
+        w_first = np.clip((lm - lmin) / (lc[0] - lmin), 0.0, 1.0)
+        w_lower = np.where(first, w_first, 1.0 - w)
+        w_upper = np.where(first, 0.0, w)
+        dropped = np.where(first, 1.0 - w_first, 0.0)
+        return lo, hi, w_lower, w_upper, dropped
+
+    def _iter_bin_assignments(self, halo_catalog, mass_range, alpha_indices, mass_indices, solver_cfg):
+        """Yield ``(alpha_index, mass_index, bin_catalog, count, members)`` for every profile bin
+        with halos; ``members`` are the halos' indices in ``halo_catalog``.
+
+        Legacy / ``mass_interpolation='none'``: the halos inside the bin (nearest-bin painting,
+        bit-identical to the previous loop), count = number of halos. v2 ``'log_linear'``: every
+        halo is split between its two neighbouring mass nodes (see
+        :meth:`_mass_interpolation_weights`); the bin catalog carries the weights and count is
+        their sum. Weight dropped at the cutoff knot is accumulated in ``self._knot_dropped_weight``.
+        """
+        self._knot_dropped_weight = 0.0
+        alpha_edges = solver_cfg.halo_mass_accretion_alpha
+        if not self._mass_interpolation_active():
+            for alpha_index in alpha_indices:
+                loop_alpha_range = [alpha_edges[alpha_index], alpha_edges[alpha_index + 1]]
+                for mass_index in mass_indices:
+                    loop_mass_range = [mass_range[mass_index, alpha_index], mass_range[mass_index + 1, alpha_index]]
+                    halo_indices = halo_catalog.get_halo_indices(loop_alpha_range, loop_mass_range)
+                    if halo_indices.size == 0:
+                        continue
+                    yield alpha_index, mass_index, halo_catalog.at_indices(halo_indices), halo_indices.size, halo_indices
+            return
+
+        a_idx = np.searchsorted(np.asarray(alpha_edges), halo_catalog.alphas, side="right") - 1
+        for alpha_index in alpha_indices:
+            sel = np.where(a_idx == alpha_index)[0]
+            if sel.size == 0:
+                continue
+            lo, hi, w_lo, w_hi, dropped = self._mass_interpolation_weights(
+                halo_catalog.masses[sel], np.asarray(mass_range[:, alpha_index]))
+            self._knot_dropped_weight += float(dropped.sum())
+            bins = np.concatenate([lo, hi])
+            weights = np.concatenate([w_lo, w_hi])
+            members = np.concatenate([sel, sel])
+            keep = weights > 0
+            bins, weights, members = bins[keep], weights[keep], members[keep]
+            for mass_index in np.unique(bins):
+                m = bins == mass_index
+                bin_catalog = halo_catalog.at_indices(members[m])
+                bin_catalog.weights = weights[m]
+                yield alpha_index, int(mass_index), bin_catalog, float(weights[m].sum()), members[m]
 
     def paint_single_mass_bin(
         self,
