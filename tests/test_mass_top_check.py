@@ -65,3 +65,64 @@ def test_ensure_raises_only_when_needed_and_skips_legacy():
     leg.solver.numerics = "legacy"
     assert ensure_mass_top(leg, loader, [0, 1]) == {"checked": False}
     assert leg.solver.halo_mass_bin_max == 1e13
+
+
+# ---------------------------------------------------------------------------- cache + mass-only
+class CountingLoader(FakeLoader):
+    def __init__(self, redshifts, catalogs):
+        super().__init__(redshifts, catalogs)
+        self.catalog_reads, self.mass_reads = 0, 0
+
+    def load_halo_catalog(self, i):
+        self.catalog_reads += 1
+        return super().load_halo_catalog(i)
+
+    def load_halo_masses(self, i):
+        self.mass_reads += 1
+        return np.asarray(self._cats[i][0], float)
+
+
+def test_constant_alpha_reads_masses_only_and_caches(tmp_path):
+    p = params()
+    p.source.alpha_constant = 0.4979
+    p.solver.halo_mass_accretion_alpha = np.array([0.4479, 0.5479])
+    loader = CountingLoader([12.0, 8.0], [([1e9, 2e10], [0, 0]), ([3e11], [0])])
+    info = ensure_mass_top(p, loader, [0, 1], cache_dir=tmp_path)
+    assert loader.catalog_reads == 0 and loader.mass_reads == 2
+    assert info["m_req"] == pytest.approx(max(2e10 * np.exp(0.4979 * 6.5), 3e11 * np.exp(0.4979 * 2.5)))
+    q = params()
+    q.source.alpha_constant = 0.4979
+    q.solver.halo_mass_accretion_alpha = np.array([0.4479, 0.5479])
+    again = CountingLoader([12.0, 8.0], [([1e9, 2e10], [0, 0]), ([3e11], [0])])
+    assert ensure_mass_top(q, again, [0, 1], cache_dir=tmp_path)["m_req"] == pytest.approx(info["m_req"])
+    assert again.mass_reads == 0 and again.catalog_reads == 0
+
+
+def test_alpha_z_uses_the_largest_alpha_for_every_snapshot(tmp_path):
+    p = params()
+    p.source.alpha_constant_z = (np.array([5.0, 20.0]), np.array([0.32, 0.52]))
+    p.solver.halo_mass_accretion_alpha = np.linspace(0.3, 0.6, 7)        # centres 0.325 ... 0.575
+    loader = CountingLoader([12.0, 6.0], [([1e10], [0]), ([1e12], [0])])
+    info = ensure_mass_top(p, loader, [0, 1], cache_dir=tmp_path)
+    a12 = 0.32 + 0.2 * (12 - 5) / 15                                      # 0.4133 -> bin [0.40, 0.45)
+    assert info["alpha"] == pytest.approx(0.425)
+    assert info["m_req"] == pytest.approx(max(1e10 * np.exp(0.425 * 6.5), 1e12 * np.exp(0.425 * 0.5)))
+    assert info["exact_m_req"] <= info["m_req"]
+    assert info["global_bound"] == pytest.approx(1e12 * np.exp(0.425 * 6.5))
+    assert 0.40 <= a12 < 0.45
+
+
+def test_tree_and_tree_scatter_share_the_cache(tmp_path):
+    from beorn.painting.coverage import coverage_cache_key
+    a, b = params(), params()
+    b.source.f_st = 0.02
+    b.source.f_st_paint_distribution = "lognormal"
+    loader = CountingLoader([12.0], [([1e9], [0.5])])
+    assert coverage_cache_key(a, loader) == coverage_cache_key(b, loader)
+    ensure_mass_top(a, loader, [0], cache_dir=tmp_path)
+    second = CountingLoader([12.0], [([1e9], [0.5])])
+    ensure_mass_top(b, second, [0], cache_dir=tmp_path)
+    assert loader.catalog_reads == 1 and second.catalog_reads == 0
+    c = params()
+    c.solver.halo_mass_accretion_alpha = np.linspace(0.0, 1.6, 17)
+    assert coverage_cache_key(c, loader)[0] != coverage_cache_key(a, loader)[0]
