@@ -581,6 +581,44 @@ class ThesanLoader(MergerTreeLoader):
 
         return positions, masses, subhalo_to_group_map
 
+    def load_halo_masses(self, redshift_index: int) -> np.ndarray:
+        """GroupMass of every FoF group of a snapshot [Msun/h], read without positions (unless a
+        subbox is active), the subhalo map or any tree data: the input of the mass-grid
+        top-edge check. Same chunk-count and group-count checks as
+        :meth:`get_halo_information_from_catalog`."""
+        catalog_dir = self._catalog_directories[redshift_index]
+        snap_files = sorted(catalog_dir.rglob("*.hdf5"), key=lambda p: int(p.stem.split(".")[1]))
+        if not snap_files:
+            raise FileNotFoundError(
+                f"THESAN group-catalog directory {catalog_dir} contains no .hdf5 chunks "
+                f"(snapshot index {redshift_index}).")
+        with h5py.File(snap_files[0], "r") as f:
+            num_files_header = int(f["Header"].attrs["NumFiles"])
+            ngroups_total = int(f["Header"].attrs["Ngroups_Total"])
+        if len(snap_files) != num_files_header:
+            raise ValueError(
+                f"THESAN catalog {catalog_dir}: found {len(snap_files)} chunk file(s) but "
+                f"Header/NumFiles = {num_files_header}; the catalog is truncated or has stray files.")
+        masses, positions = [], []
+        for snap_file in snap_files:
+            with h5py.File(snap_file, "r") as f:
+                if "Group" not in f or "GroupMass" not in f["Group"]:
+                    continue
+                masses.append(f["Group"]["GroupMass"][:])
+                if self.subbox is not None:
+                    positions.append(f["Group"]["GroupPos"][:])
+        masses = np.concatenate(masses).astype(np.float64) if masses else np.zeros(0)
+        if masses.size != ngroups_total:
+            raise ValueError(
+                f"THESAN catalog {catalog_dir}: read {masses.size} groups across "
+                f"{len(snap_files)} chunk(s) but Header/Ngroups_Total = {ngroups_total}; "
+                "the catalog is incomplete.")
+        masses *= 1e10   # 10^10 M☉/h → M☉/h (as in get_halo_information_from_catalog)
+        if self.subbox is not None:
+            inside, _ = _subbox_filter(np.concatenate(positions) * 1e-3, self.subbox)
+            masses = masses[inside]
+        return masses
+
     # ── Density and velocity fields ────────────────────────────────────────
 
     def _density_cache_path(self, redshift_index: int) -> Path | None:

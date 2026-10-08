@@ -36,6 +36,12 @@ class BaseLoader(ABC):
         """
         pass
 
+    def load_halo_masses(self, redshift_index: int) -> np.ndarray:
+        """Halo masses of a snapshot only (no alphas, no tree work). Used by the mass-grid
+        top-edge check (``beorn.painting.coverage``). Loaders that can read the mass column
+        alone override this; the default goes through :meth:`load_halo_catalog`."""
+        return np.asarray(self.load_halo_catalog(redshift_index).masses, dtype=float)
+
     @abstractmethod
     def load_density_field(self, redshift_index: int) -> np.ndarray:
         """Load the baryonic density field for a given snapshot.
