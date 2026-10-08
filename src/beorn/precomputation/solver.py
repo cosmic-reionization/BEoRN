@@ -368,6 +368,89 @@ class RadiationProfileSolver:
             self.parameters = original
         return out
 
+    # ---- vectorised variants of _rho_xray_on (fst_stochastic/docs/src_fix_plan_2026-10-01.md §10)
+    # Not wired into solve() yet; validated against _rho_xray_on by review/check_profile_vectorise.py.
+
+    def _xray_spectral_kernel(self, parameters: Parameters, z, z_star_i, dz_prime):
+        """Frequency-integrated kernel of the X-ray lookback integral at one redshift ``z``.
+
+        Returns ``(z_prime, rcom_prime, g)`` with
+        g(z') = trapz_nu[ pref(nu) exp(-tau(z, z', nu)) eps_X(nu (1+z')/(1+z)) ],
+        on the same lookback grid as :meth:`_rho_xray_on`. g does not depend on the halo
+        column, so the frequency integral is done once per z instead of once per column."""
+        Om, Ob, h0 = parameters.cosmology.Om, parameters.cosmology.Ob, parameters.cosmology.h0
+        Emin, Emax, NE = parameters.source.energy_cutoff_min_xray, parameters.source.energy_cutoff_max_xray, 50
+        nb0 = rhoc0 * Ob / (m_p_in_Msun * h0)
+        nu = np.logspace(np.log(Emin / constants.h_eV_sec), np.log(Emax / constants.h_eV_sec), NE, base=np.e)
+        f_He_bynumb = 1 - parameters.solver.HI_frac
+        nH0, nHe0 = (1 - f_He_bynumb) * nb0, f_He_bynumb * nb0
+        N_prime_i = max(4, int((z_star_i - z) / dz_prime))
+        z_prime = np.logspace(np.log(z), np.log(z_star_i), N_prime_i, base=np.e)
+        rcom_prime = comoving_distance(z_prime, parameters) * h0
+        tau_prime = cum_optical_depth(z_prime, nu * constants.h_eV_sec, parameters)
+        nu_prime = nu[:, None] * ((1 + z_prime) / (1 + z))[None, :]
+        eps_X = eps_xray(nu_prime, parameters)
+        pref = ((nH0 / nb0) * sigma_HI(nu * h_eV_sec) * (nu * h_eV_sec - E_HI)
+                + (nHe0 / nb0) * sigma_HeI(nu * h_eV_sec) * (nu * h_eV_sec - E_HeI))
+        g = trapezoid(pref[:, None] * np.exp(-tau_prime) * eps_X, nu, axis=0)
+        return z_prime, rcom_prime, g
+
+    def _rho_xray_nu_first(self, parameters: Parameters, rr, z_grid, xe, rate_fn, n_mass, n_alpha, dz_prime):
+        """Step A: :meth:`_rho_xray_on` with the frequency integral done before the radial
+        interpolation. Interpolation and trapezoid are both linear and the rate does not depend
+        on nu, so this is the same sum in a different order (agreement to round-off)."""
+        h0 = parameters.cosmology.h0
+        original = self.parameters
+        self.parameters = parameters
+        try:
+            out = np.zeros((len(rr), n_mass, n_alpha, len(z_grid)))
+            for i, z in enumerate(z_grid):
+                z_star_i = self._z_star_at(z)
+                if z > z_star_i:
+                    continue
+                z_prime, rcom_prime, g = self._xray_spectral_kernel(parameters, z, z_star_i, dz_prime)
+                fac = g[None, None, :] * rate_fn(z_prime)
+                fac_r = interp1d(rcom_prime, fac, axis=-1, fill_value=0.0, bounds_error=False)(rr)
+                heat = np.moveaxis(fac_r, -1, 0)
+                out[..., i] = f_Xh(xe[i]) / (4 * np.pi * (rr / (1 + z)) ** 2)[:, None, None] * heat / (cm_per_Mpc / h0) ** 2
+        finally:
+            self.parameters = original
+        return out
+
+    def _rho_xray_direct(self, parameters: Parameters, rr, z_grid, xe, rate_fn, n_mass, n_alpha, dz_prime,
+                         chunk_elems: float = 5e7):
+        """Step B: as Step A, but the emission rate is evaluated analytically at the lookback
+        redshift z'(r) of every radius instead of being linearly interpolated between lookback
+        points (only the smooth kernel g is interpolated). The rate evaluation is batched over
+        many redshifts at once (batches of about ``chunk_elems`` rate values)."""
+        h0 = parameters.cosmology.h0
+        n_r, n_z = len(rr), len(z_grid)
+        zr = np.full((n_z, n_r), np.nan)          # z'(r) per redshift; nan = beyond the lookback
+        gr = np.zeros((n_z, n_r))
+        original = self.parameters
+        self.parameters = parameters
+        try:
+            for i, z in enumerate(z_grid):
+                z_star_i = self._z_star_at(z)
+                if z > z_star_i:
+                    continue
+                z_prime, rcom_prime, g = self._xray_spectral_kernel(parameters, z, z_star_i, dz_prime)
+                inside = rr <= rcom_prime[-1]
+                zr[i, inside] = np.interp(rr[inside], rcom_prime, z_prime)
+                gr[i, inside] = np.interp(rr[inside], rcom_prime, g)
+        finally:
+            self.parameters = original
+        geom = f_Xh(xe)[:, None] / (4 * np.pi * (rr[None, :] / (1 + z_grid[:, None])) ** 2) / (cm_per_Mpc / h0) ** 2
+        weight = (geom * gr).ravel()                       # (z * r)
+        zr = zr.ravel()
+        valid = np.flatnonzero(np.isfinite(zr) & (weight != 0))
+        out = np.zeros((n_mass, n_alpha, n_z * n_r))
+        step = max(1, int(chunk_elems // max(1, n_mass * n_alpha)))
+        for s in range(0, valid.size, step):
+            sel = valid[s:s + step]
+            out[..., sel] = rate_fn(zr[sel]) * weight[sel]
+        return np.moveaxis(out.reshape(n_mass, n_alpha, n_z, n_r), -1, 0)   # (r, M, alpha, z)
+
     @staticmethod
     def _heat_quadrature(parameters: Parameters, z_grid, rho_xray, nsub: int = 64) -> np.ndarray:
         """Exact solution of dT/da = gamma - 2T/a with T(a0) = 0: T(a) = a^-2 int a'^2 gamma da'.
