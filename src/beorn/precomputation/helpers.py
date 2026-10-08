@@ -337,6 +337,57 @@ def rho_alpha_profile(parameters: Parameters, z_bins: np.ndarray, r_grid: np.nda
 
 
 
+def rho_alpha_profile_direct(parameters: Parameters, z_bins: np.ndarray, r_grid: np.ndarray, rate_fn,
+                             n_mass: int, n_alpha: int):
+    """Step B for Lyman-alpha (fst_stochastic/docs/src_fix_plan_2026-10-01.md §10).
+
+    Same physics and lookback grids as :func:`rho_alpha_profile` with ``rate_fn``, but for every
+    Lyman-n transition the emission redshift z'(r) of each radius is found by inverting the
+    comoving distance once, and the emissivity eps(nu') * rate(z') is evaluated there directly
+    (analytic power law and analytic rate) instead of linearly interpolating the product in r.
+    The rate is evaluated for all transitions of one redshift in a single call."""
+    z_star = parameters.solver.z_source_start
+    h0 = parameters.cosmology.h0
+    rectrunc = 23
+    path_to_file = Path(importlib.util.find_spec('beorn').origin).parent / 'input_data' / 'recfrac.dat'
+    rec = np.genfromtxt(path_to_file, usecols=(0, 1), comments='#', dtype=float, names='n, f')
+    nu_n = nu_LL * (1 - 1 / rec['n'] ** 2)
+    nu_n[nu_n == 0] = np.inf
+    alS_lyal = parameters.source.lyman_alpha_power_law
+    eps_lyal_C = eps_lyal(1.0, parameters)
+    ks = np.arange(2, rectrunc)
+
+    rho_alpha = np.zeros((len(r_grid), n_mass, n_alpha, len(z_bins)))
+    for i, z in enumerate(z_bins):
+        if z > z_star:
+            continue
+        z_max = (1 - (rec['n'][ks] + 1) ** (-2)) / (1 - (rec['n'][ks]) ** (-2)) * (1 + z) - 1
+        z_max = np.minimum(z_max, z_star)
+        N_primes = np.maximum(((z_max - z) / 0.01).astype(int), 4)
+        r_query = r_grid * (1 + z)
+        zq, wq = [], []
+        for kk, (k, zmk, Nk) in enumerate(zip(ks, z_max, N_primes)):
+            z_prime = np.logspace(np.log(z), np.log(zmk), Nk, base=np.e)
+            rcom_prime = comoving_distance(z_prime, parameters) * h0
+            inside = r_query <= rcom_prime[-1]
+            zp = np.full(r_grid.size, np.nan)
+            zp[inside] = np.interp(r_query[inside], rcom_prime, z_prime)
+            nu_prime = nu_n[k] * (1 + zp) / (1 + z)
+            w = np.where(inside, eps_lyal_C * nu_prime ** (-alS_lyal) * rec['f'][k], 0.0)
+            zq.append(zp)
+            wq.append(w)
+        zq = np.concatenate(zq)                       # (k * r)
+        wq = np.concatenate(wq)
+        ok = np.isfinite(zq) & (wq != 0)
+        vals = np.zeros((n_mass, n_alpha, zq.size))
+        if ok.any():
+            vals[..., ok] = rate_fn(zq[ok]) * wq[ok]
+        flux = vals.reshape(n_mass, n_alpha, ks.size, r_grid.size).sum(axis=2)
+        flux = np.moveaxis(flux, -1, 0)
+        rho_alpha[..., i] = flux / (4 * np.pi * r_grid ** 2)[:, None, None] * (h0 / cm_per_Mpc) ** 2 / sec_per_year
+    return rho_alpha
+
+
 def cum_optical_depth(zz, E, parameters: Parameters):
     """Compute the cumulative optical depth for photons traveling from emitters.
 
