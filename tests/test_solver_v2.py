@@ -157,3 +157,21 @@ def test_fstar_branch_uses_per_f_st_parameters():
     Rhi = s._continuous_profiles(hi, r_lyal)[0]
     emitting = Rlo > 0
     assert np.all(Rhi[emitting] > Rlo[emitting])
+
+
+def test_direct_integrator_matches_loop_away_from_the_onset():
+    """Step B (profile_integrator='direct', default) vs the first v2 scheme ('loop'): same
+    physics, the rate evaluated exactly at z'(r) instead of interpolated between lookback points.
+    Agreement to the dz' discretisation; zero/non-zero changes only at the switch-on."""
+    zb = small_parameters().solver.redshifts
+    loop_p = small_parameters()
+    loop_p.solver.profile_integrator = "loop"
+    d = RadiationProfileSolver(small_parameters(), zb).solve()
+    l = RadiationProfileSolver(loop_p, zb).solve()
+    assert np.array_equal(d.R_bubble, l.R_bubble)                     # bubble solve unchanged
+    for name in ("rho_xray", "rho_heat", "rho_alpha"):
+        a, b = getattr(d, name), getattr(l, name)
+        assert np.abs(a - b).max() <= 1e-4 * np.abs(b).max(), name
+        big = np.abs(b) > 1e-3 * np.abs(b).max()
+        assert np.all(np.abs(a[big] / b[big] - 1) < 0.05), name
+    assert d.rho_heat.min() >= 0

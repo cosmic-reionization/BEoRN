@@ -22,7 +22,8 @@ from .. import constants
 # TODO: replace these unit conversions by astropy units
 from ..constants import m_p_in_Msun, km_per_Mpc, h_eV_sec, cm_per_Mpc, E_HI, E_HeI, kb_eV_per_K, rhoc0
 from ..astro import f_Xh, f_star_Halo, eps_xray
-from .helpers import Ngdot_ion, rho_alpha_profile, cum_optical_depth, emission_history_interpolator, emission_rate_fn
+from .helpers import (Ngdot_ion, rho_alpha_profile, rho_alpha_profile_direct, cum_optical_depth,
+                      emission_history_interpolator, emission_rate_fn)
 from .massaccretion import mass_accretion, trajectory_at
 from copy import deepcopy
 logger = logging.getLogger(__name__)
@@ -36,6 +37,11 @@ except (ImportError, RuntimeError):
 def _is_legacy(parameters) -> bool:
     """Legacy numerics? Objects without the v2 switch (e.g. test doubles) are treated as legacy."""
     return bool(getattr(parameters.solver, "is_legacy", True))
+
+
+def _profile_integrator(parameters) -> str:
+    """v2 lookback-integral scheme: 'direct' (step B, default) or 'loop' (first v2 version)."""
+    return getattr(parameters.solver, "profile_integrator", "loop")
 
 
 class RadiationProfileSolver:
@@ -199,7 +205,7 @@ class RadiationProfileSolver:
                 "Set parameters.solver.fXh = 'constant' to use the default approximation (x_e = 2e-4)."
             )
 
-        logger.info(f"Computing profiles for {self.z_bins.size} redshifts, {self.parameters.solver.halo_mass_bins.size - 1} halo mass bins and {self.parameters.solver.halo_mass_accretion_alpha.size - 1} alpha bins (numerics={getattr(self.parameters.solver, 'numerics', 'legacy')}).")
+        logger.info(f"Computing profiles for {self.z_bins.size} redshifts, {self.parameters.solver.halo_mass_bins.size - 1} halo mass bins and {self.parameters.solver.halo_mass_accretion_alpha.size - 1} alpha bins (numerics={getattr(self.parameters.solver, 'numerics', 'legacy')}, integrator={_profile_integrator(self.parameters)}).")
         r_lyal = np.logspace(-5, 2, 1000, base=10)
         # TODO - recheck this:
         # physical distance for lyal profile. Never goes further away than 10**2 = 100 pMpc/h (checked)
@@ -249,9 +255,13 @@ class RadiationProfileSolver:
         z_ref = self._z_ref()
         r_bubble = self._R_bubble_continuous(parameters, m_ref, alphas, z_ref)
         rho_xray, rho_heat = self._xray_and_heat_continuous(parameters, m_ref, alphas, z_ref)
-        halo_mass, halo_mass_derivative = mass_accretion(parameters, self.z_bins, m_ref, alphas)
-        rho_alpha = rho_alpha_profile(parameters, self.z_bins, r_lyal, halo_mass, halo_mass_derivative,
-                                      rate_fn=emission_rate_fn(parameters, m_ref, alphas, z_ref))
+        rate = emission_rate_fn(parameters, m_ref, alphas, z_ref)
+        if _profile_integrator(parameters) == 'direct':
+            rho_alpha = rho_alpha_profile_direct(parameters, self.z_bins, r_lyal, rate, m_ref.size, alphas.size)
+        else:
+            halo_mass, halo_mass_derivative = mass_accretion(parameters, self.z_bins, m_ref, alphas)
+            rho_alpha = rho_alpha_profile(parameters, self.z_bins, r_lyal, halo_mass, halo_mass_derivative,
+                                          rate_fn=rate)
         return r_bubble, rho_xray, rho_heat, rho_alpha
 
     def _R_bubble_continuous(self, parameters: Parameters, m_ref, alphas, z_ref) -> np.ndarray:
@@ -321,8 +331,9 @@ class RadiationProfileSolver:
         for a0 in range(0, n_a, step):
             sl = slice(a0, min(n_a, a0 + step))
             rate = emission_rate_fn(parameters, m_ref, alphas[sl], z_ref)
-            x_int = self._rho_xray_on(parameters, self.r_grid, z_int, xe, rate, n_m, sl.stop - sl.start,
-                                      float(parameters.solver.xray_dz_prime))
+            xray = self._rho_xray_direct if _profile_integrator(parameters) == 'direct' else self._rho_xray_on
+            x_int = xray(parameters, self.r_grid, z_int, xe, rate, n_m, sl.stop - sl.start,
+                         float(parameters.solver.xray_dz_prime))
             h_int = self._heat_quadrature(parameters, z_int, x_int)
             rho_xray[:, :, sl, :] = x_int[..., idx]
             rho_heat[:, :, sl, :] = h_int[..., idx]
@@ -369,7 +380,9 @@ class RadiationProfileSolver:
         return out
 
     # ---- vectorised variants of _rho_xray_on (fst_stochastic/docs/src_fix_plan_2026-10-01.md §10)
-    # Not wired into solve() yet; validated against _rho_xray_on by review/check_profile_vectorise.py.
+    # _rho_xray_direct is used when solver.profile_integrator == 'direct' (the v2 default);
+    # validated against _rho_xray_on by fst_stochastic/review/check_profile_vectorise.py, which
+    # also holds the intermediate step A (frequency integral first, same sum reordered).
 
     def _xray_spectral_kernel(self, parameters: Parameters, z, z_star_i, dz_prime):
         """Frequency-integrated kernel of the X-ray lookback integral at one redshift ``z``.
@@ -378,7 +391,7 @@ class RadiationProfileSolver:
         g(z') = trapz_nu[ pref(nu) exp(-tau(z, z', nu)) eps_X(nu (1+z')/(1+z)) ],
         on the same lookback grid as :meth:`_rho_xray_on`. g does not depend on the halo
         column, so the frequency integral is done once per z instead of once per column."""
-        Om, Ob, h0 = parameters.cosmology.Om, parameters.cosmology.Ob, parameters.cosmology.h0
+        Ob, h0 = parameters.cosmology.Ob, parameters.cosmology.h0
         Emin, Emax, NE = parameters.source.energy_cutoff_min_xray, parameters.source.energy_cutoff_max_xray, 50
         nb0 = rhoc0 * Ob / (m_p_in_Msun * h0)
         nu = np.logspace(np.log(Emin / constants.h_eV_sec), np.log(Emax / constants.h_eV_sec), NE, base=np.e)
@@ -395,34 +408,15 @@ class RadiationProfileSolver:
         g = trapezoid(pref[:, None] * np.exp(-tau_prime) * eps_X, nu, axis=0)
         return z_prime, rcom_prime, g
 
-    def _rho_xray_nu_first(self, parameters: Parameters, rr, z_grid, xe, rate_fn, n_mass, n_alpha, dz_prime):
-        """Step A: :meth:`_rho_xray_on` with the frequency integral done before the radial
-        interpolation. Interpolation and trapezoid are both linear and the rate does not depend
-        on nu, so this is the same sum in a different order (agreement to round-off)."""
-        h0 = parameters.cosmology.h0
-        original = self.parameters
-        self.parameters = parameters
-        try:
-            out = np.zeros((len(rr), n_mass, n_alpha, len(z_grid)))
-            for i, z in enumerate(z_grid):
-                z_star_i = self._z_star_at(z)
-                if z > z_star_i:
-                    continue
-                z_prime, rcom_prime, g = self._xray_spectral_kernel(parameters, z, z_star_i, dz_prime)
-                fac = g[None, None, :] * rate_fn(z_prime)
-                fac_r = interp1d(rcom_prime, fac, axis=-1, fill_value=0.0, bounds_error=False)(rr)
-                heat = np.moveaxis(fac_r, -1, 0)
-                out[..., i] = f_Xh(xe[i]) / (4 * np.pi * (rr / (1 + z)) ** 2)[:, None, None] * heat / (cm_per_Mpc / h0) ** 2
-        finally:
-            self.parameters = original
-        return out
-
     def _rho_xray_direct(self, parameters: Parameters, rr, z_grid, xe, rate_fn, n_mass, n_alpha, dz_prime,
                          chunk_elems: float = 5e7):
-        """Step B: as Step A, but the emission rate is evaluated analytically at the lookback
-        redshift z'(r) of every radius instead of being linearly interpolated between lookback
-        points (only the smooth kernel g is interpolated). The rate evaluation is batched over
-        many redshifts at once (batches of about ``chunk_elems`` rate values)."""
+        """X-ray lookback integral of :meth:`_rho_xray_on` (``profile_integrator='direct'``).
+
+        The frequency integral is done once per redshift (:meth:`_xray_spectral_kernel`), and the
+        emission rate is evaluated analytically at the lookback redshift z'(r) of every radius
+        instead of being linearly interpolated between lookback points; only the smooth kernel g
+        is interpolated. The rate evaluation is batched over many redshifts at once (batches of
+        about ``chunk_elems`` rate values)."""
         h0 = parameters.cosmology.h0
         n_r, n_z = len(rr), len(z_grid)
         zr = np.full((n_z, n_r), np.nan)          # z'(r) per redshift; nan = beyond the lookback

@@ -147,3 +147,35 @@ def test_v2_solver_option_validation(kwargs):
     from beorn.structs.parameters import SolverParameters
     with pytest.raises(ValueError):
         SolverParameters(**kwargs)
+
+
+# profile_integrator (step B, 2026-10-08): 'direct' is the v2 default; 'loop' reproduces the
+# hashes of the first v2 implementation, recorded here from the code before the field existed.
+_PRE_DIRECT_V2_DEFAULT_HASHES = {
+    "profiles_hash": "ecb84966",
+    "profiles_fstar_hash": "cc781835",
+    "beorn_hash": "0c873b2d",
+    "unique_hash": "5519efc02fcc1f3caab98fd7902aa61d",
+}
+
+
+def test_loop_integrator_reproduces_pre_direct_v2_hashes():
+    p = Parameters()
+    p.solver.profile_integrator = "loop"
+    for name, expected in _PRE_DIRECT_V2_DEFAULT_HASHES.items():
+        assert getattr(p, name)() == expected, name
+
+
+def test_direct_integrator_is_default_and_changes_v2_hashes():
+    p = Parameters()
+    assert p.solver.profile_integrator == "direct"
+    for name, old in _PRE_DIRECT_V2_DEFAULT_HASHES.items():
+        assert getattr(p, name)() != old, name
+
+
+def test_legacy_ignores_profile_integrator():
+    a, b = Parameters(), Parameters()
+    a.solver.numerics = b.solver.numerics = "legacy"
+    b.solver.profile_integrator = "loop"
+    for name in _PRE_DIRECT_V2_DEFAULT_HASHES:
+        assert getattr(a, name)() == getattr(b, name)(), name

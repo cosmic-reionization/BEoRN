@@ -261,6 +261,17 @@ class SolverParameters:
     """v2 only: before the profiles are computed, raise ``halo_mass_bin_max`` (at fixed bin
     width) if a painted halo traced back to the reference redshift would lie above it."""
 
+    profile_integrator: Literal['direct', 'loop'] = 'direct'
+    """v2 only: how the X-ray and Lyman-alpha lookback integrals are evaluated
+    (fst_stochastic/docs/src_fix_plan_2026-10-01.md §10).
+
+    ``'direct'`` (default): the frequency integral is done once per redshift and the emission
+    rate is evaluated analytically at the lookback redshift of every radius (step B); about
+    5x faster than ``'loop'`` and exact at the source switch-on.
+    ``'loop'``: the first v2 implementation (rate interpolated linearly between lookback
+    points). It is dropped from every hash, so v2 runs and caches made before ``'direct'``
+    existed are reproduced, bit for bit, with ``profile_integrator: loop``."""
+
     ode_method: str = 'RK45'
     """Integration method passed to scipy.integrate.solve_ivp for R_bubble and rho_heat.
     'RK45' (default) is fine for non-stiff or mildly stiff systems.
@@ -293,6 +304,8 @@ class SolverParameters:
             self.halo_mass_accretion_alpha = np.array(self.halo_mass_accretion_alpha)
         if self.numerics not in ('v2', 'legacy'):
             raise ValueError(f"solver.numerics must be 'v2' or 'legacy', got {self.numerics!r}")
+        if self.profile_integrator not in ('direct', 'loop'):
+            raise ValueError(f"solver.profile_integrator must be 'direct' or 'loop', got {self.profile_integrator!r}")
         if int(self.onset_internal_refine) < 1:
             raise ValueError("solver.onset_internal_refine must be >= 1")
         if int(self.bubble_substeps) < 10:
@@ -485,12 +498,16 @@ class Parameters:
     # Fields added by the nonuniform-fix (2026-10). Under numerics == 'legacy' they are dropped
     # from every hash, so a legacy configuration hashes exactly as it did before they existed.
     _V2_SOLVER_KEYS = ("numerics", "onset_internal_refine", "xray_dz_prime", "bubble_substeps",
-                       "mass_top_check")
+                       "mass_top_check", "profile_integrator")
     _V2_SIMULATION_KEYS = ("mass_interpolation",)
 
     def _strip_v2_keys(self, d: dict) -> dict:
         """Remove the v2-only keys from a ``to_dict`` tree when the legacy scheme is selected."""
         if not self.solver.is_legacy:
+            # profile_integrator 'loop' is the pre-'direct' v2 scheme: drop the key so those
+            # hashes are unchanged.
+            if self.solver.profile_integrator == 'loop' and "solver" in d:
+                d["solver"] = {k: v for k, v in d["solver"].items() if k != "profile_integrator"}
             return d
         if "solver" in d:
             d["solver"] = {k: v for k, v in d["solver"].items() if k not in self._V2_SOLVER_KEYS}
@@ -502,12 +519,15 @@ class Parameters:
         """Profile-shaping v2 settings (empty for legacy, so legacy profile hashes are unchanged)."""
         if self.solver.is_legacy:
             return {}
-        return {
+        keys = {
             'numerics': self.solver.numerics,
             'onset_internal_refine': int(self.solver.onset_internal_refine),
             'xray_dz_prime': float(self.solver.xray_dz_prime),
             'bubble_substeps': int(self.solver.bubble_substeps),
         }
+        if self.solver.profile_integrator != 'loop':     # 'loop' keeps the pre-'direct' hashes
+            keys['profile_integrator'] = self.solver.profile_integrator
+        return keys
 
     @property
     def mass_interpolation_active(self) -> bool:
