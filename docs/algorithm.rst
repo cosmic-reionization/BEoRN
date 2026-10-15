@@ -116,9 +116,18 @@ Both :meth:`~beorn.precomputation.solver.RadiationProfileSolver.R_bubble` and
 .. code-block:: python
 
    parameters.solver.ode_method = 'LSODA'   # auto-detects stiffness
-   parameters.solver.ode_rtol   = 1e-2
-   parameters.solver.ode_atol   = 1e-2
+   parameters.solver.ode_rtol   = 1e-3      # default
+   parameters.solver.ode_atol   = 1e-8      # default
 
 ``'LSODA'`` is a good all-round choice; ``'Radau'`` or ``'BDF'`` are faster
 when the system is strongly stiff (high-z runs with dense IGM or fine redshift
 grids).
+
+Keep ``ode_atol`` small.  With a loose absolute tolerance (e.g. ``1e-2``) the
+integrator takes very large steps while a bubble volume is still ~0, and its
+intermediate stages sample later epochs when the halo already forms stars.
+Haloes that are not yet star forming then acquire spurious bubbles
+(:math:`R_b` up to ~0.1 cMpc/h), which inflates the ionised fraction by a factor
+~3 at :math:`z \gtrsim 15`.  The defaults reproduce a ``1e-6`` / ``1e-12``
+reference to ~1 % in :math:`x_\mathrm{HII}`, :math:`T_k` and the 21-cm power
+spectrum, at about the same cost as the previous ``1e-2`` / ``1e-2``.

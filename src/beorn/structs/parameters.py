@@ -185,12 +185,16 @@ class SolverParameters:
     back to ``z_source_start``.  When ``source_age`` is set, the window is further
     capped by the finite age — whichever limit is reached first applies."""
 
-    ode_rtol: float = 1e-2
+    ode_rtol: float = 1e-3
     """Relative tolerance for ODE integrations (R_bubble, rho_heat).
-    Looser values speed up the solver; tighten if profiles show numerical artefacts."""
+    The default reproduces a 1e-6 / 1e-12 reference to ~1 % in x_HII, T_k and the 21-cm power
+    spectrum at about the same cost as the old 1e-2."""
 
-    ode_atol: float = 1e-2
-    """Absolute tolerance for ODE integrations (R_bubble, rho_heat)."""
+    ode_atol: float = 1e-8
+    """Absolute tolerance for ODE integrations (R_bubble [(cMpc/h)^3], rho_heat [K]).
+    Must be small: with atol ~ 1e-2 the solver takes huge steps while the bubble volume is ~0
+    and its stages sample later, star-forming epochs, so haloes that have not yet formed stars
+    get spurious bubbles (R_b up to ~0.1 cMpc/h), inflating x_HII by ~3x at z > 15."""
 
     ode_method: str = 'RK45'
     """Integration method passed to scipy.integrate.solve_ivp for R_bubble and rho_heat.
@@ -384,8 +388,8 @@ class Parameters:
     def profiles_hash(self) -> str:
         """Short MD5 hash of parameters that affect the 1D radiation profiles.
 
-        Covers source parameters, cosmology, solver redshifts, and the halo
-        mass / accretion-rate bins.  Intentionally excludes random seed, grid
+        Covers source parameters, cosmology, solver redshifts, the halo
+        mass / accretion-rate bins and the ODE solver settings.  Intentionally excludes random seed, grid
         dimensions (Ncell, Lbox, py21cmfast_high_res_factor), and other
         simulation parameters that do not influence the 1D profile shapes.
         This allows profiles to be reused when re-running BEoRN with a
@@ -405,6 +409,11 @@ class Parameters:
             'z_decoupling': self.solver.z_decoupling,
             'z_source_start': self.solver.z_source_start,
             't_source_age': self.source.t_source_age,
+            # the ODE settings change the profiles too (see ode_atol), so cached
+            # profiles computed with other tolerances must not be reused
+            'ode_rtol': self.solver.ode_rtol,
+            'ode_atol': self.solver.ode_atol,
+            'ode_method': self.solver.ode_method,
         }
         return hashlib.md5(str(d).encode()).hexdigest()[:8]
 

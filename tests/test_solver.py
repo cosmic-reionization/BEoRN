@@ -313,3 +313,13 @@ def test_mpi_fstar_profile_cache_roundtrip(tmp_path, monkeypatch):
     gathered = comm.gather(profiles.payload, root=0)
     if rank == 0:
         assert gathered == ["computed-by-rank-0", "computed-by-rank-0"]
+
+
+def test_profiles_hash_depends_on_ode_settings():
+    """Cached profiles computed with other ODE tolerances must not be reused."""
+    from beorn.structs import Parameters
+    base = Parameters()
+    for field, value in (("ode_rtol", 1e-2), ("ode_atol", 1e-2), ("ode_method", "LSODA")):
+        changed = Parameters()
+        setattr(changed.solver, field, value)
+        assert changed.profiles_hash() != base.profiles_hash(), field
