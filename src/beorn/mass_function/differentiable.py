@@ -34,7 +34,7 @@ from ..constants import rhoc0
 from ..cosmo.differentiable import (
     get_backend, device_of, as_array, as_const, trapz_static, growth_factor,
 )
-from ..lpt.linear_power import transfer_eh_nowiggle, sigma8_normalisation
+from ..cosmo.ps_linear import transfer_eh_nowiggle, sigma8_normalisation
 from .models import _f_nu, _normalise_A
 
 

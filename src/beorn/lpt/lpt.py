@@ -65,7 +65,7 @@ import numpy as np
 
 from ..cosmo import D, hubble
 from .backends import get_backend, LPTBackend
-from .linear_power import PowerSpectrum, get_power_spectrum
+from ..cosmo.ps_linear import PowerSpectrum, get_power_spectrum
 
 
 # ============================================================

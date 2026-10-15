@@ -21,7 +21,7 @@ import warnings
 import numpy as np
 
 from ..structs import Parameters, HaloCatalog
-from .linear_power import PowerSpectrum
+from ..cosmo.ps_linear import PowerSpectrum
 
 logger = logging.getLogger(__name__)
 

@@ -5,6 +5,8 @@
   ``from beorn.cosmo import D, hubble`` keeps working unchanged.
 - :mod:`.differentiable` — backend-generic (numpy/jax/torch), differentiable,
   GPU-capable counterparts (issue #42, Phase 1).
+- :mod:`.ps_linear` — linear matter P(k): Eisenstein & Hu (default), CAMB,
+  CLASS, file/tabulated. Shared by ``lpt``, ``mass_function``, ``halo_model``.
 """
 
 from .background import (
@@ -36,6 +38,11 @@ from .differentiable import (
     hubble_E,
 )
 
+from .ps_linear import (
+    PowerSpectrum,
+    get_power_spectrum,
+)
+
 __all__ = [
     # background (numpy)
     "hubble",
@@ -62,4 +69,7 @@ __all__ = [
     "growth_factor",
     "growth_rate",
     "hubble_E",
+    # linear power spectrum
+    "PowerSpectrum",
+    "get_power_spectrum",
 ]

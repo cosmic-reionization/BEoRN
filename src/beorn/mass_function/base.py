@@ -17,7 +17,7 @@ except ImportError:
 from ..cosmo import D
 from ..constants import rhoc0
 from ..structs import Parameters
-from ..lpt.linear_power import get_power_spectrum, PowerSpectrum
+from ..cosmo.ps_linear import get_power_spectrum, PowerSpectrum
 from .window import Window, get_window
 
 
@@ -33,7 +33,11 @@ class MassFunction:
         window:      Filter function — ``'tophat'`` (default), ``'sharp_k'``,
                      ``'smooth_k'``, or a :class:`~beorn.mass_function.window.Window`
                      instance.
-        ps_method:   Power spectrum method (default ``'eisenstein_hu'``).
+        ps_method:   Power spectrum method (default ``'eisenstein_hu'``); see
+                     :func:`beorn.cosmo.ps_linear.get_power_spectrum`.
+        power_spectrum: Ready-made :class:`PowerSpectrum` to use instead of
+                     building one from ``ps_method`` (lets several models
+                     share a single CAMB/CLASS run).
         **ps_kwargs: Forwarded to the power spectrum constructor.
     """
 
@@ -41,14 +45,15 @@ class MassFunction:
         self,
         parameters: Parameters,
         window: str | Window = 'tophat',
-        ps_method: str = 'eisenstein_hu',
+        ps_method: str | None = 'eisenstein_hu',
+        power_spectrum: PowerSpectrum | None = None,
         **ps_kwargs,
     ):
         self.parameters = parameters
         self.window_fn: Window = get_window(window)
-        self.power_spectrum: PowerSpectrum = get_power_spectrum(
-            ps_method, parameters, **ps_kwargs
-        )
+        if power_spectrum is None:
+            power_spectrum = get_power_spectrum(ps_method, parameters, **ps_kwargs)
+        self.power_spectrum: PowerSpectrum = power_spectrum
         self._precompute_sigma()
 
     # ------------------------------------------------------------------

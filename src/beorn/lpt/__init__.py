@@ -13,13 +13,16 @@ Quick start::
     solver = lpt.SecondOrderLPT(param, seed=42)
     delta = solver.get_density(z=10.0)
 
-Power spectrum methods: 'eisenstein_hu' (default), 'eisenstein_hu_wiggle', 'boltzmann', 'tabulated'.
+Power spectrum methods (see :mod:`beorn.cosmo.ps_linear`): None/'eisenstein_hu' (default),
+'eisenstein_hu_wiggle', 'camb', 'class', 'boltzmann', 'tabulated'.
 Backends: 'numpy' (default), 'torch', 'jax'.
 """
-from .linear_power import (
+from ..cosmo.ps_linear import (
     PowerSpectrum,
     EisensteinHu,
     BoltzmannSolver,
+    CAMBPowerSpectrum,
+    CLASSPowerSpectrum,
     TabulatedPowerSpectrum,
     DiscoEB,
     get_power_spectrum,
@@ -41,6 +44,8 @@ __all__ = [
     'PowerSpectrum',
     'EisensteinHu',
     'BoltzmannSolver',
+    'CAMBPowerSpectrum',
+    'CLASSPowerSpectrum',
     'TabulatedPowerSpectrum',
     'DiscoEB',
     'get_power_spectrum',

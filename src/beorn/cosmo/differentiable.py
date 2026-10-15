@@ -7,7 +7,7 @@ autograd, and run on whatever device their tensor inputs live on (CUDA, MPS).
 They complement (never replace) the numpy functions in :mod:`.background`:
 the numpy defaults stay unchanged; these are the opt-in gpu/diff path
 (issue #42, Phase 1: G2). The shared backend helpers here are also used by
-the differentiable P(k) functions in :mod:`beorn.lpt.linear_power`.
+the differentiable P(k) functions in :mod:`beorn.cosmo.ps_linear`.
 
 - :func:`growth_factor`  D(a; Om) normalised to D(1)=1 — counterpart of
   :func:`.background.D`; differentiable w.r.t. a and Om
@@ -24,7 +24,7 @@ import numpy as np
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Backend helpers (shared with beorn.lpt.linear_power differentiable functions)
+# Backend helpers (shared with beorn.cosmo.ps_linear differentiable functions)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def get_backend(backend: str):
